@@ -8,12 +8,12 @@ import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTim
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey:            "AIzaSyAXCwSRQiIr4otv6I3kJVz7IzdgvV8yxxA",
-  authDomain:        "worklife-bordado.firebaseapp.com",
-  projectId:         "worklife-bordado",
-  storageBucket:     "worklife-bordado.firebasestorage.app",
-  messagingSenderId: "840101288164",
-  appId:             "1:840101288164:web:b32fdc44e9c239f16974f1",
+  apiKey:            "REEMPLAZA_AQUI",
+  authDomain:        "REEMPLAZA_AQUI",
+  projectId:         "REEMPLAZA_AQUI",
+  storageBucket:     "REEMPLAZA_AQUI",
+  messagingSenderId: "REEMPLAZA_AQUI",
+  appId:             "REEMPLAZA_AQUI",
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
@@ -125,8 +125,9 @@ function emptyPosicion() {
   return { tecnica:"", medida:"", colores:"", logotipos:"", logoImg:null };
 }
 function nextNumero(ordenes) {
-  if (!ordenes.length) return "5000";
-  return String(Math.max(...ordenes.map(o => parseInt(o.numero) || 0)) + 1);
+  if (!ordenes || !ordenes.length) return "5000";
+  const max = Math.max(4999, ...ordenes.map(o => parseInt(o.numero) || 0));
+  return String(max + 1);
 }
 function emptyOrden(ordenes) {
   const pos = {};
@@ -446,6 +447,7 @@ async function buildPdfHtml(orden) {
         })()
       }</span></div>
       <div class="mrow"><span class="mlabel">No. Cotización</span><span class="mval">${orden.noCotizacion||""}</span></div>
+      <div class="mrow"><span class="mlabel">Vendedor</span><span class="mval">${orden.creadoPorNombre||""}</span></div>
     </div>
   </div>
 
@@ -788,6 +790,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
                 <div style={{flex:1}}>
                   <div style={{fontWeight:700,color:C.text}}>{o.cliente||"Sin cliente"}</div>
                   <div style={{fontSize:11,color:C.muted}}>Cot: {o.noCotizacion||"—"} · {fmtDate(o.fecha)}</div>
+                  {o.creadoPorNombre && <div style={{fontSize:10,color:C.accent,marginTop:2}}>👤 {o.creadoPorNombre}</div>}
                 </div>
                 <div style={{textAlign:"right",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
                   <Badge etapa={o.etapa}/>
@@ -906,6 +909,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
         <div style={{flex:1}}>
           <div style={{fontSize:18,fontWeight:800,color:C.text}}>
             Orden #{form.numero} <span style={{marginLeft:8}}><Badge etapa={form.etapa}/></span>
+          {form.creadoPorNombre && <span style={{marginLeft:12,fontSize:12,color:C.muted,fontWeight:400}}>👤 {form.creadoPorNombre}</span>}
           </div>
           <div style={{fontSize:12,color:C.muted}}>{form.cliente||"Sin cliente"}</div>
         </div>

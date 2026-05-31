@@ -8,12 +8,12 @@ import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTim
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey:            "REEMPLAZA_AQUI",
-  authDomain:        "REEMPLAZA_AQUI",
-  projectId:         "REEMPLAZA_AQUI",
-  storageBucket:     "REEMPLAZA_AQUI",
-  messagingSenderId: "REEMPLAZA_AQUI",
-  appId:             "REEMPLAZA_AQUI",
+  apiKey:            "AIzaSyAXCwSRQiIr4otv6I3kJVz7IzdgvV8yxxA",
+  authDomain:        "worklife-bordado.firebaseapp.com",
+  projectId:         "worklife-bordado",
+  storageBucket:     "worklife-bordado.firebasestorage.app",
+  messagingSenderId: "840101288164",
+  appId:             "1:840101288164:web:b32fdc44e9c239f16974f1",
 };
 
 const firebaseApp = initializeApp(firebaseConfig);

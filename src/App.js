@@ -95,16 +95,16 @@ const ETAPAS = [
   {id:"cancelada", label:"Cancelada",       color:"#c0392b"},
 ];
 const VIEWS = [
-  {id:"playera_frente",   label:"Playera Frente"},
-  {id:"playera_atras",    label:"Playera Atrás"},
-  {id:"playera_derecho",  label:"Manga Der."},
-  {id:"playera_izquierdo",label:"Manga Izq."},
-  {id:"pantalon_frente",  label:"Pantalón Frente"},
-  {id:"pantalon_trasero", label:"Pantalón Atrás"},
-  {id:"gorra_frente",     label:"Gorra Frente"},
-  {id:"gorra_atras",      label:"Gorra Atrás"},
-  {id:"gorra_derecho",    label:"Gorra Der."},
-  {id:"gorra_izquierdo",  label:"Gorra Izq."},
+  {id:"playera_frente",label:"Playera Frente",ratio:1.7197,logoSize:50},
+    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoSize:25},
+    {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoSize:72},
+    {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoSize:72},
+    {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoSize:61},
+    {id:"pantalon_trasero",label:"Pantalón Atrás",ratio:1.3631,logoSize:61},
+    {id:"gorra_frente",label:"Gorra Frente",ratio:0.9779,logoSize:37},
+    {id:"gorra_atras",label:"Gorra Atrás",ratio:0.9505,logoSize:66},
+    {id:"gorra_derecho",label:"Gorra Der.",ratio:1.1429,logoSize:66},
+    {id:"gorra_izquierdo",label:"Gorra Izq.",ratio:1.1834,logoSize:66},
 ];
 const C = {
   bg:"#0f1117",surface:"#1a1d27",card:"#21263a",border:"#2e3450",

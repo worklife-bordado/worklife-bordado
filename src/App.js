@@ -320,7 +320,10 @@ async function buildPdfHtml(orden) {
   </tr>`;
 
   // Position rows
-  const posRows = POS_LIST.map(p => {
+  const posRows = POS_LIST.filter(p => {
+    const v = orden.posiciones[p.key] || {};
+    return v.tecnica || v.medida || v.colores || v.logotipos || v.logoImg;
+  }).map(p => {
     const v = orden.posiciones[p.key] || {};
     return `<tr>
       <td style="border:1px solid #ccc;padding:2px 4px;font-size:9px;font-weight:700;background:#f5f5f5;text-align:center;">${p.key}</td>

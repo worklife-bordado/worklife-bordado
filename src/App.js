@@ -411,7 +411,7 @@ async function buildPdfHtml(orden) {
   table.pos-table th { background: #555; color: #fff; font-size: 7px; padding: 2px 4px; text-align: center; border: 1px solid #999; }
   .pos-right-col { font-size: 8.5px; color: #333; padding: 2px 5px; border-left: 1px solid #ccc; font-style: italic; }
 
-  .prendas-section { margin-top: 3px; flex: 1; }
+  .prendas-section { margin-top: 3px; }
   table.prendas-table { width: 100%; border-collapse: collapse; }
   table.prendas-table th { background: #555; color: #fff; font-size: 7.5px; padding: 2px 3px; text-align: center; border: 1px solid #999; }
 
@@ -422,7 +422,7 @@ async function buildPdfHtml(orden) {
   .viz-cell{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;overflow:visible;}
   .viz-cell .viz-label{font-size:6px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;white-space:nowrap;}
   .viz-cell .viz-frame{position:relative;line-height:0;width:100%;}
-  .viz-cell .viz-frame img.sil{width:100%;height:auto;max-height:100px;display:block;}
+  .viz-cell .viz-frame img.sil{width:100%;height:auto;max-height:130px;display:block;}
 
   /* Footer */
   .footer-text { font-size: 8px; color: #333; margin-top: 4px; border: 1px solid #ccc; padding: 3px 5px; line-height: 1.5; }

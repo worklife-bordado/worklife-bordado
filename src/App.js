@@ -395,7 +395,7 @@ async function buildPdfHtml(orden) {
   .meta-cell .mrow .mval { min-width: 25mm; border-bottom: 1px solid #555; text-align: left; padding-left: 3px; }
 
   /* Main body: left panel + right table */
-  .body-row { display: flex; gap: 3px; margin-top: 3px; flex: 1; min-height: 0; }
+  .body-row { display: flex; gap: 3px; margin-top: 3px; min-height: 0; }
 
   /* Left: garment visualization panel */
   .left-panel { width: 52mm; flex-shrink: 0; border: 1px solid #555; padding: 2px; display: flex; flex-direction: column; }
@@ -427,9 +427,9 @@ async function buildPdfHtml(orden) {
   /* Footer */
   .footer-text { font-size: 8px; color: #333; margin-top: 4px; border: 1px solid #ccc; padding: 3px 5px; line-height: 1.5; }
   .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; flex-shrink: 0; }
-  .comments-box { border: 1px solid #ccc; padding: 4px; flex: 1; min-height: 18mm; }
+  .comments-box { border: 1px solid #ccc; padding: 4px; min-height: 18mm; }
   .comments-box .box-title { font-size: 9px; font-weight: 700; margin-bottom: 3px; }
-  .firmas-box { border: 1px solid #ccc; padding: 4px; display: flex; flex-direction: column; justify-content: flex-end; flex: 1; min-height: 18mm; }
+  .firmas-box { border: 1px solid #ccc; padding: 4px; display: flex; flex-direction: column; justify-content: flex-end; min-height: 18mm; }
   .firmas-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .firma-line { border-top: 1px solid #333; padding-top: 2px; font-size: 8.5px; text-align: center; }
 </style>

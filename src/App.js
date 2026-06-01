@@ -349,24 +349,21 @@ async function buildPdfHtml(orden) {
     display: flex; flex-direction: column;
     min-height: 100vh;
   }
-  @media print {
-    html, body { height: 100%; }
-    body { padding: 0; margin: 0; }
-    @page { size: letter portrait; margin: 6mm; }
-  }
-  /* The page wrapper fills the body and distributes its children */
+@media print {
+  html, body { height: 100%; margin: 0; padding: 0; }
+  @page { size: letter portrait; margin: 0; }
+  body { padding: 0; margin: 0; }
   .page {
-    width: 100%;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    /* On screen: max-width centered; on print: full page */
-    max-width: 200mm;
-    margin: 0 auto;
+    width: 215.9mm !important;
+    max-width: 215.9mm !important;
+    margin: 0 !important;
+    padding: 6mm !important;
+    box-sizing: border-box !important;
+    height: 279.4mm !important;
+    max-height: 279.4mm !important;
+    overflow: hidden !important;
   }
-  @media print {
-    .page { max-width: 100%; margin: 0; }
-  }
+}
 
   /* Header */
   .header-row { display: flex; align-items: flex-start; margin-bottom: 3px; border-bottom: 2px solid #222; padding-bottom: 3px; }

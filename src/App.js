@@ -145,6 +145,7 @@ function emptyOrden(ordenes) {
     prendas: [emptyPrenda()],
     comentarios: "",
     etapa: "nueva",
+    bordador: "",
     historial: [{ etapa:"nueva", fecha: new Date().toISOString(), nota:"Orden creada" }],
   };
 }
@@ -734,11 +735,15 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
         match = (o.numero||"").includes(q)
           || (o.cliente||"").toLowerCase().includes(q)
           || (o.noCotizacion||"").toLowerCase().includes(q)
-          || Object.values(o.posiciones||{}).some(p => (p.logotipos||"").toLowerCase().includes(q));
+          || Object.values(o.posiciones||{}).some(p => (p.logotipos||"").toLowerCase().includes(q))
+          || (o.bordador||"").toLowerCase().includes(q)
+          || (o.creadoPorNombre||"").toLowerCase().includes(q);
       else if (campo === "numero")     match = (o.numero||"").includes(q);
       else if (campo === "cliente")    match = (o.cliente||"").toLowerCase().includes(q);
       else if (campo === "cotizacion") match = (o.noCotizacion||"").toLowerCase().includes(q);
       else if (campo === "logotipo")   match = Object.values(o.posiciones||{}).some(p => (p.logotipos||"").toLowerCase().includes(q));
+      else if (campo === "bordador")   match = (o.bordador||"").toLowerCase().includes(q);
+      else if (campo === "vendedor")   match = (o.creadoPorNombre||"").toLowerCase().includes(q);
     }
     return match && (filtro === "todas" || o.etapa === filtro);
   });
@@ -774,6 +779,8 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           <option value="cliente">Cliente</option>
           <option value="cotizacion">No. Cotización</option>
           <option value="logotipo">Logotipo</option>
+          <option value="bordador">Bordador</option>
+          <option value="vendedor">Vendedor</option>
         </select>
         <input placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)}
           style={{flex:1,background:C.card,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:13,outline:"none"}}/>
@@ -806,6 +813,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
                   <div style={{fontWeight:700,color:C.text}}>{o.cliente||"Sin cliente"}</div>
                   <div style={{fontSize:11,color:C.muted}}>Cot: {o.noCotizacion||"—"} · {fmtDate(o.fecha)}</div>
                   {o.creadoPorNombre && <div style={{fontSize:10,color:C.accent,marginTop:2}}>👤 {o.creadoPorNombre}</div>}
+                  {o.bordador && <div style={{fontSize:10,color:"#4caf7d",marginTop:1}}>✂️ {o.bordador}</div>}
                 </div>
                 <div style={{textAlign:"right",display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
                   <Badge etapa={o.etapa}/>
@@ -1083,6 +1091,14 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
       {tab === "seg" && (
         <div>
           <div style={{marginBottom:20}}>
+            <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Bordador asignado</div>
+            <input
+              value={form.bordador||""}
+              onChange={e => setForm(p => ({...p, bordador: e.target.value}))}
+              placeholder="Nombre del bordador..."
+              disabled={!puedeEditarSeguimiento}
+              style={{width:"100%",background:C.surface,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:13,outline:"none",marginBottom:20,boxSizing:"border-box",opacity:puedeEditarSeguimiento?1:0.5}}
+            />
             <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Mover a etapa</div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
               {ETAPAS.map(e => (

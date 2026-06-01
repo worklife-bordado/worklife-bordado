@@ -95,8 +95,8 @@ const ETAPAS = [
   {id:"cancelada", label:"Cancelada",       color:"#c0392b"},
 ];
 const VIEWS = [
-  {id:"playera_frente",label:"Playera Frente",ratio:1.7197,logoSize:56},
-    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoSize:27},
+  {id:"playera_frente",label:"Playera Frente",ratio:1.7197,logoSize:80},
+    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoSize:40},
     {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoSize:80},
     {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoSize:80},
     {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoSize:67},

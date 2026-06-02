@@ -323,7 +323,7 @@ async function buildPdfHtml(orden) {
   // Position rows
   const posRows = POS_LIST.filter(p => {
     const v = orden.posiciones[p.key] || {};
-    return v.tecnica || v.medida || v.colores || v.logotipos || v.logoImg;
+    return v.logoImg;
   }).map(p => {
     const v = orden.posiciones[p.key] || {};
     return `<tr>

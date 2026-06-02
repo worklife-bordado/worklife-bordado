@@ -213,12 +213,13 @@ async function buildPdfHtml(orden) {
   // TALLA_GRUPOS is defined globally, use it here too
   const POS_LIST = [
     {key:"A",label:"Frente Izq."},{key:"B",label:"Frente Der."},{key:"C",label:"Manga Der."},
-    {key:"D",label:"Manga Izq."},{key:"E",label:"Frente Centro"},{key:"F",label:"Espalda Alta"},
-    {key:"G",label:"Espalda Centro"},{key:"H",label:"Espalda Abajo"},{key:"I",label:"Pant tras izq"},
-    {key:"J",label:"Pant tras der"},{key:"K",label:"Pant del izq"},{key:"L",label:"Pant del der"},
-    {key:"R",label:"Frente gorra"},{key:"N",label:"Fte der.Gorra"},{key:"M",label:"Fte izq.Gorra"},
-    {key:"O",label:"LadoDer.Gorra"},{key:"P",label:"LadoIzq.Gorra"},{key:"Q",label:"Atrás gorra."},
-  ];
+  {key:"D",label:"Manga Izq."},{key:"E",label:"Frente Centro"},{key:"F",label:"Espalda Alta"},
+  {key:"G",label:"Espalda Centro"},{key:"H",label:"Espalda Abajo"},{key:"I",label:"Pant tras izq"},
+  {key:"J",label:"Pant tras der"},{key:"K",label:"Pant del izq"},{key:"L",label:"Pant del der"},
+  {key:"R",label:"Frente gorra"},{key:"N",label:"Fte der.Gorra"},{key:"M",label:"Fte izq.Gorra"},
+  {key:"O",label:"LadoDer.Gorra"},{key:"P",label:"LadoIzq.Gorra"},{key:"Q",label:"Atrás gorra."},
+  {key:"T",label:"Costado Der."},{key:"S",label:"Costado Izq."},
+];
 
   // Garment thumbnails for left panel (with position pins drawn as SVG circles)
   const PINS_PDF = {

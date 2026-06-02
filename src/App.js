@@ -271,12 +271,12 @@ async function buildPdfHtml(orden) {
 
     // Solo las vistas que tienen al menos un logo subido
   const VIEWS_PDF = [
-    {id:"playera_frente",label:"Playera Frente",ratio:1.7197,logoSize:55},
-    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoSize:55},
-    {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoSize:55},
-    {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoSize:55},
-    {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoSize:55},
-    {id:"pantalon_trasero",label:"Pantalón Atrás",ratio:1.3631,logoSize:55},
+    {id:"playera_frente",label:"Playera Frente",ratio:1.7197,logoSize:60},
+    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoSize:70},
+    {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoSize:60},
+    {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoSize:60},
+    {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoSize:60},
+    {id:"pantalon_trasero",label:"Pantalón Atrás",ratio:1.3631,logoSize:60},
     {id:"gorra_frente",label:"Gorra Frente",ratio:0.9779,logoSize:40},
     {id:"gorra_atras",label:"Gorra Atrás",ratio:0.9505,logoSize:40},
     {id:"gorra_derecho",label:"Gorra Der.",ratio:1.1429,logoSize:40},

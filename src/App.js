@@ -669,7 +669,13 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
     <div>
       <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
         {VIEWS.map(v => (
-          <button key={v.id} onClick={() => setView(v.id)} style={{
+          <button key={v.id} onClick={() => {
+  try {
+    setView(v.id);
+  } catch(e) {
+    console.error("ERROR al cambiar vista:", v.id, e);
+  }
+}} style={{
             background:view===v.id?C.accent:"transparent",color:view===v.id?"#0f1117":C.muted,
             border:"1px solid "+(view===v.id?C.accent:C.border),borderRadius:20,
             padding:"5px 16px",fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .2s",

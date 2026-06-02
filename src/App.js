@@ -891,6 +891,14 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
     return o;
   });
   const [tab, setTab] = useState("info");
+useEffect(() => {
+    const o = JSON.parse(JSON.stringify(orden));
+    o.prendas = (o.prendas && o.prendas.length ? o.prendas : [emptyPrenda()]).map(p => ({
+      descripcion: p.descripcion || "",
+      tallas: (() => { const t = mkTallas(); TALLAS.forEach(k => { t[k] = (p.tallas && p.tallas[k] != null) ? p.tallas[k] : ""; }); return t; })(),
+    }));
+    setForm(o);
+  }, [orden.id]);
 
   const upd = (f, v) => setForm(p => ({ ...p, [f]: v }));
   const updPos = (key, field, val) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], [field]: val } } }));

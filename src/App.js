@@ -649,6 +649,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
   const [pending, setPending] = useState(null);
   const fileRef = useRef(null);
   const pins = PINS[view] || [];
+  const safePosiciones = posiciones && typeof posiciones === 'object' ? posiciones : {};
 
   const handlePin = key => { setPending(key); fileRef.current.click(); };
   const handleFile = e => {
@@ -675,7 +676,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
         <div style={{position:"relative",flexShrink:0,width:220}}>
           <img src={IMGS[view]} alt="prenda" style={{width:220,height:"auto",display:"block",borderRadius:8,background:C.card,border:"1px solid "+C.border}}/>
           {pins.map(pin => {
-            const pos = posiciones[pin.key] || {};
+            const pos = safePosiciones[pin.key] || {};
             const hasLogo = !!pos.logoImg;
             const isHov = hovered === pin.key;
             const posLabel = POSICIONES.find(p => p.key === pin.key)?.label || pin.key;
@@ -705,7 +706,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {pins.map(pin => {
-              const pos = posiciones[pin.key] || {};
+              const pos = safePosiciones[pin.key] || {};
               const posLabel = POSICIONES.find(p => p.key === pin.key)?.label || pin.key;
               return (
                 <div key={pin.key} style={{background:pos.logoImg?C.accentGlow:C.card,border:"1px solid "+(pos.logoImg?C.accent+"44":C.border),borderRadius:7,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>

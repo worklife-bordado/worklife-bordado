@@ -936,7 +936,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
           </div>
           <div style={{fontSize:12,color:C.muted}}>{form.cliente||"Sin cliente"}</div>
         </div>
-        <Btn onClick={async () => { await onSave(form); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
+        <Btn onClick={async () => { await onSave(form); await new Promise(r => setTimeout(r, 500)); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
         <Btn onClick={() => onDuplicar(form)} variant="ghost" size="sm">⧉ Duplicar</Btn>
         <Btn onClick={() => onSave(form)} size="sm">💾 Guardar</Btn>
         <Btn onClick={() => { onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>

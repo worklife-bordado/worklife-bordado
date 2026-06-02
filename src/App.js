@@ -1140,7 +1140,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
           </div>
           <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Historial</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {[...form.historial].reverse().map((h, i) => {
+            {[...(form.historial || [])].reverse().map((h, i) => {
               const eta = etapaInfo(h.etapa);
               return (
                 <div key={i} style={{background:C.card,border:"1px solid "+C.border,borderLeft:"4px solid "+eta.color,borderRadius:8,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>

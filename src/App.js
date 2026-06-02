@@ -1341,8 +1341,9 @@ export default function App() {
           puedeCancelar={puedeCancelar}
         />
       )}
-      {vista === "detalle" && ordenData && (
+     {vista === "detalle" && ordenData && (
         <Detalle
+          key={ordenData.id}
           orden={ordenData}
           usuario={usuario}
           rol={rol}

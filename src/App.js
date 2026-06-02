@@ -644,12 +644,16 @@ function Btn({ children, onClick, variant="primary", size="md", style:ext={} }) 
 
 // ── GarmentVisualizer ─────────────────────────────────────────────────────────
 function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
-  const [view, setView] = useState("frente");
+  const [view, setView] = useState("playera_frente");
   const [hovered, setHovered] = useState(null);
   const [pending, setPending] = useState(null);
   const fileRef = useRef(null);
   const pins = PINS[view] || [];
   const safePosiciones = posiciones && typeof posiciones === 'object' ? posiciones : {};
+  
+  console.log("VIEW:", view);
+  console.log("PINS[view]:", PINS[view]);
+  console.log("IMGS[view]:", IMGS[view] ? "existe" : "NO EXISTE");
 
   const handlePin = key => { setPending(key); fileRef.current.click(); };
   const handleFile = e => {

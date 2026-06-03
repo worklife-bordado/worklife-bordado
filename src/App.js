@@ -112,8 +112,8 @@ const VIEWS = [
     {id:"gorra_atras",label:"Gorra Atrás",ratio:0.9505,logoSize:72},
     {id:"gorra_derecho",label:"Gorra Der.",ratio:1.1429,logoSize:72},
     {id:"gorra_izquierdo",label:"Gorra Izq.",ratio:1.1834,logoSize:72},
-  {id:"costado_derecho_cuerpo",label:"Costado Der.",ratio:1.0,logoSize:80},
-  {id:"costado_izquierdo_cuerpo",label:"Costado Izq.",ratio:1.0,logoSize:80},
+  {id:"costado_derecho_cuerpo",label:"Costado Der.",ratio:1.0,logoSize:110},
+  {id:"costado_izquierdo_cuerpo",label:"Costado Izq.",ratio:1.0,logoSize:110},
 ];
 const C = {
   bg:"#0f1117",surface:"#1a1d27",card:"#21263a",border:"#2e3450",
@@ -293,8 +293,8 @@ async function buildPdfHtml(orden) {
     {id:"gorra_atras",label:"Gorra Atrás",ratio:0.9505,logoSize:60},
     {id:"gorra_derecho",label:"Gorra Der.",ratio:1.1429,logoSize:60},
     {id:"gorra_izquierdo",label:"Gorra Izq.",ratio:1.1834,logoSize:60},
-    {id:"costado_derecho_cuerpo",label:"Costado Der.",ratio:1.0,logoSize:80},
-    {id:"costado_izquierdo_cuerpo",label:"Costado Izq.",ratio:1.0,logoSize:80},
+    {id:"costado_derecho_cuerpo",label:"Costado Der.",ratio:1.0,logoSize:130},
+    {id:"costado_izquierdo_cuerpo",label:"Costado Izq.",ratio:1.0,logoSize:130},
   ];
   const activeViews = VIEWS_PDF.filter(v =>
     (PINS_PDF[v.id] || []).some(pin => orden.posiciones[pin.key] && orden.posiciones[pin.key].logoImg)

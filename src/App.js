@@ -434,7 +434,7 @@ async function buildPdfHtml(orden) {
   table.prendas-table th { background: #555; color: #fff; font-size: 7.5px; padding: 2px 3px; text-align: center; border: 1px solid #999; }
 
 /* Visualization section */
-  .viz-section{margin-top:4px;border:1px solid #555;page-break-inside:avoid;flex-shrink:0;}
+  .viz-section{margin-top:4px;border:1px solid #555;page-break-inside:avoid;flex-shrink:0;max-height:200px;overflow:hidden;}
   .viz-section .section-title{background:#444;color:#fff;font-size:8px;font-weight:700;text-align:center;padding:3px;letter-spacing:1px;}
   .viz-inner{display:flex;flex-direction:row;flex-wrap:nowrap;width:100%;box-sizing:border-box;padding:4px 6px;gap:4px;align-items:flex-end;justify-content:space-between;}
   .viz-cell{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;overflow:visible;}

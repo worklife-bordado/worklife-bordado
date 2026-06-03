@@ -434,13 +434,13 @@ async function buildPdfHtml(orden) {
   table.prendas-table th { background: #555; color: #fff; font-size: 7.5px; padding: 2px 3px; text-align: center; border: 1px solid #999; }
 
 /* Visualization section */
-  .viz-section{margin-top:4px;border:1px solid #555;page-break-inside:avoid;flex-shrink:0;max-height:200px;overflow:hidden;}
+  .viz-section{margin-top:4px;border:1px solid #555;page-break-inside:avoid;flex-shrink:1;flex-grow:1;min-height:0;overflow:hidden;}
   .viz-section .section-title{background:#444;color:#fff;font-size:8px;font-weight:700;text-align:center;padding:3px;letter-spacing:1px;}
-  .viz-inner{display:flex;flex-direction:row;flex-wrap:nowrap;width:100%;box-sizing:border-box;padding:4px 6px;gap:4px;align-items:flex-end;justify-content:space-between;}
+  .viz-inner{display:flex;flex-direction:row;flex-wrap:nowrap;width:100%;height:100%;box-sizing:border-box;padding:4px 6px;gap:4px;align-items:stretch;justify-content:space-between;}
   .viz-cell{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;overflow:visible;}
   .viz-cell .viz-label{font-size:6px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;white-space:nowrap;}
   .viz-cell .viz-frame{position:relative;line-height:0;width:100%;}
-  .viz-cell .viz-frame img.sil{width:100%;height:auto;display:block;}
+  .viz-cell .viz-frame img.sil{width:100%;height:100%;object-fit:contain;display:block;}
 
   /* Footer */
   .footer-text { font-size: 8px; color: #333; margin-top: 4px; border: 1px solid #ccc; padding: 3px 5px; line-height: 1.5; }

@@ -60,8 +60,8 @@ const PINS = {
   gorra_atras: [{key:"Q",x:50.87,y:28.57}],
   gorra_derecho: [{key:"O",x:16.5,y:55.43}],
   gorra_izquierdo: [{key:"P",x:84.5,y:52.07}],
-  costado_derecho_cuerpo: [{key:"T",x:33.0,y:75.0}],
-  costado_izquierdo_cuerpo: [{key:"S",x:52.0,y:75.0}],
+  costado_derecho_cuerpo: [{key:"T", x:45.0, y:55.0}],
+  costado_izquierdo_cuerpo: [{key:"S", x:45.0, y:55.0}],
 };
   
 

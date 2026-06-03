@@ -61,7 +61,7 @@ const PINS = {
   gorra_derecho: [{key:"O",x:16.5,y:55.43}],
   gorra_izquierdo: [{key:"P",x:84.5,y:52.07}],
   costado_derecho_cuerpo: [{key:"T", x:45.0, y:65.0}],
-  costado_izquierdo_cuerpo: [{key:"S", x:52.0, y:65.0}],
+  costado_izquierdo_cuerpo: [{key:"S", x:54.0, y:65.0}],
 };
   
 
@@ -233,8 +233,8 @@ async function buildPdfHtml(orden) {
     gorra_atras: [{key:"Q",x:51.11,y:28.76}],
     gorra_derecho: [{key:"O",x:16.51,y:55.67}],
     gorra_izquierdo: [{key:"P",x:84.66,y:52.35}],
-    costado_derecho_cuerpo: [{key:"T",x:33.0,y:75.0}],
-    costado_izquierdo_cuerpo: [{key:"S",x:52.0,y:75.0}],
+    costado_derecho_cuerpo: [{key:"T",x:45.0,y:65.0}],
+    costado_izquierdo_cuerpo: [{key:"S",x:52.0,y:65.0}],
   };
 
   // Build garment panel cell (thumbnail + pins)

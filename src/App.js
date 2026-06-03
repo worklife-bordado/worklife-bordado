@@ -747,7 +747,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
 }
 
 // ── Lista ─────────────────────────────────────────────────────────────────────
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar }) {
+function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario }) {
   const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
@@ -783,7 +783,10 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           <div style={{fontSize:22,fontWeight:800,color:C.text,letterSpacing:-.5}}>Órdenes de Bordado</div>
           <div style={{color:C.muted,fontSize:13}}>{ordenes.length} órdenes en total</div>
         </div>
-        {onCreate && <Btn onClick={onCreate} size="lg">+ Nueva Orden</Btn>}
+        <div style={{display:"flex",gap:8}}>
+  {onCreate && <Btn onClick={onCreate} size="lg">+ Nueva Orden</Btn>}
+  <Btn onClick={onCalendario} variant="ghost" size="lg">📅 Calendario</Btn>
+</div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
@@ -1167,7 +1170,76 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
     </>
   );
 }
+// ── Calendario ────────────────────────────────────────────────────────────────
+function Calendario({ ordenes, onBack, onSelect }) {
+  const hoy = new Date();
+  const [anio, setAnio] = useState(hoy.getFullYear());
+  const [mes, setMes] = useState(hoy.getMonth());
 
+  const primerDia = new Date(anio, mes, 1).getDay();
+  const diasEnMes = new Date(anio, mes + 1, 0).getDate();
+  const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+  const ordensPorDia = {};
+  ordenes.forEach(o => {
+    if (!o.fechaRequerida) return;
+    const d = o.fechaRequerida; // "YYYY-MM-DD"
+    const [y, m, dia] = d.split("-").map(Number);
+    if (y === anio && m - 1 === mes) {
+      if (!ordensPorDia[dia]) ordensPorDia[dia] = [];
+      ordensPorDia[dia].push(o);
+    }
+  });
+
+  const celdas = [];
+  for (let i = 0; i < primerDia; i++) celdas.push(null);
+  for (let d = 1; d <= diasEnMes; d++) celdas.push(d);
+
+  const esHoy = d => d === hoy.getDate() && mes === hoy.getMonth() && anio === hoy.getFullYear();
+
+  return (
+    <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
+        <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
+        <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>📅 Calendario de Entregas</div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:20}}>
+        <Btn onClick={() => { if(mes===0){setMes(11);setAnio(a=>a-1);}else setMes(m=>m-1); }} variant="ghost" size="sm">‹</Btn>
+        <div style={{fontSize:18,fontWeight:700,color:C.text,minWidth:200,textAlign:"center"}}>{meses[mes]} {anio}</div>
+        <Btn onClick={() => { if(mes===11){setMes(0);setAnio(a=>a+1);}else setMes(m=>m+1); }} variant="ghost" size="sm">›</Btn>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
+        {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map(d => (
+          <div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:C.muted,padding:"4px 0"}}>{d}</div>
+        ))}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+        {celdas.map((d, i) => (
+          <div key={i} style={{
+            minHeight:90,
+            background: d && esHoy(d) ? "#EEF2FF" : d ? C.card : "transparent",
+            borderRadius:8,
+            border: d && esHoy(d) ? "2px solid "+C.accent : d ? "1px solid "+C.border : "none",
+            padding:"6px 4px",
+            verticalAlign:"top"
+          }}>
+            {d && (
+              <>
+                <div style={{fontSize:12,fontWeight:esHoy(d)?800:600,color:esHoy(d)?C.accent:C.text,marginBottom:4}}>{d}</div>
+                {(ordensPorDia[d]||[]).map(o => (
+                  <div key={o.id} onClick={() => onSelect(o.id)}
+                    style={{background:C.accent,color:"#fff",borderRadius:4,padding:"2px 5px",fontSize:10,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    #{o.numero} {o.cliente}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 // ── App ───────────────────────────────────────────────────────────────────────
 // ── Login Screen ─────────────────────────────────────────────────────────────
 function LoginScreen({ onLogin, error }) {
@@ -1360,17 +1432,26 @@ export default function App() {
       </div>
 
       {vista === "lista" && (
-        <Lista
-          ordenes={ordenes}
-          usuario={usuario}
-          rol={rol}
-          onSelect={id => { setActiva(id); setVista("detalle"); }}
-          onCreate={puedeCrear ? crear : null}
-          onDuplicar={duplicar}
-          onCancelarReactivar={cancelarReactivar}
-          puedeCancelar={puedeCancelar}
-        />
-      )}
+  <Lista
+    ordenes={ordenes}
+    usuario={usuario}
+    rol={rol}
+    onSelect={id => { setActiva(id); setVista("detalle"); }}
+    onCreate={puedeCrear ? crear : null}
+    onDuplicar={duplicar}
+    onCancelarReactivar={cancelarReactivar}
+    puedeCancelar={puedeCancelar}
+    onCalendario={() => setVista("calendario")}
+  />
+)}
+{vista === "calendario" && (
+  <Calendario
+    ordenes={ordenes}
+    onBack={() => setVista("lista")}
+    onSelect={id => { setActiva(id); setVista("detalle"); }}
+  />
+)}
+
      {vista === "detalle" && ordenData && (
         <Detalle
           key={ordenData.id}

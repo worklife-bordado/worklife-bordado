@@ -1216,7 +1216,7 @@ function Calendario({ ordenes, onBack, onSelect }) {
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
         {celdas.map((d, i) => (
           <div key={i} style={{
-            minHeight:90,
+            minHeight:100,
             background: d && esHoy(d) ? "#EEF2FF" : d ? C.card : "transparent",
             borderRadius:8,
             border: d && esHoy(d) ? "2px solid "+C.accent : d ? "1px solid "+C.border : "none",
@@ -1229,7 +1229,7 @@ function Calendario({ ordenes, onBack, onSelect }) {
                 {(ordensPorDia[d]||[]).map(o => (
                   <div key={o.id} onClick={() => onSelect(o.id)}
                     style={{background:C.accent,color:"#fff",borderRadius:4,padding:"2px 5px",fontSize:10,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                    #{o.numero} {o.cliente}
+                    #{o.numero}
                   </div>
                 ))}
               </>

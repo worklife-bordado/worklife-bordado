@@ -275,7 +275,7 @@ async function buildPdfHtml(orden) {
     return `<div class="viz-cell" style="flex-grow:${ratio};">
   <span class="viz-label">${label}</span>
   <div class="viz-frame">
-    <img class="sil" src="${IMGS[viewId]}" alt="${label}" style="width:100%;height:auto;display:block;"/>
+    <img class="sil" src="${IMGS[viewId]}" alt="${label}" style="width:100%;height:auto;display:block;mix-blend-mode:multiply;"/>
     ${pinDivs}
   </div>
 </div>`;

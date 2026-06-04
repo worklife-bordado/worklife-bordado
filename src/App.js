@@ -685,7 +685,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
       </div>
       <div style={{display:"flex",gap:20,alignItems:"flex-start"}}>
         <div style={{position:"relative",flexShrink:0,width:220}}>
-          <img src={IMGS[view]} alt="prenda" style={{width:220,height:"auto",display:"block",borderRadius:8,background:C.card,border:"1px solid "+C.border}}/>
+          <img src={IMGS[view]} alt="prenda" style={{width:220,height:"auto",display:"block",borderRadius:8,background:"white",border:"1px solid "+C.border,mixBlendMode:"multiply"}}/>
           {pins.map(pin => {
             const pos = safePosiciones[pin.key] || {};
             const hasLogo = !!pos.logoImg;

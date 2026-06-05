@@ -1177,16 +1177,31 @@ function Calendario({ ordenes, onBack, onSelect }) {
   const hoy = new Date();
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth());
+  const [filtroCampo, setFiltroCampo] = useState("todos");
+  const [filtroValor, setFiltroValor] = useState("");
 
+  const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
   const primerDia = new Date(anio, mes, 1).getDay();
   const diasEnMes = new Date(anio, mes + 1, 0).getDate();
-  const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+  // Obtener valores únicos para los selectores
+  const clientes = [...new Set(ordenes.map(o => o.cliente).filter(Boolean))].sort();
+  const vendedores = [...new Set(ordenes.map(o => o.creadoPorNombre).filter(Boolean))].sort();
+  const bordadores = [...new Set(ordenes.map(o => o.bordador).filter(Boolean))].sort();
+
+  // Filtrar órdenes
+  const ordenesFiltradas = ordenes.filter(o => {
+    if (!filtroValor) return true;
+    if (filtroCampo === "cliente") return (o.cliente||"") === filtroValor;
+    if (filtroCampo === "vendedor") return (o.creadoPorNombre||"") === filtroValor;
+    if (filtroCampo === "bordador") return (o.bordador||"") === filtroValor;
+    return true;
+  });
 
   const ordensPorDia = {};
-  ordenes.forEach(o => {
+  ordenesFiltradas.forEach(o => {
     if (!o.fechaRequerida) return;
-    const d = o.fechaRequerida; // "YYYY-MM-DD"
-    const [y, m, dia] = d.split("-").map(Number);
+    const [y, m, dia] = o.fechaRequerida.split("-").map(Number);
     if (y === anio && m - 1 === mes) {
       if (!ordensPorDia[dia]) ordensPorDia[dia] = [];
       ordensPorDia[dia].push(o);
@@ -1196,8 +1211,9 @@ function Calendario({ ordenes, onBack, onSelect }) {
   const celdas = [];
   for (let i = 0; i < primerDia; i++) celdas.push(null);
   for (let d = 1; d <= diasEnMes; d++) celdas.push(d);
-
   const esHoy = d => d === hoy.getDate() && mes === hoy.getMonth() && anio === hoy.getFullYear();
+
+  const opcionesFiltro = filtroCampo === "cliente" ? clientes : filtroCampo === "vendedor" ? vendedores : filtroCampo === "bordador" ? bordadores : [];
 
   return (
     <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
@@ -1205,25 +1221,51 @@ function Calendario({ ordenes, onBack, onSelect }) {
         <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
         <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>📅 Calendario de Entregas</div>
       </div>
+
+      {/* Filtros */}
+      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        <select value={filtroCampo} onChange={e => { setFiltroCampo(e.target.value); setFiltroValor(""); }}
+          style={{background:C.card,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontSize:12}}>
+          <option value="todos">Sin filtro</option>
+          <option value="cliente">Cliente</option>
+          <option value="vendedor">Vendedor</option>
+          <option value="bordador">Bordador</option>
+        </select>
+        {filtroCampo !== "todos" && (
+          <select value={filtroValor} onChange={e => setFiltroValor(e.target.value)}
+            style={{background:C.card,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontSize:12,minWidth:180}}>
+            <option value="">— Todos —</option>
+            {opcionesFiltro.map(op => <option key={op} value={op}>{op}</option>)}
+          </select>
+        )}
+        {filtroValor && (
+          <Btn onClick={() => { setFiltroCampo("todos"); setFiltroValor(""); }} variant="ghost" size="sm">✕ Limpiar</Btn>
+        )}
+      </div>
+
+      {/* Navegación mes */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,marginBottom:20}}>
         <Btn onClick={() => { if(mes===0){setMes(11);setAnio(a=>a-1);}else setMes(m=>m-1); }} variant="ghost" size="sm">‹</Btn>
         <div style={{fontSize:18,fontWeight:700,color:C.text,minWidth:200,textAlign:"center"}}>{meses[mes]} {anio}</div>
         <Btn onClick={() => { if(mes===11){setMes(0);setAnio(a=>a+1);}else setMes(m=>m+1); }} variant="ghost" size="sm">›</Btn>
       </div>
+
+      {/* Días de la semana */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
         {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map(d => (
           <div key={d} style={{textAlign:"center",fontSize:11,fontWeight:700,color:C.muted,padding:"4px 0"}}>{d}</div>
         ))}
       </div>
+
+      {/* Celdas */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
         {celdas.map((d, i) => (
           <div key={i} style={{
-            minHeight:100,
+            minHeight:90,
             background: d && esHoy(d) ? "#EEF2FF" : d ? C.card : "transparent",
             borderRadius:8,
             border: d && esHoy(d) ? "2px solid "+C.accent : d ? "1px solid "+C.border : "none",
             padding:"6px 4px",
-            verticalAlign:"top"
           }}>
             {d && (
               <>

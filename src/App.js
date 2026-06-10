@@ -985,14 +985,12 @@ useEffect(() => {
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
 
   const cambiarEtapa = id => {
-    const nuevoForm = {
-      ...form, etapa: id,
-      historial: [...form.historial, { etapa: id, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(id).label}"` }],
-    };
-    setForm(nuevoForm);
-    onSave(nuevoForm);
+    setForm(p => ({
+      ...p, etapa: id,
+      historial: [...p.historial, { etapa: id, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(id).label}"` }],
+    }));
   };
-
+   
   const totalPrendas = form.prendas.reduce((s, p) => s + TALLAS.reduce((ts, t) => ts + (parseInt(p.tallas[t]) || 0), 0), 0);
   const TABS = [
     {id:"info",l:"Información"},{id:"viz",l:"Visualización"},

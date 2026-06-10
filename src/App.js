@@ -1516,14 +1516,23 @@ if (usuario) {
     await setDoc(doc(db, "ordenes", String(form.id)), form);
 // Registrar cambios en historial
 if (anterior) {
-  const camposIgnorar = ['historial', 'prendas', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre'];
+  const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre'];
   const cambios = [];
   const camposLegibles = {
     cliente: 'Cliente', etapa: 'Etapa', bordador: 'Bordador',
     fechaRequerida: 'Fecha Requerida', fecha: 'Fecha', noCotizacion: 'No. Cotización',
     comentarios: 'Comentarios', vendedor: 'Vendedor'
   };
-  Object.keys(form).forEach(campo => {
+  if (JSON.stringify(anterior.prendas) !== JSON.stringify(form.prendas)) {
+  cambios.push({
+    campo: 'prendas',
+    etiqueta: 'Prendas',
+    antes: 'versión anterior',
+    despues: 'versión actualizada'
+  });
+}
+
+Object.keys(form).forEach(campo => {
     if (camposIgnorar.includes(campo)) return;
     const antes = JSON.stringify(anterior[campo]);
     const despues = JSON.stringify(form[campo]);

@@ -938,7 +938,9 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   return o;
 });
   const [tab, setTab] = useState("info");
-
+  const [solicitarFirmaModal, setSolicitarFirmaModal] = useState(false);
+  const [emailCliente, setEmailCliente] = useState("");
+  const [linkFirma, setLinkFirma] = useState("");
   const upd = (f, v) => setForm(p => ({ ...p, [f]: v }));
   const updPos = (key, field, val) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], [field]: val } } }));
   const handleLogoUpload = (key, dataUrl) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], logoImg: dataUrl } } }));
@@ -977,6 +979,48 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   return (
     <>
     {pdfHtml && <PdfModal html={pdfHtml} onClose={() => setPdfHtml(null)}/>}
+{solicitarFirmaModal && (
+  <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#0008",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+    <div style={{background:C.card,borderRadius:12,padding:32,maxWidth:400,width:"90%",border:"1px solid "+C.border}}>
+      <div style={{fontSize:18,fontWeight:800,color:C.text,marginBottom:16}}>✍ Solicitar Firma</div>
+      {!linkFirma ? (
+        <>
+          <div style={{fontSize:13,color:C.muted,marginBottom:12}}>Ingresa el email del cliente para generar el link de firma.</div>
+          <input value={emailCliente} onChange={e => setEmailCliente(e.target.value)}
+            placeholder="correo@cliente.com" type="email"
+            style={{width:"100%",background:C.surface,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"8px 10px",fontSize:13,marginBottom:16,boxSizing:"border-box"}}/>
+          <div style={{display:"flex",gap:8}}>
+            <Btn onClick={() => { setSolicitarFirmaModal(false); setEmailCliente(""); setLinkFirma(""); }} variant="ghost" size="sm">Cancelar</Btn>
+            <Btn onClick={async () => {
+              if (!emailCliente) return;
+              const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+              const expiraEn = new Date(Date.now() + 72 * 60 * 60 * 1000);
+              await setDoc(doc(db, "solicitudesFirma", token), {
+                ordenId: form.id,
+                numeroOrden: form.numero,
+                emailCliente: emailCliente.toLowerCase(),
+                expiraEn,
+                firmado: false,
+                creadoEn: new Date()
+              });
+              const link = `https://worklife-bordado.vercel.app/api/firma?token=${token}&email=${encodeURIComponent(emailCliente)}`;
+              setLinkFirma(link);
+            }} size="sm">Generar Link</Btn>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{fontSize:13,color:C.muted,marginBottom:8}}>Link generado — válido por 72 horas:</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:6,padding:"8px 10px",fontSize:11,color:C.accent,wordBreak:"break-all",marginBottom:16}}>{linkFirma}</div>
+          <div style={{display:"flex",gap:8}}>
+            <Btn onClick={() => navigator.clipboard.writeText(linkFirma)} variant="ghost" size="sm">📋 Copiar</Btn>
+            <Btn onClick={() => { setSolicitarFirmaModal(false); setEmailCliente(""); setLinkFirma(""); }} size="sm">Cerrar</Btn>
+          </div>
+        </>
+      )}
+    </div>
+  </div>
+)}
     <div style={{maxWidth:960,margin:"0 auto",padding:"0 16px 40px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
         <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
@@ -988,6 +1032,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
           <div style={{fontSize:12,color:C.muted}}>{form.cliente||"Sin cliente"}</div>
         </div>
         <Btn onClick={async () => { console.log("POSICIONES FORM:", JSON.stringify(form.posiciones)); await onSave(form); await new Promise(r => setTimeout(r, 500)); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
+                     <Btn onClick={() => setSolicitarFirmaModal(true)} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
         <Btn onClick={() => onDuplicar(form)} variant="ghost" size="sm">⧉ Duplicar</Btn>
         <Btn onClick={() => onSave(form)} size="sm">💾 Guardar</Btn>
         <Btn onClick={() => { onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>

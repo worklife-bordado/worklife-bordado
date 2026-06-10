@@ -1398,6 +1398,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     
     // Notificar al vendedor si cambió la etapa
     if (anterior && anterior.etapa !== form.etapa && form.creadoPor) {
+console.log("Cambio de etapa detectado:", anterior?.etapa, "->", form.etapa, "creadoPor:", form.creadoPor);
       try {
 
         // Buscar token por email

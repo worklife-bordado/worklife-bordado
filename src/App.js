@@ -948,6 +948,19 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   return o;
 });
   const [tab, setTab] = useState("info");
+  const [historialOrden, setHistorialOrden] = useState([]);
+useEffect(() => {
+    if (!orden?.id) return;
+    const q = query(
+      collection(db, "historial"),
+      where("ordenId", "==", String(orden.id)),
+      orderBy("fecha", "desc")
+    );
+    const unsub = onSnapshot(q, snap => {
+      setHistorialOrden(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return unsub;
+  }, [orden?.id]);
   const [solicitarFirmaModal, setSolicitarFirmaModal] = useState(false);
   const [emailCliente, setEmailCliente] = useState("");
   const [linkFirma, setLinkFirma] = useState("");
@@ -984,6 +997,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   const TABS = [
     {id:"info",l:"Información"},{id:"viz",l:"Visualización"},
     {id:"pos",l:"Posiciones"},{id:"prendas",l:"Prendas"},{id:"seg",l:"Seguimiento"},
+    {id:"historial",l:"Historial"},
   ];
 
   return (
@@ -1236,6 +1250,31 @@ await setDoc(doc(db, "solicitudesFirma", token), {
           </div>
         </div>
       )}
+{tab === "historial" && (
+  <div>
+    <div style={{color:C.muted,fontSize:13,marginBottom:16}}>Registro de todos los cambios realizados en esta orden.</div>
+    {historialOrden.length === 0 ? (
+      <div style={{color:C.muted,textAlign:"center",marginTop:40}}>No hay cambios registrados aún.</div>
+    ) : (
+      historialOrden.map(h => (
+        <div key={h.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 16px",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontWeight:700,color:C.text,fontSize:13}}>👤 {h.usuario}</span>
+            <span style={{color:C.muted,fontSize:11}}>{h.fecha?.toDate?.()?.toLocaleString('es-MX')||""}</span>
+          </div>
+          {h.cambios.map((c, i) => (
+            <div key={i} style={{fontSize:12,color:C.muted,marginBottom:4,paddingLeft:8,borderLeft:"2px solid "+C.border}}>
+              <span style={{color:C.accent,fontWeight:700}}>{c.etiqueta}:</span>
+              {" "}{typeof c.antes === 'object' ? '(complejo)' : String(c.antes||"(vacío)")}
+              {" → "}
+              {typeof c.despues === 'object' ? '(complejo)' : String(c.despues||"(vacío)")}
+            </div>
+          ))}
+        </div>
+      ))
+    )}
+  </div>
+)}
 
       <div style={{marginTop:28,display:"flex",gap:10,justifyContent:"flex-end"}}>
         <Btn onClick={onBack} variant="ghost">Cancelar</Btn>
@@ -1475,6 +1514,39 @@ if (usuario) {
   const guardar = async (form) => {
     const anterior = ordenes.find(o => o.id == form.id);
     await setDoc(doc(db, "ordenes", String(form.id)), form);
+// Registrar cambios en historial
+if (anterior) {
+  const camposIgnorar = ['historial'];
+  const cambios = [];
+  const camposLegibles = {
+    cliente: 'Cliente', etapa: 'Etapa', bordador: 'Bordador',
+    fechaRequerida: 'Fecha Requerida', fecha: 'Fecha', noCotizacion: 'No. Cotización',
+    comentarios: 'Comentarios', vendedor: 'Vendedor'
+  };
+  Object.keys(form).forEach(campo => {
+    if (camposIgnorar.includes(campo)) return;
+    const antes = JSON.stringify(anterior[campo]);
+    const despues = JSON.stringify(form[campo]);
+    if (antes !== despues) {
+      cambios.push({
+        campo,
+        etiqueta: camposLegibles[campo] || campo,
+        antes: anterior[campo],
+        despues: form[campo]
+      });
+    }
+  });
+  if (cambios.length > 0) {
+    await addDoc(collection(db, "historial"), {
+      ordenId: String(form.id),
+      numeroOrden: form.numero,
+      usuario: usuario.displayName || usuario.email,
+      email: usuario.email,
+      fecha: serverTimestamp(),
+      cambios
+    });
+  }
+}
     
   // Notificar al vendedor si cambió la etapa
     console.log("GUARDAR llamado - anterior:", anterior?.etapa, "nuevo:", form.etapa, "id:", form.id);

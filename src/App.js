@@ -1413,7 +1413,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
         snap.forEach(async d => {
           const token = d.data().token;
           if (token) {
-            await fetch("/api/notify", {
+            const resp = await fetch("/api/notify", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1422,6 +1422,8 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
                 cuerpo: `La etapa cambió a: ${form.etapa}`
               })
             });
+            const respData = await resp.json();
+            console.log("Respuesta notify:", resp.status, respData);
           }
         });
       } catch (err) {

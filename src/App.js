@@ -4,8 +4,9 @@ import { useState, useRef, useEffect } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyAXCwSRQiIr4otv6I3kJVz7IzdgvV8yxxA",
@@ -17,6 +18,7 @@ const firebaseConfig = {
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
+const messaging = getMessaging(firebaseApp);
 const db          = getFirestore(firebaseApp);
 const auth        = getAuth(firebaseApp);
 const provider    = new GoogleAuthProvider();
@@ -1324,6 +1326,18 @@ export default function App() {
         const r = ROLES[user.email] || null;
         setUsuario(user);
         setRol(r);
+// Registrar token FCM para notificaciones push
+getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
+  .then(token => {
+    if (token) {
+      setDoc(doc(db, "fcmTokens", user.uid), {
+        token,
+        email: user.email,
+        updatedAt: serverTimestamp()
+      });
+    }
+  })
+  .catch(err => console.log("FCM token error:", err));
       } else {
         setUsuario(null);
         setRol(null);
@@ -1379,7 +1393,35 @@ export default function App() {
   };
 
   const guardar = async (form) => {
+    const anterior = ordenes.find(o => o.id == form.id);
     await setDoc(doc(db, "ordenes", String(form.id)), form);
+    
+    // Notificar al vendedor si cambió la etapa
+    if (anterior && anterior.etapa !== form.etapa && form.creadoPor) {
+      try {
+
+        // Buscar token por email
+        const snap = await getDocs(
+          query(collection(db, "fcmTokens"), where("email", "==", form.creadoPor))
+        );
+        snap.forEach(async d => {
+          const token = d.data().token;
+          if (token) {
+            await fetch("/api/notify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                token,
+                titulo: `Orden #${form.numero} actualizada`,
+                cuerpo: `La etapa cambió a: ${form.etapa}`
+              })
+            });
+          }
+        });
+      } catch (err) {
+        console.log("Error enviando notificación:", err);
+      }
+    }
   };
 
   const duplicar = async (id) => {

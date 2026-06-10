@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
@@ -1329,6 +1329,7 @@ export default function App() {
   const [authListo,setAuthListo]= useState(false);  // waiting for Firebase auth check
   const [loginErr, setLoginErr] = useState("");
   const [ordenes,  setOrdenes]  = useState([]);
+  const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("lista");
   const [activa,   setActiva]   = useState(null);
   const importRef = useRef(null);
@@ -1364,12 +1365,20 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   // ── Firestore listener — only when logged in ──────────────────────────────
   useEffect(() => {
     if (!usuario) return;
+// Cargar notificaciones no leídas
+let unsubNotifs = () => {};
+if (usuario) {
+  unsubNotifs = onSnapshot(
+    query(collection(db, "notificaciones"), where("para", "==", usuario.email), where("leida", "==", false)),
+    snap => setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+  );
+}
     const unsub = onSnapshot(collection(db, "ordenes"), snap => {
       const data = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       data.sort((a,b) => (a.numero||"").localeCompare(b.numero||""));
       setOrdenes(data);
     });
-    return unsub;
+    return () => { unsub(); unsubNotifs(); };
   }, [usuario]);
 
   const login = async () => {
@@ -1434,6 +1443,13 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
             });
             const respData = await resp.json();
             console.log("Respuesta notify:", resp.status, respData);
+            await addDoc(collection(db, "notificaciones"), {
+              para: form.creadoPor,
+              titulo: `Orden #${form.numero} actualizada`,
+              cuerpo: `La etapa cambió a: ${form.etapa}`,
+              leida: false,
+              fecha: serverTimestamp()
+            });
           }
         });
       } catch (err) {
@@ -1521,6 +1537,14 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
         <div style={{color:C.border,fontSize:18}}>|</div>
         <div style={{color:C.muted,fontSize:13}}>Órdenes de Bordado</div>
         <div style={{flex:1}}/>
+<div style={{position:"relative",cursor:"pointer"}} onClick={() => setVista("notificaciones")}>
+  <span style={{fontSize:22}}>🔔</span>
+  {notifs.length > 0 && (
+    <span style={{position:"absolute",top:-4,right:-4,background:"#e74c3c",color:"#fff",borderRadius:"50%",fontSize:9,fontWeight:800,width:16,height:16,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      {notifs.length}
+    </span>
+  )}
+</div>
         {/* Rol badge */}
         <div style={{fontSize:11,color:C.muted,background:C.card,borderRadius:20,padding:"3px 10px",border:"1px solid "+C.border}}>
           {usuario.displayName||usuario.email} · <span style={{color:C.accent,textTransform:"uppercase",fontWeight:700}}>{rol}</span>
@@ -1545,6 +1569,36 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     puedeCancelar={puedeCancelar}
     onCalendario={() => setVista("calendario")}
   />
+)}
+{vista === "notificaciones" && (
+  <div style={{maxWidth:600,margin:"0 auto",padding:"0 16px 40px"}}>
+    <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
+      <Btn onClick={() => setVista("lista")} variant="ghost" size="sm">← Volver</Btn>
+      <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>🔔 Notificaciones</div>
+      {notifs.length > 0 && (
+        <Btn onClick={async () => {
+          for (const n of notifs) {
+            await deleteDoc(doc(db, "notificaciones", n.id));
+          }
+        }} variant="ghost" size="sm">Marcar todas como leídas</Btn>
+      )}
+    </div>
+    {notifs.length === 0 ? (
+      <div style={{color:C.muted,textAlign:"center",marginTop:40,fontSize:14}}>No tienes notificaciones pendientes</div>
+    ) : (
+      notifs.map(n => (
+        <div key={n.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,color:C.text,fontSize:13}}>{n.titulo}</div>
+            <div style={{color:C.muted,fontSize:12,marginTop:2}}>{n.cuerpo}</div>
+          </div>
+          <Btn onClick={async () => {
+            await deleteDoc(doc(db, "notificaciones", n.id));
+          }} variant="ghost" size="sm">✓ Leída</Btn>
+        </div>
+      ))
+    )}
+  </div>
 )}
 {vista === "calendario" && (
   <Calendario

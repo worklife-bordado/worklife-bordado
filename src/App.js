@@ -1523,10 +1523,11 @@ if (anterior) {
     fechaRequerida: 'Fecha Requerida', fecha: 'Fecha', noCotizacion: 'No. Cotización',
     comentarios: 'Comentarios', vendedor: 'Vendedor'
   };
-const sortObj = obj => JSON.stringify(obj, Object.keys(obj || {}).sort());
-const prendasAntes = (anterior.prendas||[]).map(p => sortObj(p));
-const prendasDespues = (form.prendas||[]).map(p => sortObj(p));
-if (JSON.stringify(prendasAntes) !== JSON.stringify(prendasDespues)) {
+const normalizarPrendas = (prendas) => (prendas||[]).map(p => ({
+  descripcion: p.descripcion||"",
+  tallas: Object.fromEntries(Object.entries(p.tallas||{}).sort())
+}));
+if (JSON.stringify(normalizarPrendas(anterior.prendas)) !== JSON.stringify(normalizarPrendas(form.prendas))) {
   cambios.push({
     campo: 'prendas',
     etiqueta: 'Prendas',

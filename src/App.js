@@ -1396,9 +1396,10 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     const anterior = ordenes.find(o => o.id == form.id);
     await setDoc(doc(db, "ordenes", String(form.id)), form);
     
-    // Notificar al vendedor si cambió la etapa
+  // Notificar al vendedor si cambió la etapa
+    console.log("GUARDAR llamado - anterior:", anterior?.etapa, "nuevo:", form.etapa, "id:", form.id);
     if (anterior && anterior.etapa !== form.etapa && form.creadoPor) {
-console.log("Cambio de etapa detectado:", anterior?.etapa, "->", form.etapa, "creadoPor:", form.creadoPor);
+      console.log("Cambio de etapa detectado:", anterior?.etapa, "->", form.etapa, "creadoPor:", form.creadoPor);
       try {
 
         // Buscar token por email

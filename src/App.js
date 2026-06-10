@@ -19,6 +19,12 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const messaging = getMessaging(firebaseApp);
+onMessage(messaging, (payload) => {
+  const { title, body } = payload.notification;
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon: '/logo192.png' });
+  }
+});
 const db          = getFirestore(firebaseApp);
 const auth        = getAuth(firebaseApp);
 const provider    = new GoogleAuthProvider();

@@ -960,7 +960,7 @@ useEffect(() => {
       setHistorialOrden(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return unsub;
-  }, [orden?.id]);
+  }, [orden.id]);
   const [solicitarFirmaModal, setSolicitarFirmaModal] = useState(false);
   const [emailCliente, setEmailCliente] = useState("");
   const [linkFirma, setLinkFirma] = useState("");
@@ -1739,7 +1739,6 @@ if (anterior) {
 
      {vista === "detalle" && ordenData && (
         <Detalle
-          key={ordenData.id}
           orden={ordenData}
           usuario={usuario}
           rol={rol}

@@ -222,6 +222,16 @@ async function processLogosForPdf(orden, views, pins) {
 }
 
 async function buildPdfHtml(orden) {
+// Buscar firma del cliente
+  let firmaImg = null;
+  try {
+    const firmaSnap = await getDocs(
+      query(collection(db, "solicitudesFirma"), where("ordenId", "==", orden.id), where("firmado", "==", true))
+    );
+    if (!firmaSnap.empty) {
+      firmaImg = firmaSnap.docs[0].data().firma;
+    }
+  } catch(e) {}
   // TALLA_GRUPOS is defined globally, use it here too
   const POS_LIST = [
     {key:"A",label:"Frente Izq."},{key:"B",label:"Frente Der."},{key:"C",label:"Manga Der."},
@@ -597,7 +607,7 @@ async function buildPdfHtml(orden) {
     </div>
     <div class="firmas-box">
       <div class="firmas-grid">
-        <div class="firma-line">Cliente</div>
+        ${firmaImg ? `<div style="text-align:center;"><img src="${firmaImg}" style="max-height:60px;max-width:180px;"/><div style="border-top:1px solid #000;margin-top:4px;font-size:8px;">Cliente</div></div>` : `<div class="firma-line">Cliente</div>`}
         <div class="firma-line">Representante comercial WorkLife</div>
       </div>
     </div>

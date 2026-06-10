@@ -1523,9 +1523,10 @@ if (anterior) {
     fechaRequerida: 'Fecha Requerida', fecha: 'Fecha', noCotizacion: 'No. Cotización',
     comentarios: 'Comentarios', vendedor: 'Vendedor'
   };
-console.log("PRENDAS ANTERIOR:", JSON.stringify(anterior.prendas));
-console.log("PRENDAS FORM:", JSON.stringify(form.prendas));
-  if (JSON.stringify(anterior.prendas) !== JSON.stringify(form.prendas)) {
+const sortObj = obj => JSON.stringify(obj, Object.keys(obj || {}).sort());
+const prendasAntes = (anterior.prendas||[]).map(p => sortObj(p));
+const prendasDespues = (form.prendas||[]).map(p => sortObj(p));
+if (JSON.stringify(prendasAntes) !== JSON.stringify(prendasDespues)) {
   cambios.push({
     campo: 'prendas',
     etiqueta: 'Prendas',

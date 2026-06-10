@@ -1516,7 +1516,7 @@ if (usuario) {
     await setDoc(doc(db, "ordenes", String(form.id)), form);
 // Registrar cambios en historial
 if (anterior) {
-  const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre'];
+  const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre', 'prendas'];
   const cambios = [];
   const camposLegibles = {
     cliente: 'Cliente', etapa: 'Etapa', bordador: 'Bordador',

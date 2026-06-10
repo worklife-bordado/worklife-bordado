@@ -10,8 +10,7 @@ function getApp() {
   return getApps()[0];
 }
 
-export default async function handler(req, res) {
-  const { token } = req.query;
+module.exports = async function handler(req, res) {  const { token } = req.query;
   const emailIngresado = req.method === 'POST' ? req.body.email : null;
 
   if (!token) {

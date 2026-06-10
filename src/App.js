@@ -1005,14 +1005,16 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
               if (!emailCliente) return;
               const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
               const expiraEn = new Date(Date.now() + 72 * 60 * 60 * 1000);
-              await setDoc(doc(db, "solicitudesFirma", token), {
-                ordenId: form.id,
-                numeroOrden: form.numero,
-                emailCliente: emailCliente.toLowerCase(),
-                expiraEn,
-                firmado: false,
-                creadoEn: new Date()
-              });
+             const htmlPdf = await buildPdfHtml(form);
+await setDoc(doc(db, "solicitudesFirma", token), {
+  ordenId: form.id,
+  numeroOrden: form.numero,
+  emailCliente: emailCliente.toLowerCase(),
+  expiraEn,
+  firmado: false,
+  creadoEn: new Date(),
+  htmlPdf
+});
               const link = `https://worklife-bordado.vercel.app/api/firma?token=${token}&email=${encodeURIComponent(emailCliente)}`;
               setLinkFirma(link);
             }} size="sm">Generar Link</Btn>

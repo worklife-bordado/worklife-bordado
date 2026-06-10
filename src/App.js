@@ -949,10 +949,14 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   const addPrenda = () => setForm(p => ({ ...p, prendas: [...p.prendas, emptyPrenda()] }));
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
 
-  const cambiarEtapa = id => setForm(p => ({
-    ...p, etapa: id,
-    historial: [...p.historial, { etapa: id, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(id).label}"` }],
-  }));
+  const cambiarEtapa = id => {
+    const nuevoForm = {
+      ...form, etapa: id,
+      historial: [...form.historial, { etapa: id, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(id).label}"` }],
+    };
+    setForm(nuevoForm);
+    onSave(nuevoForm);
+  };
 
   const totalPrendas = form.prendas.reduce((s, p) => s + TALLAS.reduce((ts, t) => ts + (parseInt(p.tallas[t]) || 0), 0), 0);
   const TABS = [

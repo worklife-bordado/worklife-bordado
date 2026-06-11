@@ -1617,8 +1617,11 @@ Object.keys(form).forEach(campo => {
 const cancelar = async (id) => {
     const orden = ordenes.find(o => o.id == id);
     if (!orden) return;
-    if (orden.etapa === "calidad" || orden.etapa === "entregada") return;
-    const confirmado = window.confirm(`¿Estás seguro de cancelar la orden #${orden.numero}? Esta acción no se puede deshacer.`);
+    if (orden.etapa === "calidad" || orden.etapa === "entregada") {
+      alert("No se puede cancelar una orden en Control Calidad o Entregada.");
+      return;
+    }
+    const confirmado = window.confirm(`¿Estás seguro de cancelar la orden #${orden.numero}?`);
     if (!confirmado) return;
     const actualizada = {
       ...orden,
@@ -1629,7 +1632,8 @@ const cancelar = async (id) => {
         nota: `Cancelada por ${usuario.displayName || usuario.email}`
       }]
     };
-    await guardar(actualizada);
+    await setDoc(doc(db, "ordenes", String(actualizada.id)), actualizada);
+    setVista("lista");
   };
 
   // Cancelar / reactivar — no elimina, solo cambia etapa

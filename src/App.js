@@ -1382,8 +1382,8 @@ function Calendario({ ordenes, onBack, onSelect }) {
                 <div style={{fontSize:12,fontWeight:esHoy(d)?800:600,color:esHoy(d)?C.accent:C.text,marginBottom:4}}>{d}</div>
                 {(ordensPorDia[d]||[]).map(o => (
                   <div key={o.id} onClick={() => onSelect(o.id)}
-                    style={{background:C.accent,color:"#fff",borderRadius:4,padding:"2px 5px",fontSize:10,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                    #{o.numero}
+                    style={{background:etapaInfo(o.etapa).color,color:"#fff",borderRadius:4,padding:"2px 5px",fontSize:10,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    #{o.numero} · {etapaInfo(o.etapa).label}
                   </div>
                 ))}
               </>

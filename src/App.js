@@ -1389,21 +1389,23 @@ function Calendario({ ordenes, onBack, onSelect }) {
       </div>
 
       {/* Celdas */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+   <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
         {celdas.map((d, i) => (
           <div key={i} style={{
-            minHeight:90,
+            minHeight:70,
             background: d && esHoy(d) ? "#EEF2FF" : d ? C.card : "transparent",
             borderRadius:8,
             border: d && esHoy(d) ? "2px solid "+C.accent : d ? "1px solid "+C.border : "none",
-            padding:"6px 4px",
+            padding:"4px 2px",
+            overflow:"hidden",
+            minWidth:0,
           }}>
             {d && (
               <>
-                <div style={{fontSize:12,fontWeight:esHoy(d)?800:600,color:esHoy(d)?C.accent:C.text,marginBottom:4}}>{d}</div>
+                <div style={{fontSize:11,fontWeight:esHoy(d)?800:600,color:esHoy(d)?C.accent:C.text,marginBottom:2}}>{d}</div>
                 {(ordensPorDia[d]||[]).map(o => (
                   <div key={o.id} onClick={() => onSelect(o.id)}
-                    style={{background:etapaInfo(o.etapa).color,color:"#fff",borderRadius:4,padding:"2px 5px",fontSize:10,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    style={{background:etapaInfo(o.etapa).color,color:"#fff",borderRadius:4,padding:"2px 3px",fontSize:9,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",width:"100%",boxSizing:"border-box"}}>
                     #{o.numero} · {etapaInfo(o.etapa).label}
                   </div>
                 ))}

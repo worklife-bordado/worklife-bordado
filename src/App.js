@@ -1010,7 +1010,15 @@ useEffect(() => {
     {id:"pos",l:"Posiciones"},{id:"prendas",l:"Prendas"},{id:"seg",l:"Seguimiento"},
     {id:"historial",l:"Historial"},
   ];
-
+const validarYGuardar = (cb) => {
+    if (!form.fechaRequerida || !form.noCotizacion) {
+      alert("Por favor llena los campos obligatorios:\n" + 
+        (!form.fechaRequerida ? "• Fecha Requerida\n" : "") +
+        (!form.noCotizacion ? "• No. Cotización\n" : ""));
+      return;
+    }
+    cb();
+  };
   return (
     <>
     {pdfHtml && <PdfModal html={pdfHtml} onClose={() => setPdfHtml(null)}/>}
@@ -1071,7 +1079,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         <Btn onClick={async () => { console.log("POSICIONES FORM:", JSON.stringify(form.posiciones)); await onSave(form); await new Promise(r => setTimeout(r, 500)); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
                      <Btn onClick={() => setSolicitarFirmaModal(true)} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
         <Btn onClick={() => onDuplicar(form)} variant="ghost" size="sm">⧉ Duplicar</Btn>
-        <Btn onClick={() => onSave(form)} size="sm">💾 Guardar</Btn>
+        <Btn onClick={() => validarYGuardar(() => onSave(form))} size="sm">💾 Guardar</Btn>
         <Btn onClick={() => { onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>
       </div>
 
@@ -1289,7 +1297,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
 
       <div style={{marginTop:28,display:"flex",gap:10,justifyContent:"flex-end"}}>
         <Btn onClick={onBack} variant="ghost">Cancelar</Btn>
-        <Btn onClick={() => { onSave(form); onBack(); }}>💾 Guardar y volver</Btn>
+        <Btn onClick={() => validarYGuardar(() => { onSave(form); onBack(); })}>💾 Guardar y volver</Btn>
       </div>
     </div>
     </>

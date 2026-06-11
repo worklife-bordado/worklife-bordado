@@ -1614,6 +1614,23 @@ Object.keys(form).forEach(campo => {
     setActiva(copia.id);
     setVista("detalle");
   };
+const cancelar = async (id) => {
+    const orden = ordenes.find(o => o.id == id);
+    if (!orden) return;
+    if (orden.etapa === "calidad" || orden.etapa === "entregada") return;
+    const confirmado = window.confirm(`¿Estás seguro de cancelar la orden #${orden.numero}? Esta acción no se puede deshacer.`);
+    if (!confirmado) return;
+    const actualizada = {
+      ...orden,
+      etapa: "cancelada",
+      historial: [...(orden.historial||[]), {
+        etapa: "cancelada",
+        fecha: new Date().toISOString(),
+        nota: `Cancelada por ${usuario.displayName || usuario.email}`
+      }]
+    };
+    await guardar(actualizada);
+  };
 
   // Cancelar / reactivar — no elimina, solo cambia etapa
   const cancelarReactivar = async (orden) => {

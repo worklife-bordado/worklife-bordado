@@ -1774,7 +1774,7 @@ const cancelar = async (id) => {
           puedeEditarSeguimiento={puedeEditarSeguimiento}
           onSave={guardar}
           onBack={() => setVista("lista")}
-          onDelete={null}
+          onDelete={cancelar}
           onDuplicar={puedeCrear ? async (form) => { await guardar(form); await duplicar(form.id); } : null}
         />
       )}

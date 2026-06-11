@@ -985,6 +985,15 @@ useEffect(() => {
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
 
   const cambiarEtapa = id => {
+    if (id === "cancelada") {
+      const mensaje = form.etapa === "bordado"
+        ? `⚠️ La orden está EN BORDADO.\n\nVerifica con el encargado de bordado que las prendas NO han sido bordadas antes de continuar.\n\n¿Estás seguro de cancelar?`
+        : `¿Estás seguro de mover esta orden a Cancelada?`;
+      if (!window.confirm(mensaje)) return;
+    }
+    if (form.etapa === "cancelada" && id !== "cancelada") {
+      if (!window.confirm(`¿Estás seguro de reactivar la orden #${form.numero} que está Cancelada?`)) return;
+    }
     setForm(p => ({
       ...p, etapa: id,
       historial: [...p.historial, { etapa: id, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(id).label}"` }],
@@ -1621,7 +1630,10 @@ const cancelar = async (id) => {
       alert("No se puede cancelar una orden en Control Calidad o Entregada.");
       return;
     }
-    const confirmado = window.confirm(`¿Estás seguro de cancelar la orden #${orden.numero}?`);
+    const mensaje = orden.etapa === "bordado"
+      ? `⚠️ La orden #${orden.numero} está EN BORDADO.\n\nVerifica con el encargado de bordado que las prendas NO han sido bordadas antes de continuar.\n\n¿Estás seguro de cancelar?`
+      : `¿Estás seguro de cancelar la orden #${orden.numero}?`;
+    const confirmado = window.confirm(mensaje);
     if (!confirmado) return;
     const actualizada = {
       ...orden,

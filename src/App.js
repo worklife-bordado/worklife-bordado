@@ -986,6 +986,10 @@ useEffect(() => {
 
   const cambiarEtapa = id => {
     if (id === "cancelada") {
+      if (form.etapa === "calidad" || form.etapa === "entregada") {
+        alert("No se puede cancelar una orden en Control Calidad o Entregada.");
+        return;
+      }
       const mensaje = form.etapa === "bordado"
         ? `⚠️ La orden está EN BORDADO.\n\nVerifica con el encargado de bordado que las prendas NO han sido bordadas antes de continuar.\n\n¿Estás seguro de cancelar?`
         : `¿Estás seguro de mover esta orden a Cancelada?`;

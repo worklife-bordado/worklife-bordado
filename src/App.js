@@ -1311,8 +1311,8 @@ function Dashboard({ ordenes, onBack }) {
   const [desde, setDesde] = useState(primerDiaMes.toISOString().slice(0, 10));
   const [hasta, setHasta] = useState(hoy.toISOString().slice(0, 10));
 
-  const getFechaEtapa = (orden, etapa) => {
-    const entrada = [...(orden.historial||[])].reverse().find(h => h.etapa === etapa);
+ const getFechaEtapa = (orden, etapa) => {
+    const entrada = (orden.historial||[]).find(h => h.etapa === etapa);
     return entrada ? new Date(entrada.fecha) : null;
   };
 

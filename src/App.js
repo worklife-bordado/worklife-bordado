@@ -815,14 +815,36 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
 </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
-        {ETAPAS.map(e => (
-          <div key={e.id} onClick={() => setFiltro(filtro === e.id ? "todas" : e.id)}
-            style={{background:filtro===e.id?e.color+"22":C.card,border:"1px solid "+(filtro===e.id?e.color:C.border),borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>
-            <div style={{fontSize:22,fontWeight:800,color:e.color}}>{cnt[e.id]}</div>
-            <div style={{fontSize:11,color:C.muted,marginTop:2}}>{e.label}</div>
-          </div>
-        ))}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+        {(() => {
+          const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
+          const activas = ordenes.filter(o => etapasActivas.includes(o.etapa) && o.fechaRequerida);
+          const hoy = new Date();
+          hoy.setHours(0,0,0,0);
+          const vencidas = activas.filter(o => new Date(o.fechaRequerida) < hoy);
+          const porVencer = activas.filter(o => {
+            const fecha = new Date(o.fechaRequerida);
+            const diff = (fecha - hoy) / (1000*60*60*24);
+            return diff >= 0 && diff <= 3;
+          });
+          const aTiempo = activas.length - vencidas.length - porVencer.length;
+          return (
+            <>
+              <div style={{background:"#c0392b22",border:"1px solid #c0392b",borderRadius:10,padding:"10px 14px"}}>
+                <div style={{fontSize:22,fontWeight:800,color:"#c0392b"}}>{vencidas.length}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>🔴 Vencidas</div>
+              </div>
+              <div style={{background:"#f5a62322",border:"1px solid #f5a623",borderRadius:10,padding:"10px 14px"}}>
+                <div style={{fontSize:22,fontWeight:800,color:"#f5a623"}}>{porVencer.length}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>⚠️ Vencen en 3 días</div>
+              </div>
+              <div style={{background:"#4caf7d22",border:"1px solid #4caf7d",borderRadius:10,padding:"10px 14px"}}>
+                <div style={{fontSize:22,fontWeight:800,color:"#4caf7d"}}>{aTiempo}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>✅ A tiempo</div>
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       <div style={{display:"flex",gap:8,marginBottom:14}}>

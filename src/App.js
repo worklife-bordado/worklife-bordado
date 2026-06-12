@@ -1401,14 +1401,13 @@ function Dashboard({ ordenes, onBack }) {
   };
 
   const calcEntregasATiempo = () => {
-    const conFecha = ordensFiltradas.filter(o => o.fechaRequerida);
-    if (conFecha.length === 0) return null;
-    const aTiempo = conFecha.filter(o => {
-      const entradaCalidad = getFechaEtapa(o, "calidad");
-      if (!entradaCalidad) return false;
-      return entradaCalidad <= new Date(o.fechaRequerida + "T23:59:59");
+    const entregadas = ordensFiltradas.filter(o => o.fechaRequerida && getFechaEtapa(o, "entregada"));
+    if (entregadas.length === 0) return null;
+    const aTiempo = entregadas.filter(o => {
+      const fechaEntrega = getFechaEtapa(o, "entregada");
+      return fechaEntrega <= new Date(o.fechaRequerida + "T23:59:59");
     });
-    return { pct: ((aTiempo.length / conFecha.length) * 100).toFixed(1), total: conFecha.length, aTiempo: aTiempo.length };
+    return { pct: ((aTiempo.length / entregadas.length) * 100).toFixed(1), total: entregadas.length, aTiempo: aTiempo.length };
   };
 
   const p1 = calcPromedio("nueva", "bordado");
@@ -1478,7 +1477,7 @@ function Dashboard({ ordenes, onBack }) {
           <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
             <div>
               <div style={{fontSize:48,fontWeight:800,color:parseFloat(entregas.pct)>=80?"#4caf7d":parseFloat(entregas.pct)>=50?"#f5a623":"#c0392b"}}>{entregas.pct}%</div>
-              <div style={{fontSize:13,color:C.muted}}>órdenes que entraron a Control Calidad a tiempo</div>
+              <div style={{fontSize:13,color:C.muted}}>órdenes entregadas antes o en la fecha requerida</div>
             </div>
             <div style={{flex:1,minWidth:200}}>
               <div style={{background:C.surface,borderRadius:8,height:12,overflow:"hidden"}}>

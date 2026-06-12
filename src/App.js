@@ -795,6 +795,20 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
       else if (campo === "bordador")   match = (o.bordador||"").toLowerCase().includes(q);
       else if (campo === "vendedor")   match = (o.creadoPorNombre||"").toLowerCase().includes(q);
     }
+    const hoy = new Date();
+    hoy.setHours(0,0,0,0);
+    const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
+    if (filtro === "vencidas") return match && etapasActivas.includes(o.etapa) && o.fechaRequerida && new Date(o.fechaRequerida) < hoy;
+    if (filtro === "porVencer") {
+      if (!etapasActivas.includes(o.etapa) || !o.fechaRequerida) return false;
+      const diff = (new Date(o.fechaRequerida) - hoy) / (1000*60*60*24);
+      return match && diff >= 0 && diff <= 3;
+    }
+    if (filtro === "aTiempo") {
+      if (!etapasActivas.includes(o.etapa) || !o.fechaRequerida) return false;
+      const diff = (new Date(o.fechaRequerida) - hoy) / (1000*60*60*24);
+      return match && diff > 3;
+    }
     return match && (filtro === "todas" || o.etapa === filtro);
   });
 
@@ -827,19 +841,26 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
             const diff = (fecha - hoy) / (1000*60*60*24);
             return diff >= 0 && diff <= 3;
           });
-          const aTiempo = activas.length - vencidas.length - porVencer.length;
+          const aTiempo = activas.filter(o => {
+            const fecha = new Date(o.fechaRequerida);
+            const diff = (fecha - hoy) / (1000*60*60*24);
+            return diff > 3;
+          });
           return (
             <>
-              <div style={{background:"#c0392b22",border:"1px solid #c0392b",borderRadius:10,padding:"10px 14px"}}>
+              <div onClick={() => setFiltro(filtro === "vencidas" ? "todas" : "vencidas")}
+                style={{background:filtro==="vencidas"?"#c0392b33":"#c0392b22",border:"2px solid #c0392b",borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>
                 <div style={{fontSize:22,fontWeight:800,color:"#c0392b"}}>{vencidas.length}</div>
                 <div style={{fontSize:11,color:C.muted,marginTop:2}}>🔴 Vencidas</div>
               </div>
-              <div style={{background:"#f5a62322",border:"1px solid #f5a623",borderRadius:10,padding:"10px 14px"}}>
+              <div onClick={() => setFiltro(filtro === "porVencer" ? "todas" : "porVencer")}
+                style={{background:filtro==="porVencer"?"#f5a62333":"#f5a62322",border:"2px solid #f5a623",borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>
                 <div style={{fontSize:22,fontWeight:800,color:"#f5a623"}}>{porVencer.length}</div>
-                <div style={{fontSize:11,color:C.muted,marginTop:2}}>⚠️ Vencen en 3 días</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>⚠️ Vencen pronto 3 días</div>
               </div>
-              <div style={{background:"#4caf7d22",border:"1px solid #4caf7d",borderRadius:10,padding:"10px 14px"}}>
-                <div style={{fontSize:22,fontWeight:800,color:"#4caf7d"}}>{aTiempo}</div>
+              <div onClick={() => setFiltro(filtro === "aTiempo" ? "todas" : "aTiempo")}
+                style={{background:filtro==="aTiempo"?"#4caf7d33":"#4caf7d22",border:"2px solid #4caf7d",borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>
+                <div style={{fontSize:22,fontWeight:800,color:"#4caf7d"}}>{aTiempo.length}</div>
                 <div style={{fontSize:11,color:C.muted,marginTop:2}}>✅ A tiempo</div>
               </div>
             </>

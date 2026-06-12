@@ -1492,7 +1492,48 @@ function Dashboard({ ordenes, onBack }) {
           </div>
         )}
       </div>
-  
+  {/* Cobertura de Control Calidad */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Cobertura de Control Calidad</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {(() => {
+          const entregadas = ordensFiltradas.filter(o => getFechaEtapa(o, "entregada"));
+          if (entregadas.length === 0) return <div style={{color:C.muted,fontSize:13}}>No hay órdenes entregadas en el período.</div>;
+          const conCalidad = entregadas.filter(o => (o.historial||[]).some(h => h.etapa === "calidad"));
+          const sinCalidad = entregadas.filter(o => !(o.historial||[]).some(h => h.etapa === "calidad"));
+          const pct = ((conCalidad.length / entregadas.length) * 100).toFixed(1);
+          return (
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap",marginBottom:16}}>
+                <div>
+                  <div style={{fontSize:48,fontWeight:800,color:parseFloat(pct)>=90?"#4caf7d":parseFloat(pct)>=70?"#f5a623":"#c0392b"}}>{pct}%</div>
+                  <div style={{fontSize:13,color:C.muted}}>de órdenes entregadas pasaron por Control Calidad</div>
+                </div>
+                <div style={{flex:1,minWidth:200}}>
+                  <div style={{background:C.surface,borderRadius:8,height:12,overflow:"hidden"}}>
+                    <div style={{background:parseFloat(pct)>=90?"#4caf7d":parseFloat(pct)>=70?"#f5a623":"#c0392b",height:"100%",width:pct+"%",borderRadius:8,transition:"width .5s"}}/>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:12,color:C.muted}}>
+                    <span>✅ {conCalidad.length} con Control Calidad</span>
+                    <span>⚠️ {sinCalidad.length} sin Control Calidad</span>
+                    <span>Total: {entregadas.length}</span>
+                  </div>
+                </div>
+              </div>
+              {sinCalidad.length > 0 && (
+                <div>
+                  <div style={{fontSize:12,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Órdenes entregadas sin pasar por Control Calidad</div>
+                  {sinCalidad.map(o => (
+                    <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:C.surface,borderRadius:6,marginBottom:4,borderLeft:"3px solid #f5a623"}}>
+                      <span style={{fontWeight:700,color:C.text,fontSize:13}}>#{o.numero} — {o.cliente}</span>
+                      <span style={{fontSize:12,color:"#f5a623",fontWeight:700}}>Bordado → Entregada directamente</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
     {/* Tasa de retrabajo interno */}
       <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Tasa de Retrabajo Interno</div>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>

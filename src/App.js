@@ -987,39 +987,48 @@ useEffect(() => {
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
 
 const cambiarEtapa = id => {
+    // Transiciones permitidas
+    const transicionesPermitidas = {
+      "nueva":     ["bordado", "cancelada"],
+      "bordado":   ["calidad", "cancelada"],
+      "calidad":   ["entregada", "retrabajo", "cancelada"],
+      "entregada": ["retrabajo"],
+      "retrabajo": ["calidad"],
+      "cancelada": ["nueva", "bordado", "calidad"],
+    };
+
+    const permitidas = transicionesPermitidas[form.etapa] || [];
+    if (!permitidas.includes(id)) {
+      const etapaActual = etapaInfo(form.etapa).label;
+      const etapaDestino = etapaInfo(id).label;
+      alert(`❌ No es posible mover la orden de "${etapaActual}" a "${etapaDestino}".\n\nFlujo permitido desde ${etapaActual}:\n${permitidas.map(e => "• " + etapaInfo(e).label).join("\n")}`);
+      return;
+    }
+
     if (id === "cancelada") {
-      if (form.etapa === "calidad" || form.etapa === "entregada") {
-        alert("No se puede cancelar una orden en Control Calidad o Entregada.");
-        return;
-      }
       const mensaje = form.etapa === "bordado"
         ? `⚠️ La orden está EN BORDADO.\n\nVerifica con el encargado de bordado que las prendas NO han sido bordadas antes de continuar.\n\n¿Estás seguro de cancelar?`
         : `¿Estás seguro de mover esta orden a Cancelada?`;
       if (!window.confirm(mensaje)) return;
     }
+
     if (id === "retrabajo") {
-      if (form.etapa !== "entregada") {
-        alert("Solo se puede marcar como Retrabajo una orden que ya fue Entregada.");
-        return;
-      }
-      if (!window.confirm(`⚠️ La orden #${form.numero} fue reportada por el cliente con problemas de calidad.\n\n¿Confirmas que regresa a Retrabajo?`)) return;
+      if (!window.confirm(`⚠️ La orden #${form.numero} fue reportada con problemas de calidad.\n\n¿Confirmas que regresa a Retrabajo?`)) return;
     }
-    if (form.etapa === "retrabajo" && id !== "retrabajo" && id !== "cancelada") {
-      if (id !== "calidad") {
-        alert("Una orden en Retrabajo solo puede avanzar a Control Calidad.");
-        return;
-      }
+
+    if (form.etapa === "retrabajo") {
       if (!window.confirm(`¿Confirmas mover la orden #${form.numero} de Retrabajo a Control Calidad?`)) return;
     }
-    if (form.etapa === "cancelada" && id !== "cancelada") {
+
+    if (form.etapa === "cancelada") {
       if (!window.confirm(`¿Estás seguro de reactivar la orden #${form.numero} que está Cancelada?`)) return;
     }
+
     setForm(p => ({
       ...p, etapa: id,
       historial: [...p.historial, { etapa: id, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(id).label}"` }],
     }));
-  };
-   
+  };   
   const totalPrendas = form.prendas.reduce((s, p) => s + TALLAS.reduce((ts, t) => ts + (parseInt(p.tallas[t]) || 0), 0), 0);
   const TABS = [
     {id:"info",l:"Información"},{id:"viz",l:"Visualización"},
@@ -1453,7 +1462,7 @@ function Dashboard({ ordenes, onBack }) {
             let enCalidad = false;
             for (let i = 0; i < hist.length; i++) {
               if (hist[i].etapa === "calidad") enCalidad = true;
-              if (enCalidad && hist[i].etapa === "bordado") return true;
+              if (enCalidad && hist[i].etapa === "retrabajo") return true;
             }
             return false;
           });

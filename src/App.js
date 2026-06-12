@@ -772,8 +772,8 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
 }
 
 // ── Lista ─────────────────────────────────────────────────────────────────────
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento }) {  
-const [search, setSearch] = useState("");
+function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard }) {
+  const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
 
@@ -1833,7 +1833,6 @@ export default function App() {
   const [vista,    setVista]    = useState("lista");
   const [activa,   setActiva]   = useState(null);
   const importRef = useRef(null);
-  const [semaforo, setSemaforo] = useState("null");
 
   // ── Auth listener ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1881,13 +1880,7 @@ if (usuario) {
     });
     return () => { unsub(); unsubNotifs(); };
   }, [usuario]);
-useEffect(() => {
-    if (!usuario) return;
-    const unsub = onSnapshot(doc(db, "config", "semaforo"), snap => {
-      if (snap.exists()) setSemaforo(snap.data().valor || "verde");
-    });
-    return unsub;
-  }, [usuario]);
+
   const login = async () => {
     setLoginErr("");
     try {
@@ -2135,7 +2128,7 @@ const cancelar = async (id) => {
       </div>
 
       {vista === "lista" && (
-<Lista
+  <Lista
     ordenes={ordenes}
     usuario={usuario}
     rol={rol}
@@ -2146,12 +2139,8 @@ const cancelar = async (id) => {
     puedeCancelar={puedeCancelar}
     onCalendario={() => setVista("calendario")}
     onDashboard={() => setVista("dashboard")}
-    semaforo={semaforo}
-    onSemaforo={async (val) => {
-      await setDoc(doc(db, "config", "semaforo"), { valor: val });
-    }}
-puedeEditarSeguimiento={puedeEditarSeguimiento}
   />
+)}
 {vista === "notificaciones" && (
   <div style={{maxWidth:600,margin:"0 auto",padding:"0 16px 40px"}}>
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>

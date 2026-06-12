@@ -869,7 +869,7 @@ const [search, setSearch] = useState("");
       </div>
 
 {/* Semáforo de carga de trabajo */}
-      {(() => {
+      {semaforo && (() => {
         const SEMAFOROS = [
           { id:"verde",    label:"15 días",  sub:"Con posibilidad de mejorar tiempo",      color:"#4caf7d", bg:"#4caf7d22" },
           { id:"amarillo", label:"15 días",  sub:"Sin posibilidad de reducir tiempo",      color:"#f5c623", bg:"#f5c62322" },
@@ -1866,7 +1866,7 @@ export default function App() {
   const [vista,    setVista]    = useState("lista");
   const [activa,   setActiva]   = useState(null);
   const importRef = useRef(null);
-  const [semaforo, setSemaforo] = useState("verde");
+  const [semaforo, setSemaforo] = useState("null");
 
   // ── Auth listener ─────────────────────────────────────────────────────────
   useEffect(() => {

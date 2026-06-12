@@ -867,7 +867,37 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           );
         })()}
       </div>
-
+{semaforo && (() => {
+        const SEMAFOROS = [
+          { id:"verde",    label:"15 días",  sub:"Con posibilidad de mejorar tiempo",      color:"#4caf7d", bg:"#4caf7d22" },
+          { id:"amarillo", label:"15 días",  sub:"Sin posibilidad de reducir tiempo",      color:"#f5c623", bg:"#f5c62322" },
+          { id:"naranja",  label:"20 días",  sub:"Tiempo de entrega",                      color:"#f5a623", bg:"#f5a62322" },
+          { id:"rojo",     label:"25 días",  sub:"Tiempo de entrega",                      color:"#c0392b", bg:"#c0392b22" },
+          { id:"guinda",   label:"30 días",  sub:"Tiempo de entrega",                      color:"#7b0d1e", bg:"#7b0d1e22" },
+        ];
+        const actual = SEMAFOROS.find(s => s.id === semaforo) || SEMAFOROS[0];
+        return (
+          <div style={{background:actual.bg,border:"2px solid "+actual.color,borderRadius:12,padding:"14px 20px",marginBottom:20}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={{width:20,height:20,borderRadius:"50%",background:actual.color,flexShrink:0}}></div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:800,color:actual.color}}>Tiempo de entrega estimado: {actual.label} naturales</div>
+                <div style={{fontSize:12,color:C.muted}}>{actual.sub}</div>
+              </div>
+              {puedeEditarSeguimiento && (
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {SEMAFOROS.map(s => (
+                    <div key={s.id} onClick={() => onSemaforo(s.id)}
+                      style={{width:22,height:22,borderRadius:"50%",background:s.color,cursor:"pointer",border:semaforo===s.id?"3px solid "+C.text:"3px solid transparent",transition:"all .2s"}}
+                      title={s.label+" — "+s.sub}
+                    ></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <select value={campo} onChange={e => setCampo(e.target.value)}
           style={{background:C.card,border:"1px solid "+C.border,borderRadius:8,color:C.muted,padding:"10px 12px",fontSize:12,outline:"none",cursor:"pointer",flexShrink:0}}>

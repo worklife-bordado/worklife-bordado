@@ -881,7 +881,7 @@ const [search, setSearch] = useState("");
         return (
           <div style={{background:actual.bg,border:"2px solid "+actual.color,borderRadius:12,padding:"14px 20px",marginBottom:20}}>
             <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-              <div style={{width:20,height:20,borderRadius:"50%",background:actual.color,flexShrink:0}}/>
+              <div style={{width:20,height:20,borderRadius:"50%",background:actual.color,flexShrink:0}}></div>
               <div style={{flex:1}}>
                 <div style={{fontSize:15,fontWeight:800,color:actual.color}}>Tiempo de entrega estimado: {actual.label} naturales</div>
                 <div style={{fontSize:12,color:C.muted}}>{actual.sub}</div>

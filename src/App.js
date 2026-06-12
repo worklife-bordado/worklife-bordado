@@ -111,6 +111,7 @@ const ETAPAS = [
   {id:"bordado",   label:"En Bordado",      color:"#5c8fe0"},
   {id:"calidad",   label:"Control Calidad", color:"#f5a623"},
   {id:"entregada", label:"Entregada",       color:"#4caf7d"},
+  {id:"retrabajo", label:"Retrabajo",       color:"#8e44ad"},
   {id:"cancelada", label:"Cancelada",       color:"#c0392b"},
 ];
 const VIEWS = [
@@ -985,7 +986,7 @@ useEffect(() => {
   const addPrenda = () => setForm(p => ({ ...p, prendas: [...p.prendas, emptyPrenda()] }));
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
 
-  const cambiarEtapa = id => {
+const cambiarEtapa = id => {
     if (id === "cancelada") {
       if (form.etapa === "calidad" || form.etapa === "entregada") {
         alert("No se puede cancelar una orden en Control Calidad o Entregada.");
@@ -995,6 +996,20 @@ useEffect(() => {
         ? `⚠️ La orden está EN BORDADO.\n\nVerifica con el encargado de bordado que las prendas NO han sido bordadas antes de continuar.\n\n¿Estás seguro de cancelar?`
         : `¿Estás seguro de mover esta orden a Cancelada?`;
       if (!window.confirm(mensaje)) return;
+    }
+    if (id === "retrabajo") {
+      if (form.etapa !== "entregada") {
+        alert("Solo se puede marcar como Retrabajo una orden que ya fue Entregada.");
+        return;
+      }
+      if (!window.confirm(`⚠️ La orden #${form.numero} fue reportada por el cliente con problemas de calidad.\n\n¿Confirmas que regresa a Retrabajo?`)) return;
+    }
+    if (form.etapa === "retrabajo" && id !== "retrabajo" && id !== "cancelada") {
+      if (id !== "calidad") {
+        alert("Una orden en Retrabajo solo puede avanzar a Control Calidad.");
+        return;
+      }
+      if (!window.confirm(`¿Confirmas mover la orden #${form.numero} de Retrabajo a Control Calidad?`)) return;
     }
     if (form.etapa === "cancelada" && id !== "cancelada") {
       if (!window.confirm(`¿Estás seguro de reactivar la orden #${form.numero} que está Cancelada?`)) return;
@@ -1427,8 +1442,8 @@ function Dashboard({ ordenes, onBack }) {
         )}
       </div>
   
-      {/* Tasa de retrabajo */}
-      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Tasa de Retrabajo</div>
+    {/* Tasa de retrabajo interno */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Tasa de Retrabajo Interno</div>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
         {(() => {
           const conHistorial = ordensFiltradas.filter(o => (o.historial||[]).length > 0);
@@ -1447,7 +1462,7 @@ function Dashboard({ ordenes, onBack }) {
             <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
               <div>
                 <div style={{fontSize:48,fontWeight:800,color:parseFloat(pct)<=10?"#4caf7d":parseFloat(pct)<=30?"#f5a623":"#c0392b"}}>{pct}%</div>
-                <div style={{fontSize:13,color:C.muted}}>de órdenes regresaron de Calidad a Bordado</div>
+                <div style={{fontSize:13,color:C.muted}}>de órdenes regresaron de Calidad a Bordado (detección interna)</div>
               </div>
               <div style={{flex:1,minWidth:200}}>
                 <div style={{background:C.surface,borderRadius:8,height:12,overflow:"hidden"}}>
@@ -1457,6 +1472,37 @@ function Dashboard({ ordenes, onBack }) {
                   <span>⚠️ {conRetrabajo.length} con retrabajo</span>
                   <span>✅ {conHistorial.length - conRetrabajo.length} sin retrabajo</span>
                   <span>Total: {conHistorial.length}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Retrabajo por cliente */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Retrabajo Reportado por Cliente</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {(() => {
+          const entregadas = ordensFiltradas.filter(o => (o.historial||[]).some(h => h.etapa === "entregada"));
+          if (entregadas.length === 0) return <div style={{color:C.muted,fontSize:13}}>No hay órdenes entregadas en el período.</div>;
+          const conRetrabajoCliente = entregadas.filter(o =>
+            (o.historial||[]).some(h => h.etapa === "retrabajo")
+          );
+          const pct = ((conRetrabajoCliente.length / entregadas.length) * 100).toFixed(1);
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:48,fontWeight:800,color:parseFloat(pct)===0?"#4caf7d":parseFloat(pct)<=5?"#f5a623":"#c0392b"}}>{pct}%</div>
+                <div style={{fontSize:13,color:C.muted}}>de órdenes entregadas regresaron por reporte del cliente</div>
+              </div>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{background:C.surface,borderRadius:8,height:12,overflow:"hidden"}}>
+                  <div style={{background:parseFloat(pct)===0?"#4caf7d":parseFloat(pct)<=5?"#f5a623":"#c0392b",height:"100%",width:Math.min(parseFloat(pct)*5,100)+"%",borderRadius:8,transition:"width .5s"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:12,color:C.muted}}>
+                  <span>🔴 {conRetrabajoCliente.length} reportadas por cliente</span>
+                  <span>✅ {entregadas.length - conRetrabajoCliente.length} sin reporte</span>
+                  <span>Total entregadas: {entregadas.length}</span>
                 </div>
               </div>
             </div>

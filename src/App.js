@@ -1518,6 +1518,81 @@ function Dashboard({ ordenes, onBack }) {
           );
         })()}
       </div>
+{/* Órdenes vencidas */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Operación - Órdenes Vencidas</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {(() => {
+          const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
+          const activas = ordenes.filter(o => etapasActivas.includes(o.etapa) && o.fechaRequerida);
+          if (activas.length === 0) return <div style={{color:C.muted,fontSize:13}}>No hay órdenes activas con fecha requerida.</div>;
+          const hoy = new Date();
+          hoy.setHours(0,0,0,0);
+          const vencidas = activas.filter(o => new Date(o.fechaRequerida) < hoy);
+          const porVencer = activas.filter(o => {
+            const fecha = new Date(o.fechaRequerida);
+            const diff = (fecha - hoy) / (1000*60*60*24);
+            return diff >= 0 && diff <= 3;
+          });
+          return (
+            <div>
+              <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:16}}>
+                <div style={{background:"#c0392b22",border:"1px solid #c0392b",borderRadius:8,padding:"12px 20px",flex:1,minWidth:140}}>
+                  <div style={{fontSize:32,fontWeight:800,color:"#c0392b"}}>{vencidas.length}</div>
+                  <div style={{fontSize:12,color:C.muted}}>🔴 Vencidas</div>
+                </div>
+                <div style={{background:"#f5a62322",border:"1px solid #f5a623",borderRadius:8,padding:"12px 20px",flex:1,minWidth:140}}>
+                  <div style={{fontSize:32,fontWeight:800,color:"#f5a623"}}>{porVencer.length}</div>
+                  <div style={{fontSize:12,color:C.muted}}>⚠️ Vencen en 3 días</div>
+                </div>
+                <div style={{background:"#4caf7d22",border:"1px solid #4caf7d",borderRadius:8,padding:"12px 20px",flex:1,minWidth:140}}>
+                  <div style={{fontSize:32,fontWeight:800,color:"#4caf7d"}}>{activas.length - vencidas.length - porVencer.length}</div>
+                  <div style={{fontSize:12,color:C.muted}}>✅ A tiempo</div>
+                </div>
+              </div>
+              {vencidas.length > 0 && (
+                <div>
+                  <div style={{fontSize:12,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Detalle órdenes vencidas</div>
+                  {vencidas.sort((a,b) => new Date(a.fechaRequerida)-new Date(b.fechaRequerida)).map(o => {
+                    const dias = Math.floor((hoy - new Date(o.fechaRequerida)) / (1000*60*60*24));
+                    return (
+                      <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:C.surface,borderRadius:6,marginBottom:4,borderLeft:"3px solid #c0392b"}}>
+                        <span style={{fontWeight:700,color:C.text,fontSize:13}}>#{o.numero} — {o.cliente}</span>
+                        <span style={{fontSize:12,color:"#c0392b",fontWeight:700}}>{etapaInfo(o.etapa).label} · {dias} día{dias!==1?"s":""} vencida</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Carga de trabajo actual */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Operación - Carga de Trabajo Actual</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {(() => {
+          const total = ordenes.filter(o => o.etapa !== "cancelada").length;
+          return (
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              {ETAPAS.filter(e => e.id !== "cancelada").map(e => {
+                const count = ordenes.filter(o => o.etapa === e.id).length;
+                const pct = total > 0 ? ((count/total)*100).toFixed(0) : 0;
+                return (
+                  <div key={e.id} style={{background:e.color+"22",border:"1px solid "+e.color,borderRadius:8,padding:"12px 20px",flex:1,minWidth:120}}>
+                    <div style={{fontSize:32,fontWeight:800,color:e.color}}>{count}</div>
+                    <div style={{fontSize:12,color:C.muted,marginBottom:4}}>{e.label}</div>
+                    <div style={{background:C.surface,borderRadius:4,height:6,overflow:"hidden"}}>
+                      <div style={{background:e.color,height:"100%",width:pct+"%",borderRadius:4}}/>
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:4}}>{pct}% del total</div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
     </div>
   );
 }

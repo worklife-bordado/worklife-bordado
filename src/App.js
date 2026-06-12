@@ -1426,6 +1426,43 @@ function Dashboard({ ordenes, onBack }) {
           </div>
         )}
       </div>
+  
+      {/* Tasa de retrabajo */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Tasa de Retrabajo</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {(() => {
+          const conHistorial = ordensFiltradas.filter(o => (o.historial||[]).length > 0);
+          if (conHistorial.length === 0) return <div style={{color:C.muted,fontSize:13}}>No hay órdenes con historial en el período.</div>;
+          const conRetrabajo = conHistorial.filter(o => {
+            const hist = o.historial || [];
+            let enCalidad = false;
+            for (let i = 0; i < hist.length; i++) {
+              if (hist[i].etapa === "calidad") enCalidad = true;
+              if (enCalidad && hist[i].etapa === "bordado") return true;
+            }
+            return false;
+          });
+          const pct = ((conRetrabajo.length / conHistorial.length) * 100).toFixed(1);
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:48,fontWeight:800,color:parseFloat(pct)<=10?"#4caf7d":parseFloat(pct)<=30?"#f5a623":"#c0392b"}}>{pct}%</div>
+                <div style={{fontSize:13,color:C.muted}}>de órdenes regresaron de Calidad a Bordado</div>
+              </div>
+              <div style={{flex:1,minWidth:200}}>
+                <div style={{background:C.surface,borderRadius:8,height:12,overflow:"hidden"}}>
+                  <div style={{background:parseFloat(pct)<=10?"#4caf7d":parseFloat(pct)<=30?"#f5a623":"#c0392b",height:"100%",width:pct+"%",borderRadius:8,transition:"width .5s"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:12,color:C.muted}}>
+                  <span>⚠️ {conRetrabajo.length} con retrabajo</span>
+                  <span>✅ {conHistorial.length - conRetrabajo.length} sin retrabajo</span>
+                  <span>Total: {conHistorial.length}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
     </div>
   );
 }

@@ -1377,6 +1377,7 @@ function Dashboard({ ordenes, onBack }) {
   const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
   const [desde, setDesde] = useState(primerDiaMes.toISOString().slice(0, 10));
   const [hasta, setHasta] = useState(hoy.toISOString().slice(0, 10));
+  const [verSinCalidad, setVerSinCalidad] = useState(false);
 
  const getFechaEtapa = (orden, etapa) => {
     const entrada = (orden.historial||[]).find(h => h.etapa === etapa);
@@ -1521,8 +1522,12 @@ function Dashboard({ ordenes, onBack }) {
               </div>
               {sinCalidad.length > 0 && (
                 <div>
-                  <div style={{fontSize:12,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Órdenes entregadas sin pasar por Control Calidad</div>
-                  {sinCalidad.map(o => (
+                  <div onClick={() => setVerSinCalidad(!verSinCalidad)}
+                    style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:C.surface,borderRadius:6,cursor:"pointer",marginBottom:4}}>
+                    <span style={{fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>Órdenes sin Control Calidad ({sinCalidad.length})</span>
+                    <span style={{fontSize:12,color:C.accent}}>{verSinCalidad ? "▲ Ocultar" : "▼ Ver detalle"}</span>
+                  </div>
+                  {verSinCalidad && sinCalidad.map(o => (
                     <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:C.surface,borderRadius:6,marginBottom:4,borderLeft:"3px solid #f5a623"}}>
                       <span style={{fontWeight:700,color:C.text,fontSize:13}}>#{o.numero} — {o.cliente}</span>
                       <span style={{fontSize:12,color:"#f5a623",fontWeight:700}}>Bordado → Entregada directamente</span>

@@ -1033,7 +1033,7 @@ const cambiarEtapa = id => {
     // Transiciones permitidas
     const transicionesPermitidas = {
       "nueva":     ["bordado", "cancelada"],
-      "bordado":   ["calidad", "cancelada"],
+      "bordado":   ["calidad", "entregada", "cancelada"],
       "calidad":   ["entregada", "retrabajo", "cancelada"],
       "entregada": ["retrabajo"],
       "retrabajo": ["calidad"],
@@ -1054,7 +1054,9 @@ const cambiarEtapa = id => {
         : `¿Estás seguro de mover esta orden a Cancelada?`;
       if (!window.confirm(mensaje)) return;
     }
-
+if (id === "entregada" && form.etapa === "bordado") {
+      if (!window.confirm(`⚠️ ATENCIÓN: Estás entregando la orden #${form.numero} sin pasar por Control Calidad.\n\n¿Estás seguro de saltarte la revisión de calidad?`)) return;
+    }
     if (id === "retrabajo") {
       if (!window.confirm(`⚠️ La orden #${form.numero} fue reportada con problemas de calidad.\n\n¿Confirmas que regresa a Retrabajo?`)) return;
     }

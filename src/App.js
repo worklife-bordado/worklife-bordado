@@ -771,7 +771,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
 }
 
 // ── Lista ─────────────────────────────────────────────────────────────────────
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario }) {
+function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard }) {
   const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
@@ -810,6 +810,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
         <div style={{display:"flex",gap:8}}>
   {onCreate && <Btn onClick={onCreate} size="lg">+ Nueva Orden</Btn>}
   <Btn onClick={onCalendario} variant="ghost" size="lg">📅 Calendario</Btn>
+  <Btn onClick={onDashboard} variant="ghost" size="lg">📊 Indicadores</Btn>
 </div>
       </div>
 
@@ -1303,6 +1304,131 @@ await setDoc(doc(db, "solicitudesFirma", token), {
     </>
   );
 }
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ ordenes, onBack }) {
+  const hoy = new Date();
+  const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  const [desde, setDesde] = useState(primerDiaMes.toISOString().slice(0, 10));
+  const [hasta, setHasta] = useState(hoy.toISOString().slice(0, 10));
+
+  const getFechaEtapa = (orden, etapa) => {
+    const entrada = [...(orden.historial||[])].reverse().find(h => h.etapa === etapa);
+    return entrada ? new Date(entrada.fecha) : null;
+  };
+
+  const ordensFiltradas = ordenes.filter(o => {
+    const fechaCreacion = new Date(o.fecha);
+    return fechaCreacion >= new Date(desde) && fechaCreacion <= new Date(hasta + "T23:59:59");
+  });
+
+  const calcPromedio = (etapaInicio, etapaFin) => {
+    const tiempos = ordensFiltradas.map(o => {
+      const inicio = etapaInicio === "nueva" ? new Date(o.fecha) : getFechaEtapa(o, etapaInicio);
+      const fin = getFechaEtapa(o, etapaFin);
+      if (!inicio || !fin) return null;
+      const dias = (fin - inicio) / (1000 * 60 * 60 * 24);
+      return dias >= 0 ? dias : null;
+    }).filter(d => d !== null);
+    if (tiempos.length === 0) return null;
+    return (tiempos.reduce((a, b) => a + b, 0) / tiempos.length).toFixed(1);
+  };
+
+  const calcEntregasATiempo = () => {
+    const conFecha = ordensFiltradas.filter(o => o.fechaRequerida);
+    if (conFecha.length === 0) return null;
+    const aTiempo = conFecha.filter(o => {
+      const entradaCalidad = getFechaEtapa(o, "calidad");
+      if (!entradaCalidad) return false;
+      return entradaCalidad <= new Date(o.fechaRequerida + "T23:59:59");
+    });
+    return { pct: ((aTiempo.length / conFecha.length) * 100).toFixed(1), total: conFecha.length, aTiempo: aTiempo.length };
+  };
+
+  const p1 = calcPromedio("nueva", "bordado");
+  const p2 = calcPromedio("bordado", "calidad");
+  const p3 = calcPromedio("calidad", "entregada");
+  const entregas = calcEntregasATiempo();
+
+  const Tarjeta = ({ titulo, valor, subtitulo, color }) => (
+    <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"20px 24px",flex:1,minWidth:200}}>
+      <div style={{fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>{titulo}</div>
+      <div style={{fontSize:32,fontWeight:800,color:color||C.accent}}>{valor ?? "—"}</div>
+      {subtitulo && <div style={{fontSize:12,color:C.muted,marginTop:4}}>{subtitulo}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
+        <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
+        <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>📊 Indicadores</div>
+      </div>
+
+      {/* Selector de fechas */}
+      <div style={{display:"flex",gap:12,marginBottom:28,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>Desde</label>
+          <input type="date" value={desde} onChange={e => setDesde(e.target.value)}
+            style={{background:C.surface,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontSize:13}}/>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          <label style={{fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>Hasta</label>
+          <input type="date" value={hasta} onChange={e => setHasta(e.target.value)}
+            style={{background:C.surface,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontSize:13}}/>
+        </div>
+        <div style={{fontSize:13,color:C.muted,marginTop:16}}>{ordensFiltradas.length} órdenes en el período</div>
+      </div>
+
+      {/* Tiempos promedio */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Tiempos Promedio</div>
+      <div style={{display:"flex",gap:12,marginBottom:28,flexWrap:"wrap"}}>
+        <Tarjeta
+          titulo="Nueva → En Bordado"
+          valor={p1 ? `${p1} días` : "—"}
+          subtitulo="Tiempo de preparación"
+          color="#5c8fe0"
+        />
+        <Tarjeta
+          titulo="En Bordado → Control Calidad"
+          valor={p2 ? `${p2} días` : "—"}
+          subtitulo="Tiempo de bordado"
+          color="#f5a623"
+        />
+        <Tarjeta
+          titulo="Control Calidad → Entregada"
+          valor={p3 ? `${p3} días` : "—"}
+          subtitulo="Tiempo de calidad y entrega"
+          color="#4caf7d"
+        />
+      </div>
+
+      {/* Entregas a tiempo */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Cumplimiento de Fecha Requerida</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {entregas === null ? (
+          <div style={{color:C.muted,fontSize:13}}>No hay órdenes con fecha requerida en el período.</div>
+        ) : (
+          <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:48,fontWeight:800,color:parseFloat(entregas.pct)>=80?"#4caf7d":parseFloat(entregas.pct)>=50?"#f5a623":"#c0392b"}}>{entregas.pct}%</div>
+              <div style={{fontSize:13,color:C.muted}}>órdenes que entraron a Control Calidad a tiempo</div>
+            </div>
+            <div style={{flex:1,minWidth:200}}>
+              <div style={{background:C.surface,borderRadius:8,height:12,overflow:"hidden"}}>
+                <div style={{background:parseFloat(entregas.pct)>=80?"#4caf7d":parseFloat(entregas.pct)>=50?"#f5a623":"#c0392b",height:"100%",width:entregas.pct+"%",borderRadius:8,transition:"width .5s"}}/>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:12,color:C.muted}}>
+                <span>✅ {entregas.aTiempo} a tiempo</span>
+                <span>❌ {entregas.total - entregas.aTiempo} tarde</span>
+                <span>Total: {entregas.total}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 // ── Calendario ────────────────────────────────────────────────────────────────
 function Calendario({ ordenes, onBack, onSelect }) {
   const hoy = new Date();
@@ -1755,6 +1881,7 @@ const cancelar = async (id) => {
     onCancelarReactivar={cancelarReactivar}
     puedeCancelar={puedeCancelar}
     onCalendario={() => setVista("calendario")}
+    onDashboard={() => setVista("dashboard")}
   />
 )}
 {vista === "notificaciones" && (
@@ -1786,6 +1913,12 @@ const cancelar = async (id) => {
       ))
     )}
   </div>
+)}
+{vista === "dashboard" && (
+  <Dashboard
+    ordenes={ordenes.filter(o => o.etapa !== "cancelada")}
+    onBack={() => setVista("lista")}
+  />
 )}
 {vista === "calendario" && (
   <Calendario

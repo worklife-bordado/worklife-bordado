@@ -774,11 +774,11 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
 // ── Lista ─────────────────────────────────────────────────────────────────────
 function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
   const SEMAFOROS = [
-    { id:"verde",    label:"15 días",  sub:"Con posibilidad de mejorar tiempo",  color:"#4caf7d", bg:"#4caf7d22" },
-    { id:"amarillo", label:"15 días",  sub:"Sin posibilidad de reducir tiempo",  color:"#f5c623", bg:"#f5c62322" },
-    { id:"naranja",  label:"20 días",  sub:"Tiempo de entrega",                  color:"#f5a623", bg:"#f5a62322" },
-    { id:"rojo",     label:"25 días",  sub:"Tiempo de entrega",                  color:"#c0392b", bg:"#c0392b22" },
-    { id:"guinda",   label:"30 días",  sub:"Tiempo de entrega",                  color:"#7b0d1e", bg:"#7b0d1e22" },
+    { id:"verde",    label:"10 días",  sub:"Tiempo de entrega",  color:"#4caf7d", bg:"#4caf7d22" },
+    { id:"amarillo", label:"15 días",  sub:"Tiempo de entrega",  color:"#f5c623", bg:"#f5c62322" },
+    { id:"naranja",  label:"20 días",  sub:"Tiempo de entrega",  color:"#f5a623", bg:"#f5a62322" },
+    { id:"rojo",     label:"25 días",  sub:"Tiempo de entrega",  color:"#c0392b", bg:"#c0392b22" },
+    { id:"guinda",   label:"30 días",  sub:"Tiempo de entrega",  color:"#7b0d1e", bg:"#7b0d1e22" },
   ];
   const actual = SEMAFOROS.find(s => s.id === semaforo) || SEMAFOROS[0];
   return (

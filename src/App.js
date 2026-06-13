@@ -1455,9 +1455,9 @@ function Dashboard({ ordenes, onBack }) {
   };
 
 const ordensFiltradas = ordenes.filter(o => {
-  const fechaCreacion = new Date(o.fecha);
-  return fechaCreacion >= new Date(desde) && fechaCreacion <= new Date(hasta + "T23:59:59");
-});  
+  const fecha = o.fecha ? o.fecha.slice(0, 10) : "";
+  return fecha >= desde && fecha <= hasta;
+});
 const calcPromedio = (etapaInicio, etapaFin) => {
     const tiempos = ordensFiltradas.map(o => {
       const inicio = etapaInicio === "nueva" ? new Date(o.fecha) : getFechaEtapa(o, etapaInicio);

@@ -863,9 +863,18 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           <div style={{color:C.muted,fontSize:13}}>{ordenes.length} órdenes en total</div>
         </div>
         <div style={{display:"flex",gap:8}}>
-  {onCreate && <Btn onClick={onCreate} size="lg">+ Nueva Orden</Btn>}
-  <Btn onClick={onCalendario} variant="ghost" size="lg">📅 Calendario</Btn>
-  <Btn onClick={onDashboard} variant="ghost" size="lg">📊 Indicadores</Btn>
+ {onCreate && <Btn onClick={onCreate} size="lg">
+  <span style={{display: window.innerWidth < 480 ? "none" : "inline"}}>+ Nueva Orden</span>
+  <span style={{display: window.innerWidth < 480 ? "inline" : "none"}}>🆕</span>
+</Btn>}
+<Btn onClick={onCalendario} variant="ghost" size="lg">
+  <span style={{display: window.innerWidth < 480 ? "none" : "inline"}}>📅 Calendario</span>
+  <span style={{display: window.innerWidth < 480 ? "inline" : "none"}}>📅</span>
+</Btn>
+<Btn onClick={onDashboard} variant="ghost" size="lg">
+  <span style={{display: window.innerWidth < 480 ? "none" : "inline"}}>📊 Indicadores</span>
+  <span style={{display: window.innerWidth < 480 ? "inline" : "none"}}>📊</span>
+</Btn>
 </div>
       </div>
 

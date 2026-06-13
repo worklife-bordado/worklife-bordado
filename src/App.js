@@ -1482,16 +1482,22 @@ const calcPromedio = (etapaInicio, etapaFin) => {
 
   const p1 = calcPromedio("nueva", "bordado");
   const p2 = (() => {
-    const tiempos = ordensFiltradas.map(o => {
-      const inicio = getFechaEtapa(o, "bordado");
-      const fin = getFechaEtapa(o, "calidad") || getFechaEtapa(o, "entregada");
-      if (!inicio || !fin) return null;
-      const dias = (fin - inicio) / (1000 * 60 * 60 * 24);
-      return dias >= 0 ? dias : null;
-    }).filter(d => d !== null);
-    if (tiempos.length === 0) return null;
-    return (tiempos.reduce((a, b) => a + b, 0) / tiempos.length).toFixed(1);
-  })();
+  const tiempos = ordensFiltradas.map(o => {
+    const hist = o.historial || [];
+    const inicioBordado = hist.find(h => h.etapa === "bordado");
+    if (!inicioBordado) return null;
+    const fechaInicio = new Date(inicioBordado.fecha);
+    const salida = hist.find(h =>
+      (h.etapa === "calidad" || h.etapa === "entregada") &&
+      new Date(h.fecha) > fechaInicio
+    );
+    if (!salida) return null;
+    const dias = (new Date(salida.fecha) - fechaInicio) / (1000 * 60 * 60 * 24);
+    return dias >= 0 ? dias : null;
+  }).filter(d => d !== null);
+  if (tiempos.length === 0) return null;
+  return (tiempos.reduce((a, b) => a + b, 0) / tiempos.length).toFixed(1);
+})();
   const p3 = calcPromedio("calidad", "entregada");
   const entregas = calcEntregasATiempo();
 

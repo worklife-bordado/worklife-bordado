@@ -803,7 +803,7 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
     </div>
   );
 }
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard }) {
+function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento }) {
   const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
@@ -898,6 +898,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           );
         })()}
       </div>
+      <Semaforo semaforo={semaforo} onSemaforo={onSemaforo} puedeEditar={puedeEditarSeguimiento} />
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <select value={campo} onChange={e => setCampo(e.target.value)}
           style={{background:C.card,border:"1px solid "+C.border,borderRadius:8,color:C.muted,padding:"10px 12px",fontSize:12,outline:"none",cursor:"pointer",flexShrink:0}}>
@@ -1862,6 +1863,7 @@ export default function App() {
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("lista");
   const [activa,   setActiva]   = useState(null);
+  const [semaforo, setSemaforo] = useState("verde");
   const importRef = useRef(null);
 
   // ── Auth listener ─────────────────────────────────────────────────────────
@@ -1910,6 +1912,14 @@ if (usuario) {
     });
     return () => { unsub(); unsubNotifs(); };
   }, [usuario]);
+
+  // ── Semáforo de carga de trabajo ──────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "config", "semaforo"), snap => {
+      if (snap.exists()) setSemaforo(snap.data().valor || "verde");
+    });
+    return unsub;
+  }, []);
 
   const login = async () => {
     setLoginErr("");
@@ -2169,6 +2179,9 @@ const cancelar = async (id) => {
     puedeCancelar={puedeCancelar}
     onCalendario={() => setVista("calendario")}
     onDashboard={() => setVista("dashboard")}
+    semaforo={semaforo}
+    onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }}
+    puedeEditarSeguimiento={puedeEditarSeguimiento}
   />
 )}
 {vista === "notificaciones" && (

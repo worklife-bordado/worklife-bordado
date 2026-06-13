@@ -1454,11 +1454,14 @@ function Dashboard({ ordenes, onBack }) {
     return entrada ? new Date(entrada.fecha) : null;
   };
 
-  const ordensFiltradas = ordenes.filter(o => {
-    const fechaCreacion = new Date(o.fecha);
-    return fechaCreacion >= new Date(desde) && fechaCreacion <= new Date(hasta + "T23:59:59");
-  });
-
+const ordensFiltradas = ordenes.filter(o => {
+  const fechaCreacion = new Date(o.fecha);
+  const fechaEntrega = getFechaEtapa(o, "entregada");
+  const inicio = new Date(desde);
+  const fin = new Date(hasta + "T23:59:59");
+  return (fechaCreacion >= inicio && fechaCreacion <= fin) ||
+         (fechaEntrega && fechaEntrega >= inicio && fechaEntrega <= fin);
+});
   const calcPromedio = (etapaInicio, etapaFin) => {
     const tiempos = ordensFiltradas.map(o => {
       const inicio = etapaInicio === "nueva" ? new Date(o.fecha) : getFechaEtapa(o, etapaInicio);

@@ -1483,6 +1483,7 @@ const calcPromedio = (etapaInicio, etapaFin) => {
   const p1 = calcPromedio("nueva", "bordado");
   const p2 = (() => {
   const tiempos = ordensFiltradas.map(o => {
+    if (!getFechaEtapa(o, "entregada")) return null; // excluir en proceso
     const hist = o.historial || [];
     const inicioBordado = hist.find(h => h.etapa === "bordado");
     if (!inicioBordado) return null;

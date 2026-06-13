@@ -807,6 +807,15 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
   const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
+  const [recordatorioSemaforo, setRecordatorioSemaforo] = useState(false);
+
+  useEffect(() => {
+    if (rol !== "seguimiento") return;
+    const hoy = new Date();
+    if (hoy.getDay() === 1) {
+      setRecordatorioSemaforo(true);
+    }
+  }, [rol]);
 
   const filtradas = ordenes.filter(o => {
     const q = search.toLowerCase().trim();
@@ -899,6 +908,25 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
         })()}
       </div>
       <Semaforo semaforo={semaforo} onSemaforo={onSemaforo} puedeEditar={puedeEditarSeguimiento} />
+{recordatorioSemaforo && (
+  <div style={{
+    background: "#f5c62322",
+    border: "2px solid #f5c623",
+    borderRadius: 10,
+    padding: "12px 16px",
+    marginBottom: 14,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12
+  }}>
+    <div style={{fontSize: 13, color: C.text}}>
+      🗓️ <strong>Recordatorio:</strong> Es lunes — recuerda actualizar el semáforo de carga de trabajo.
+    </div>
+    <div onClick={() => setRecordatorioSemaforo(false)}
+      style={{cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1}}>✕</div>
+  </div>
+)}
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <select value={campo} onChange={e => setCampo(e.target.value)}
           style={{background:C.card,border:"1px solid "+C.border,borderRadius:8,color:C.muted,padding:"10px 12px",fontSize:12,outline:"none",cursor:"pointer",flexShrink:0}}>

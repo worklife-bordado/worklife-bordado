@@ -867,8 +867,8 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           );
         })()}
       </div>
-{semaforo && (() => {
-        const SEMAFOROS = [
+{(() => {        
+const SEMAFOROS = [
           { id:"verde",    label:"15 días",  sub:"Con posibilidad de mejorar tiempo",      color:"#4caf7d", bg:"#4caf7d22" },
           { id:"amarillo", label:"15 días",  sub:"Sin posibilidad de reducir tiempo",      color:"#f5c623", bg:"#f5c62322" },
           { id:"naranja",  label:"20 días",  sub:"Tiempo de entrega",                      color:"#f5a623", bg:"#f5a62322" },

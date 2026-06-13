@@ -1455,8 +1455,11 @@ function Dashboard({ ordenes, onBack }) {
   };
 
 const ordensFiltradas = ordenes.filter(o => {
-  const fecha = o.fecha ? o.fecha.slice(0, 10) : "";
-  return fecha >= desde && fecha <= hasta;
+  const fechaCreacion = o.fecha ? o.fecha.slice(0, 10) : "";
+  const fechaEntrega = getFechaEtapa(o, "entregada");
+  const fechaEntregaStr = fechaEntrega ? fechaEntrega.toISOString().slice(0, 10) : "";
+  return (fechaCreacion >= desde && fechaCreacion <= hasta) ||
+         (fechaEntregaStr >= desde && fechaEntregaStr <= hasta);
 });
 const calcPromedio = (etapaInicio, etapaFin) => {
     const tiempos = ordensFiltradas.map(o => {

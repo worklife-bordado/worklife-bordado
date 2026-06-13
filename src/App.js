@@ -1482,7 +1482,17 @@ function Dashboard({ ordenes, onBack }) {
   };
 
   const p1 = calcPromedio("nueva", "bordado");
-  const p2 = calcPromedio("bordado", "calidad");
+  const p2 = (() => {
+    const tiempos = ordensFiltradas.map(o => {
+      const inicio = getFechaEtapa(o, "bordado");
+      const fin = getFechaEtapa(o, "calidad") || getFechaEtapa(o, "entregada");
+      if (!inicio || !fin) return null;
+      const dias = (fin - inicio) / (1000 * 60 * 60 * 24);
+      return dias >= 0 ? dias : null;
+    }).filter(d => d !== null);
+    if (tiempos.length === 0) return null;
+    return (tiempos.reduce((a, b) => a + b, 0) / tiempos.length).toFixed(1);
+  })();
   const p3 = calcPromedio("calidad", "entregada");
   const entregas = calcEntregasATiempo();
 

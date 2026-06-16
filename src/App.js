@@ -1224,15 +1224,17 @@ await setDoc(doc(db, "solicitudesFirma", token), {
   </div>
 )}
    <div style={{maxWidth:960,margin:"0 auto",padding:"0 8px 40px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
         <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
-        <div style={{flex:1}}>
+        <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:18,fontWeight:800,color:C.text}}>
             Orden #{form.numero} <span style={{marginLeft:8}}><Badge etapa={form.etapa}/></span>
           {form.creadoPorNombre && <span style={{marginLeft:12,fontSize:12,color:C.muted,fontWeight:400}}>👤 {form.creadoPorNombre}</span>}
           </div>
           <div style={{fontSize:12,color:C.muted}}>{form.cliente||"Sin cliente"}</div>
         </div>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
         <Btn onClick={async () => { console.log("POSICIONES FORM:", JSON.stringify(form.posiciones)); await onSave(form); await new Promise(r => setTimeout(r, 500)); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
                      <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } setSolicitarFirmaModal(true); }} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
         <Btn onClick={async () => {

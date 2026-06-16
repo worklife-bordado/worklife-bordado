@@ -156,6 +156,7 @@ function emptyOrden(ordenes) {
   POSICIONES.forEach(p => pos[p.key] = emptyPosicion());
   return {
     id: Date.now(),
+    seguimientoToken: genToken(),
     numero: nextNumero(ordenes),
     cliente: "",
     fecha: new Date().toISOString().slice(0,10),
@@ -177,6 +178,23 @@ function fmtDate(iso) {
   return d+"/"+m+"/"+y;
 }
 function etapaInfo(id) { return ETAPAS.find(e => e.id === id) || ETAPAS[0]; }
+
+// ── Seguimiento público para el cliente ─────────────────────────────────────
+function genToken() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+const ETAPAS_CLIENTE = [
+  { id: "recibido",  label: "Pedido recibido" },
+  { id: "bordado",   label: "En bordado" },
+  { id: "calidad",   label: "Control de calidad" },
+  { id: "entregado", label: "Entregado" },
+];
+function etapaCliente(etapa) {
+  if (etapa === "cancelada") return { idx: -1, estado: "cancelado" };
+  if (etapa === "retrabajo") return { idx: 1, estado: "revision" };
+  const map = { nueva: 0, bordado: 1, calidad: 2, entregada: 3 };
+  return { idx: map[etapa] ?? 0, estado: "normal" };
+}
 
 // ── PDF print — replicates exact WORK-LIFE Autorización de Trabajo layout ────
 // ── Pre-process logos: render at 2x for crispness ───────────────────────────
@@ -1077,7 +1095,7 @@ useEffect(() => {
   const [solicitarFirmaModal, setSolicitarFirmaModal] = useState(false);
   const [emailCliente, setEmailCliente] = useState("");
   const [linkFirma, setLinkFirma] = useState("");
-  const upd = (f, v) => setForm(p => ({ ...p, [f]: v }));
+  const upd = (f, v) => { if (!puedeEditar) return; setForm(p => ({ ...p, [f]: v })); };
   const updPos = (key, field, val) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], [field]: val } } }));
   const handleLogoUpload = (key, dataUrl) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], logoImg: dataUrl } } }));
   const handleClearLogo = (key) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], logoImg: null } } }));
@@ -1098,6 +1116,7 @@ useEffect(() => {
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
 
 const cambiarEtapa = id => {
+    if (!puedeEditarSeguimiento) { alert("Solo el rol de seguimiento o administración puede cambiar la etapa."); return; }
     // Transiciones permitidas
     const transicionesPermitidas = {
       "nueva":     ["bordado", "cancelada"],
@@ -1215,12 +1234,25 @@ await setDoc(doc(db, "solicitudesFirma", token), {
           <div style={{fontSize:12,color:C.muted}}>{form.cliente||"Sin cliente"}</div>
         </div>
         <Btn onClick={async () => { console.log("POSICIONES FORM:", JSON.stringify(form.posiciones)); await onSave(form); await new Promise(r => setTimeout(r, 500)); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
-                     <Btn onClick={() => setSolicitarFirmaModal(true)} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
-        <Btn onClick={() => onDuplicar(form)} variant="ghost" size="sm">⧉ Duplicar</Btn>
+                     <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } setSolicitarFirmaModal(true); }} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
+        <Btn onClick={async () => {
+          if (!puedeEditar) { alert("Solo ventas o administración pueden enviar el enlace de seguimiento al cliente."); return; }
+          let tk = form.seguimientoToken;
+          if (!tk) { tk = genToken(); upd("seguimientoToken", tk); await onSave({ ...form, seguimientoToken: tk }); }
+          const link = `https://worklife-bordado.vercel.app/?seguimiento=${tk}`;
+          const msg = `Hola, puede dar seguimiento a su orden #${form.numero} de WORK-LIFE en este enlace: ${link}`;
+          window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+        }} variant="ghost" size="sm">📲 Seguimiento</Btn>
+        <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } onDuplicar(form); }} variant="ghost" size="sm">⧉ Duplicar</Btn>
         <Btn onClick={() => validarYGuardar(() => onSave(form))} size="sm">💾 Guardar</Btn>
-        <Btn onClick={() => { onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>
+        <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>
       </div>
 
+      {!puedeEditar && (
+        <div style={{background:C.accentGlow,border:"1px solid "+C.accent,borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:C.accent}}>
+          🔒 Modo solo lectura — solo puedes cambiar la etapa (pestaña Seguimiento) y guardar.
+        </div>
+      )}
       <div style={{display:"flex",gap:4,marginBottom:20,borderBottom:"1px solid "+C.border,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
@@ -1379,7 +1411,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
               style={{width:"100%",background:C.surface,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:13,outline:"none",marginBottom:20,boxSizing:"border-box",opacity:puedeEditarSeguimiento?1:0.5}}
             />
             <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Mover a etapa</div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",opacity:puedeEditarSeguimiento?1:0.5}}>
               {ETAPAS.map(e => (
                 <Btn key={e.id} onClick={() => cambiarEtapa(e.id)} variant="ghost"
                   style={form.etapa === e.id ? {background:e.color,color:"#fff",border:"none"} : {borderColor:e.color+"55",color:e.color}}>
@@ -1889,6 +1921,87 @@ function Calendario({ ordenes, onBack, onSelect }) {
 }
 // ── App ───────────────────────────────────────────────────────────────────────
 // ── Login Screen ─────────────────────────────────────────────────────────────
+function SeguimientoPublico({ token }) {
+  const [data, setData] = useState(undefined); // undefined=cargando, null=no existe
+  useEffect(() => {
+    if (!token) { setData(null); return; }
+    const unsub = onSnapshot(doc(db, "seguimiento", token),
+      snap => setData(snap.exists() ? snap.data() : null),
+      () => setData(null)
+    );
+    return () => unsub();
+  }, [token]);
+
+  const NAVY = "#182B55", ORANGE = "#F7941D", GREY = "#8b90a7";
+  const wrap = { minHeight:"100vh", background:"#0f1117", color:"#e8eaf0", fontFamily:"'Barlow','Segoe UI',sans-serif", display:"flex", flexDirection:"column", alignItems:"center", padding:"32px 16px", boxSizing:"border-box" };
+
+  if (data === undefined) return <div style={{...wrap, justifyContent:"center"}}>Cargando…</div>;
+  if (data === null) return (
+    <div style={{...wrap, justifyContent:"center", textAlign:"center"}}>
+      <div style={{fontSize:48, marginBottom:12}}>🔍</div>
+      <div style={{fontSize:18, fontWeight:800}}>Orden no encontrada</div>
+      <div style={{color:GREY, marginTop:8, fontSize:14}}>Verifica el enlace con tu proveedor WORK-LIFE.</div>
+    </div>
+  );
+
+  const ec = etapaCliente(data.etapa);
+  const fmt = (iso) => { if(!iso) return "Por confirmar"; const [y,m,d]=iso.split("-"); return d+"/"+m+"/"+y; };
+
+  return (
+    <div style={wrap}>
+      <div style={{maxWidth:460, width:"100%"}}>
+        <div style={{textAlign:"center", marginBottom:28}}>
+          <div style={{fontSize:24, fontWeight:900, letterSpacing:2, color:"#fff"}}>WORK·LIFE</div>
+          <div style={{fontSize:12, color:ORANGE, fontStyle:"italic"}}>uniformes que inspiran</div>
+        </div>
+        <div style={{background:"#1a1d27", border:"1px solid #2e3450", borderRadius:14, padding:24}}>
+          <div style={{fontSize:11, color:GREY, textTransform:"uppercase", letterSpacing:1}}>Seguimiento de orden</div>
+          <div style={{fontSize:26, fontWeight:800, marginTop:4}}>#{data.numero||"—"}</div>
+          {data.cliente && <div style={{fontSize:14, color:GREY, marginTop:2}}>{data.cliente}</div>}
+          {data.prenda && <div style={{fontSize:13, color:"#e8eaf0", marginTop:8}}>{data.prenda}</div>}
+
+          {ec.estado === "cancelado" ? (
+            <div style={{marginTop:20, background:"#c0392b22", border:"1px solid #c0392b", color:"#e05c5c", borderRadius:10, padding:"14px 16px", fontWeight:700, textAlign:"center"}}>
+              Esta orden fue cancelada
+            </div>
+          ) : (
+            <div style={{marginTop:24}}>
+              {ETAPAS_CLIENTE.map((pp, i) => {
+                const done = i <= ec.idx;
+                const current = i === ec.idx;
+                return (
+                  <div key={pp.id} style={{display:"flex", alignItems:"center", gap:12, marginBottom: i<ETAPAS_CLIENTE.length-1?18:0, position:"relative"}}>
+                    <div style={{width:26, height:26, borderRadius:"50%", flexShrink:0, background: done?ORANGE:"#2e3450", color: done?"#fff":GREY, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:800, zIndex:1}}>
+                      {done ? "✓" : i+1}
+                    </div>
+                    {i < ETAPAS_CLIENTE.length-1 && (
+                      <div style={{position:"absolute", left:12, top:26, width:2, height:18, background: i<ec.idx?ORANGE:"#2e3450"}}/>
+                    )}
+                    <div style={{fontSize:15, fontWeight: current?800:500, color: done?"#e8eaf0":GREY}}>{pp.label}</div>
+                  </div>
+                );
+              })}
+              {ec.estado === "revision" && (
+                <div style={{marginTop:16, background:"#8e44ad22", border:"1px solid #8e44ad", color:"#c79be0", borderRadius:10, padding:"10px 14px", fontSize:13, textAlign:"center"}}>
+                  En revisión de calidad
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{marginTop:24, paddingTop:16, borderTop:"1px solid #2e3450", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+            <span style={{fontSize:11, color:GREY, textTransform:"uppercase", letterSpacing:1}}>Entrega estimada</span>
+            <span style={{fontSize:16, fontWeight:800, color:ORANGE}}>{fmt(data.fechaRequerida)}</span>
+          </div>
+        </div>
+        <div style={{textAlign:"center", color:GREY, fontSize:11, marginTop:20}}>
+          WORK-LIFE · San Luis Potosí · Esta página se actualiza sola
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin, error }) {
   return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:24}}>
@@ -1911,6 +2024,10 @@ function LoginScreen({ onLogin, error }) {
 
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── Ruta pública de seguimiento (cliente, sin login) ──
+  const _seg = new URLSearchParams(window.location.search).get("seguimiento");
+  if (_seg) return <SeguimientoPublico token={_seg} />;
+
   const [usuario,  setUsuario]  = useState(null);   // Firebase user object
   const [rol,      setRol]      = useState(null);   // "admin" | "ventas" | "seguimiento"
   const [authListo,setAuthListo]= useState(false);  // waiting for Firebase auth check
@@ -2002,21 +2119,42 @@ if (usuario) {
   const puedeCancelar  = (orden) => rol === "admin" || (rol === "ventas" && orden.creadoPor === usuario?.email);
 
   // ── Firestore write helpers ───────────────────────────────────────────────
+  // Refleja el estatus de la orden en la colección pública "seguimiento"
+  const syncSeguimiento = async (orden) => {
+    if (!orden || !orden.seguimientoToken) return;
+    try {
+      await setDoc(doc(db, "seguimiento", orden.seguimientoToken), {
+        numero: orden.numero || "",
+        cliente: orden.cliente || "",
+        prenda: (orden.prendas && orden.prendas[0] && orden.prendas[0].descripcion) || "",
+        etapa: orden.etapa || "nueva",
+        fechaRequerida: orden.fechaRequerida || "",
+        actualizado: serverTimestamp(),
+      });
+    } catch (e) { console.log("syncSeguimiento error:", e); }
+  };
+  // Guarda en "ordenes" y actualiza el seguimiento público
+  const guardarOrden = async (orden) => {
+    if (!orden.seguimientoToken) orden = { ...orden, seguimientoToken: genToken() };
+    await setDoc(doc(db, "ordenes", String(orden.id)), orden);
+    await syncSeguimiento(orden);
+  };
+
   const crear = async () => {
     const n = emptyOrden(ordenes);
     n.creadoPor = usuario.email;
     n.creadoPorNombre = usuario.displayName || usuario.email;
-    await setDoc(doc(db, "ordenes", String(n.id)), n);
+    await guardarOrden(n);
     setActiva(n.id);
     setVista("detalle");
   };
 
   const guardar = async (form) => {
     const anterior = ordenes.find(o => o.id == form.id);
-    await setDoc(doc(db, "ordenes", String(form.id)), form);
+    await guardarOrden(form);
 // Registrar cambios en historial
 if (anterior) {
-  const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre', 'prendas'];
+  const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre', 'prendas', 'seguimientoToken'];
   const cambios = [];
   const camposLegibles = {
     cliente: 'Cliente', etapa: 'Etapa', bordador: 'Bordador',
@@ -2112,7 +2250,7 @@ Object.keys(form).forEach(campo => {
     copia.creadoPor = usuario.email;
     copia.creadoPorNombre = usuario.displayName || usuario.email;
     copia.historial = [{ etapa:"nueva", fecha: new Date().toISOString(), nota: "Duplicada de orden #"+orig.numero+" por "+usuario.email }];
-    await setDoc(doc(db, "ordenes", String(copia.id)), copia);
+    await guardarOrden(copia);
     setActiva(copia.id);
     setVista("detalle");
   };
@@ -2137,7 +2275,7 @@ const cancelar = async (id) => {
         nota: `Cancelada por ${usuario.displayName || usuario.email}`
       }]
     };
-    await setDoc(doc(db, "ordenes", String(actualizada.id)), actualizada);
+    await guardarOrden(actualizada);
     setVista("lista");
   };
 
@@ -2150,7 +2288,7 @@ const cancelar = async (id) => {
       etapa: nueva,
       historial: [...(orden.historial||[]), { etapa: nueva, fecha: new Date().toISOString(), nota }],
     };
-    await setDoc(doc(db, "ordenes", String(orden.id)), actualizado);
+    await guardarOrden(actualizado);
   };
 
   // Export / import (backup)
@@ -2175,7 +2313,7 @@ const cancelar = async (id) => {
         const nuevas = datos.ordenes || datos;
         if (!Array.isArray(nuevas)) { alert("Archivo inválido"); return; }
         for (const o of nuevas) {
-          await setDoc(doc(db, "ordenes", String(o.id)), o);
+          await guardarOrden(o);
         }
         alert("✓ " + nuevas.length + " órdenes importadas correctamente");
       } catch { alert("Error al leer el archivo"); }

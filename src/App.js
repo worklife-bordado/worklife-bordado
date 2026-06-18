@@ -1093,6 +1093,65 @@ useEffect(() => {
     });
     return unsub;
   }, [orden.id]);
+  // ── Chat interno de la orden ──
+  const [mensajes, setMensajes] = useState([]);
+  const [nuevoMsg, setNuevoMsg] = useState("");
+  const [enviandoMsg, setEnviandoMsg] = useState(false);
+  useEffect(() => {
+    if (!orden?.id) return;
+    const qm = query(collection(db, "mensajesChat"), where("ordenId", "==", String(orden.id)));
+    const unsub = onSnapshot(qm, snap => {
+      const arr = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      arr.sort((a, b) => (a.fecha?.seconds || 0) - (b.fecha?.seconds || 0));
+      setMensajes(arr);
+    });
+    return unsub;
+  }, [orden.id]);
+  const enviarMensajeChat = async () => {
+    const texto = nuevoMsg.trim();
+    if (!texto || enviandoMsg) return;
+    setEnviandoMsg(true);
+    try {
+      const nombre = usuario?.displayName || (usuario?.email ? usuario.email.split("@")[0] : "Usuario");
+      await addDoc(collection(db, "mensajesChat"), {
+        ordenId: String(orden.id), ordenNumero: form.numero || "",
+        autor: usuario?.email || "", autorNombre: nombre, rol: rol || "",
+        texto, fecha: serverTimestamp(),
+      });
+      setNuevoMsg("");
+      // ¿A quién se avisa?
+      let dest = [];
+      if (rol === "seguimiento") {
+        if (form.creadoPor) dest = [form.creadoPor];
+      } else {
+        dest = Object.keys(ROLES).filter(e => ROLES[e] === "seguimiento");
+        if (rol === "admin" && form.creadoPor) dest.push(form.creadoPor);
+      }
+      dest = [...new Set(dest)].filter(e => e && e !== usuario?.email);
+      const titulo = `💬 Mensaje en orden #${form.numero}`;
+      const cuerpo = `${nombre}: ${texto.length > 80 ? texto.slice(0, 80) + "…" : texto}`;
+      for (const email of dest) {
+        try {
+          const snap = await getDocs(query(collection(db, "fcmTokens"), where("email", "==", email)));
+          snap.forEach(async d => {
+            const token = d.data().token;
+            if (token) {
+              await fetch("/api/notify", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, titulo, cuerpo }),
+              });
+            }
+          });
+          await addDoc(collection(db, "notificaciones"), { para: email, titulo, cuerpo, leida: false, fecha: serverTimestamp() });
+        } catch (e) { console.log("notif chat error:", e); }
+      }
+    } catch (e) {
+      console.log("enviarMensajeChat error:", e);
+      alert("No se pudo enviar el mensaje. Intenta de nuevo.");
+    } finally {
+      setEnviandoMsg(false);
+    }
+  };
   const [solicitarFirmaModal, setSolicitarFirmaModal] = useState(false);
   const [emailCliente, setEmailCliente] = useState("");
   const [linkFirma, setLinkFirma] = useState("");
@@ -1166,7 +1225,7 @@ if (id === "entregada" && form.etapa === "bordado") {
   const TABS = [
     {id:"info",l:"Información"},{id:"viz",l:"Visualización"},
     {id:"pos",l:"Posiciones"},{id:"prendas",l:"Prendas"},{id:"seg",l:"Seguimiento"},
-    {id:"historial",l:"Historial"},
+    {id:"chat",l:"💬 Chat"},{id:"historial",l:"Historial"},
   ];
 const validarYGuardar = (cb) => {
     if (!form.fechaRequerida || !form.noCotizacion) {
@@ -1457,6 +1516,40 @@ await setDoc(doc(db, "solicitudesFirma", token), {
           </div>
         </div>
       )}
+{tab === "chat" && (
+  <div>
+    <div style={{color:C.muted,fontSize:13,marginBottom:14}}>Conversación interna de la orden. Al enviar, le llega un aviso a la otra persona (🔔 y notificación push).</div>
+    <div style={{maxHeight:430,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,padding:"4px 2px",marginBottom:14}}>
+      {mensajes.length === 0 && (
+        <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:"28px 0"}}>Aún no hay mensajes. Escribe el primero.</div>
+      )}
+      {mensajes.map(m => {
+        const propio = m.autor === usuario?.email;
+        return (
+          <div key={m.id} style={{alignSelf:propio?"flex-end":"flex-start",maxWidth:"82%"}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:3,textAlign:propio?"right":"left"}}>
+              {m.autorNombre} · {m.rol}{m.fecha?.seconds ? " · "+new Date(m.fecha.seconds*1000).toLocaleString("es-MX",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : ""}
+            </div>
+            <div style={{background:propio?"#F7941D":C.surface,color:propio?"#1a1d27":C.text,padding:"9px 13px",borderRadius:12,fontSize:14,border:propio?"none":"1px solid "+C.border,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+              {m.texto}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+    <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+      <textarea
+        value={nuevoMsg}
+        onChange={e => setNuevoMsg(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarMensajeChat(); } }}
+        placeholder="Escribe un mensaje…"
+        rows={2}
+        style={{flex:1,background:C.surface,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 12px",fontSize:14,resize:"vertical",outline:"none",boxSizing:"border-box",fontFamily:"inherit"}}
+      />
+      <Btn onClick={enviarMensajeChat} size="md" style={{opacity:enviandoMsg?0.6:1}}>Enviar</Btn>
+    </div>
+  </div>
+)}
 {tab === "historial" && (
   <div>
     <div style={{color:C.muted,fontSize:13,marginBottom:16}}>Registro de todos los cambios realizados en esta orden.</div>

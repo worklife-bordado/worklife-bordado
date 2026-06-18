@@ -1422,6 +1422,21 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                 </Btn>
               ))}
             </div>
+            <div style={{fontSize:12,color:C.muted,marginTop:20,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Fecha reprogramada (por atraso)</div>
+            <input
+              type="date"
+              value={form.fechaReprogramada||""}
+              onChange={e => setForm(p => ({...p, fechaReprogramada: e.target.value}))}
+              disabled={!puedeEditarSeguimiento}
+              style={{width:"100%",background:C.surface,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:13,outline:"none",boxSizing:"border-box",opacity:puedeEditarSeguimiento?1:0.5}}
+            />
+            <div style={{fontSize:11,color:C.muted,marginTop:6}}>Vacía: el cliente ve la fecha prometida original. Con fecha: el cliente ve esta nueva fecha por atraso.</div>
+            {form.fechaReprogramada && puedeEditarSeguimiento && (
+              <button onClick={() => setForm(p => ({...p, fechaReprogramada: ""}))}
+                style={{marginTop:8,background:"transparent",border:"1px solid "+C.border,borderRadius:6,color:C.muted,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>
+                Quitar fecha reprogramada
+              </button>
+            )}
           </div>
           <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Historial</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -1991,9 +2006,16 @@ function SeguimientoPublico({ token }) {
             </div>
           )}
 
-          <div style={{marginTop:24, paddingTop:16, borderTop:"1px solid #2e3450", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-            <span style={{fontSize:11, color:GREY, textTransform:"uppercase", letterSpacing:1}}>Entrega estimada</span>
-            <span style={{fontSize:16, fontWeight:800, color:ORANGE}}>{fmt(data.fechaRequerida)}</span>
+          <div style={{marginTop:24, paddingTop:16, borderTop:"1px solid #2e3450"}}>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+              <span style={{fontSize:11, color:GREY, textTransform:"uppercase", letterSpacing:1}}>Entrega estimada</span>
+              <span style={{fontSize:16, fontWeight:800, color:ORANGE}}>{fmt(data.fechaReprogramada || data.fechaRequerida)}</span>
+            </div>
+            {data.fechaReprogramada && data.fechaReprogramada !== data.fechaRequerida && (
+              <div style={{marginTop:8, fontSize:12, color:GREY, textAlign:"right"}}>
+                Fecha actualizada · original: <span style={{textDecoration:"line-through"}}>{fmt(data.fechaRequerida)}</span>
+              </div>
+            )}
           </div>
         </div>
         <div style={{textAlign:"center", color:GREY, fontSize:11, marginTop:20}}>
@@ -2131,6 +2153,7 @@ if (usuario) {
         prenda: (orden.prendas && orden.prendas[0] && orden.prendas[0].descripcion) || "",
         etapa: orden.etapa || "nueva",
         fechaRequerida: orden.fechaRequerida || "",
+        fechaReprogramada: orden.fechaReprogramada || "",
         actualizado: serverTimestamp(),
       });
     } catch (e) { console.log("syncSeguimiento error:", e); }
@@ -2153,6 +2176,17 @@ if (usuario) {
 
   const guardar = async (form) => {
     const anterior = ordenes.find(o => o.id == form.id);
+    // Registrar reprogramación por atraso en el historial de la orden
+    if (anterior && (anterior.fechaReprogramada||"") !== (form.fechaReprogramada||"")) {
+      let nota;
+      if (form.fechaReprogramada) {
+        const [y,m,d] = form.fechaReprogramada.split("-");
+        nota = `Reprogramada por atraso a ${d}/${m}/${y}`;
+      } else {
+        nota = "Se quitó la fecha reprogramada";
+      }
+      form = { ...form, historial: [...(form.historial||[]), { etapa: form.etapa, fecha: new Date().toISOString(), nota }] };
+    }
     await guardarOrden(form);
 // Registrar cambios en historial
 if (anterior) {
@@ -2161,7 +2195,7 @@ if (anterior) {
   const camposLegibles = {
     cliente: 'Cliente', etapa: 'Etapa', bordador: 'Bordador',
     fechaRequerida: 'Fecha Requerida', fecha: 'Fecha', noCotizacion: 'No. Cotización',
-    comentarios: 'Comentarios', vendedor: 'Vendedor'
+    comentarios: 'Comentarios', vendedor: 'Vendedor', fechaReprogramada: 'Fecha Reprogramada'
   };
 const normalizarPrendas = (prendas) => (prendas||[]).map(p => ({
   descripcion: p.descripcion||"",

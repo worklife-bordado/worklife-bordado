@@ -2526,17 +2526,24 @@ const cancelar = async (id) => {
     ) : (
       notifs.map(n => (
         <div key={n.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
-          <div style={{flex:1, cursor: n.ordenId ? "pointer" : "default"}}
+          <div style={{flex:1, cursor:"pointer"}}
             onClick={async () => {
-              if (n.ordenId) {
-                setActiva(n.ordenId);
+              let id = n.ordenId;
+              if (id == null) {
+                const m = String(n.titulo || "").match(/#(\d+)/) || String(n.cuerpo || "").match(/#(\d+)/);
+                if (m) { const o = ordenes.find(x => String(x.numero) === m[1]); if (o) id = o.id; }
+              }
+              if (id != null) {
+                setActiva(id);
                 setVista("detalle");
                 try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}
+              } else {
+                alert("No se pudo identificar la orden de esta notificación.");
               }
             }}>
             <div style={{fontWeight:700,color:C.text,fontSize:13}}>{n.titulo}</div>
             <div style={{color:C.muted,fontSize:12,marginTop:2}}>{n.cuerpo}</div>
-            {n.ordenId && <div style={{color:C.accent||"#F7941D",fontSize:11,marginTop:4}}>Ver orden →</div>}
+            <div style={{color:C.accent||"#F7941D",fontSize:11,marginTop:4}}>Ver orden →</div>
           </div>
           <Btn onClick={async () => {
             await deleteDoc(doc(db, "notificaciones", n.id));

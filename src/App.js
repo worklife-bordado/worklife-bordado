@@ -1142,7 +1142,7 @@ useEffect(() => {
               });
             }
           });
-          await addDoc(collection(db, "notificaciones"), { para: email, titulo, cuerpo, leida: false, fecha: serverTimestamp() });
+          await addDoc(collection(db, "notificaciones"), { para: email, titulo, cuerpo, ordenId: String(orden.id), leida: false, fecha: serverTimestamp() });
         } catch (e) { console.log("notif chat error:", e); }
       }
     } catch (e) {
@@ -2356,6 +2356,7 @@ Object.keys(form).forEach(campo => {
               para: form.creadoPor,
               titulo: `Orden #${form.numero} actualizada`,
               cuerpo: `La etapa cambió a: ${form.etapa}`,
+              ordenId: String(form.id),
               leida: false,
               fecha: serverTimestamp()
             });
@@ -2525,9 +2526,17 @@ const cancelar = async (id) => {
     ) : (
       notifs.map(n => (
         <div key={n.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
-          <div style={{flex:1}}>
+          <div style={{flex:1, cursor: n.ordenId ? "pointer" : "default"}}
+            onClick={async () => {
+              if (n.ordenId) {
+                setActiva(n.ordenId);
+                setVista("detalle");
+                try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}
+              }
+            }}>
             <div style={{fontWeight:700,color:C.text,fontSize:13}}>{n.titulo}</div>
             <div style={{color:C.muted,fontSize:12,marginTop:2}}>{n.cuerpo}</div>
+            {n.ordenId && <div style={{color:C.accent||"#F7941D",fontSize:11,marginTop:4}}>Ver orden →</div>}
           </div>
           <Btn onClick={async () => {
             await deleteDoc(doc(db, "notificaciones", n.id));

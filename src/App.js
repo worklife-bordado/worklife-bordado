@@ -357,6 +357,10 @@ async function buildPdfHtml(orden) {
     return `<tr><td style="border:1px solid #ccc;padding:3px 6px;font-size:10px;">${p.descripcion}</td>${cells}<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:10px;font-weight:700;">${tot||""}</td></tr>`;
   }).join("");
 
+  // Comentarios del logo: cada "-" inicia una nueva línea (formato lista)
+  const comentariosLogoItems = (orden.comentariosLogo || "").split("-").map(s => s.trim()).filter(Boolean);
+  const comentariosLogoHtml = comentariosLogoItems.map(s => `<div style="margin:1px 0;">• ${s}</div>`).join("");
+
   // Empty rows to fill table (min 4 rows total)
   const filledCount = orden.prendas.filter(p => p.descripcion).length;
   const emptyRows = Math.max(0, 4 - filledCount);
@@ -572,8 +576,9 @@ async function buildPdfHtml(orden) {
       </table>
 
       <!-- Comentarios variaciones -->
-      <div style="font-size:8px;color:#333;text-align:right;margin-top:2px;font-style:italic;">
-        Comentarios variaciones autorizadas del logotipo: ${orden.comentariosLogo||""}
+      <div style="font-size:10px;color:#333;margin-top:4px;">
+        <span style="font-weight:700;">Comentarios variaciones autorizadas del logotipo:</span>
+        ${comentariosLogoHtml}
       </div>
 
       <!-- Prendas -->

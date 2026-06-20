@@ -546,9 +546,12 @@ async function buildPdfHtml(orden) {
         });
         const logos = Object.values(logoMap);
         if (logos.length === 0) return `<div style="font-size:7px;color:#999;text-align:center;padding:10px;">Sin logotipos asignados</div>`;
+        const _n = logos.length;
+        const _mh = _n <= 2 ? 92 : _n === 3 ? 76 : _n === 4 ? 64 : 52;
+        const _mw = _n <= 2 ? 145 : _n === 3 ? 130 : 118;
         return logos.map(l => `
           <div style="text-align:center;margin-bottom:6px;border:1px solid #ddd;border-radius:3px;padding:4px;">
-            <img src="${l.img}" style="width:100%;max-width:110px;max-height:70px;object-fit:contain;display:block;margin:0 auto 3px;"/>
+            <img src="${l.img}" style="width:100%;max-width:${_mw}px;max-height:${_mh}px;object-fit:contain;display:block;margin:0 auto 3px;"/>
             <div style="font-size:8.5px;color:#444;font-weight:600;">
               Posición${l.posiciones.length > 1 ? "es" : ""}: <span style="color:#111;font-weight:700;">${l.posiciones.join(", ")}</span>
             </div>

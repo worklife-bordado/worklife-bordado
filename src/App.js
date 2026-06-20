@@ -865,16 +865,17 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
     const hoy = new Date();
     hoy.setHours(0,0,0,0);
     const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
-    if (filtro === "vencidas") return match && etapasActivas.includes(o.etapa) && o.fechaRequerida && new Date(o.fechaRequerida) < hoy;
+    const diasRest = (s) => { const [y,m,d] = String(s).split("-").map(Number); return Math.round((new Date(y,(m||1)-1,d||1) - hoy) / 86400000); };
+    if (filtro === "vencidas") return match && etapasActivas.includes(o.etapa) && o.fechaRequerida && diasRest(o.fechaRequerida) < 0;
+    if (filtro === "vencenHoy") return match && etapasActivas.includes(o.etapa) && o.fechaRequerida && diasRest(o.fechaRequerida) === 0;
     if (filtro === "porVencer") {
       if (!etapasActivas.includes(o.etapa) || !o.fechaRequerida) return false;
-      const diff = (new Date(o.fechaRequerida) - hoy) / (1000*60*60*24);
-      return match && diff >= 0 && diff <= 3;
+      const d = diasRest(o.fechaRequerida);
+      return match && d >= 1 && d <= 3;
     }
     if (filtro === "aTiempo") {
       if (!etapasActivas.includes(o.etapa) || !o.fechaRequerida) return false;
-      const diff = (new Date(o.fechaRequerida) - hoy) / (1000*60*60*24);
-      return match && diff > 3;
+      return match && diasRest(o.fechaRequerida) > 3;
     }
     return match && (filtro === "todas" || o.etapa === filtro);
   });
@@ -905,29 +906,28 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
 </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(2,1fr)" : "repeat(4,1fr)",gap:10,marginBottom:20}}>
         {(() => {
           const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
           const activas = ordenes.filter(o => etapasActivas.includes(o.etapa) && o.fechaRequerida);
           const hoy = new Date();
           hoy.setHours(0,0,0,0);
-          const vencidas = activas.filter(o => new Date(o.fechaRequerida) < hoy);
-          const porVencer = activas.filter(o => {
-            const fecha = new Date(o.fechaRequerida);
-            const diff = (fecha - hoy) / (1000*60*60*24);
-            return diff >= 0 && diff <= 3;
-          });
-          const aTiempo = activas.filter(o => {
-            const fecha = new Date(o.fechaRequerida);
-            const diff = (fecha - hoy) / (1000*60*60*24);
-            return diff > 3;
-          });
+          const diasRestantes = (s) => { const [y,m,d] = String(s).split("-").map(Number); return Math.round((new Date(y,(m||1)-1,d||1) - hoy) / 86400000); };
+          const vencidas = activas.filter(o => diasRestantes(o.fechaRequerida) < 0);
+          const vencenHoy = activas.filter(o => diasRestantes(o.fechaRequerida) === 0);
+          const porVencer = activas.filter(o => { const d = diasRestantes(o.fechaRequerida); return d >= 1 && d <= 3; });
+          const aTiempo = activas.filter(o => diasRestantes(o.fechaRequerida) > 3);
           return (
             <>
               <div onClick={() => setFiltro(filtro === "vencidas" ? "todas" : "vencidas")}
                 style={{background:filtro==="vencidas"?"#c0392b33":"#c0392b22",border:"2px solid #c0392b",borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>
                 <div style={{fontSize:22,fontWeight:800,color:"#c0392b"}}>{vencidas.length}</div>
                 <div style={{fontSize:11,color:C.muted,marginTop:2}}>🔴 Vencidas</div>
+              </div>
+              <div onClick={() => setFiltro(filtro === "vencenHoy" ? "todas" : "vencenHoy")}
+                style={{background:filtro==="vencenHoy"?"#f57c0033":"#f57c0022",border:"2px solid #f57c00",borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>
+                <div style={{fontSize:22,fontWeight:800,color:"#f57c00"}}>{vencenHoy.length}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>🟠 Vencen hoy</div>
               </div>
               <div onClick={() => setFiltro(filtro === "porVencer" ? "todas" : "porVencer")}
                 style={{background:filtro==="porVencer"?"#f5a62333":"#f5a62322",border:"2px solid #f5a623",borderRadius:10,padding:"10px 14px",cursor:"pointer",transition:"all .2s"}}>

@@ -2577,6 +2577,7 @@ const cancelar = async (id) => {
 
      {vista === "detalle" && ordenData && (
         <Detalle
+          key={ordenData.id}
           orden={ordenData}
           usuario={usuario}
           rol={rol}

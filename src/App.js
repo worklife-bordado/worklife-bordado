@@ -830,7 +830,7 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
     </div>
   );
 }
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento }) {
+function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento, onBack }) {
   const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
@@ -887,6 +887,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
     <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:28}}>
         <div>
+          {onBack && <Btn onClick={onBack} variant="ghost" size="sm" style={{marginBottom:8}}>← Inicio</Btn>}
           <div style={{fontSize:22,fontWeight:800,color:C.text,letterSpacing:-.5}}>Órdenes de Bordado</div>
           <div style={{color:C.muted,fontSize:13}}>{ordenes.length} órdenes en total</div>
         </div>
@@ -2159,7 +2160,7 @@ export default function App() {
   const [loginErr, setLoginErr] = useState("");
   const [ordenes,  setOrdenes]  = useState([]);
   const [notifs, setNotifs] = useState([ ]);
-  const [vista,    setVista]    = useState("lista");
+  const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
   const [semaforo, setSemaforo] = useState("verde");
   const importRef = useRef(null);
@@ -2471,11 +2472,35 @@ const cancelar = async (id) => {
 
   const ordenData = ordenes.find(o => o.id == activa);
 
+  // ── Datos en vivo para los módulos de la home ──
+  const _homeHoy = new Date(); _homeHoy.setHours(0,0,0,0);
+  const _homeAct = ["nueva","bordado","calidad","retrabajo"];
+  const _homeDias = (s) => { const p = String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1) - _homeHoy)/86400000); };
+  const _homeActivas = ordenes.filter(o => _homeAct.includes(o.etapa) && o.fechaRequerida);
+  const homeVencidas = _homeActivas.filter(o => _homeDias(o.fechaRequerida) < 0).length;
+  const homeVencenHoy = _homeActivas.filter(o => _homeDias(o.fechaRequerida) === 0).length;
+  const _finSemOff = (7 - _homeHoy.getDay()) % 7;
+  const homeEntregasSemana = _homeActivas.filter(o => { const dd = _homeDias(o.fechaRequerida); return dd >= 0 && dd <= _finSemOff; }).length;
+  const _mesesH = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  const _futuras = _homeActivas.filter(o => _homeDias(o.fechaRequerida) >= 0).sort((a,b) => _homeDias(a.fechaRequerida) - _homeDias(b.fechaRequerida));
+  const homeProxima = _futuras.length ? (() => { const p = _futuras[0].fechaRequerida.split("-").map(Number); return p[2] + " " + _mesesH[p[1]-1]; })() : null;
+  let _onTime = 0, _conFecha = 0;
+  ordenes.filter(o => o.etapa === "entregada" && o.fechaRequerida).forEach(o => {
+    const ent = (o.historial || []).filter(h => h.etapa === "entregada").pop();
+    if (ent && ent.fecha) {
+      _conFecha++;
+      const de = new Date(ent.fecha); de.setHours(0,0,0,0);
+      const p = o.fechaRequerida.split("-").map(Number);
+      if (de <= new Date(p[0], p[1]-1, p[2])) _onTime++;
+    }
+  });
+  const homeCumplimiento = _conFecha ? Math.round(_onTime/_conFecha*100) : null;
+
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Barlow','Segoe UI',sans-serif"}}>
       {/* Navbar */}
       <div style={{background:C.surface,borderBottom:"1px solid "+C.border,padding:"0 12px",display:"flex",alignItems:"center",minHeight:52,gap:8,marginBottom:16,flexWrap:"wrap"}}>
-        <img src={LOGO_WL} alt="WorkLife" style={{height:120,objectFit:"contain",cursor:"pointer"}} onClick={() => setVista("lista")}/>
+        <img src={LOGO_WL} alt="WorkLife" style={{height:120,objectFit:"contain",cursor:"pointer"}} onClick={() => setVista("home")}/>
         <div style={{color:C.border,fontSize:18}}>|</div>
         <div style={{color:C.muted,fontSize:13}}>Órdenes de Bordado</div>
         <div style={{flex:1}}/>
@@ -2499,6 +2524,82 @@ const cancelar = async (id) => {
         <Btn onClick={logout} variant="secondary" size="sm" style={{display: window.innerWidth < 768 ? "none" : ""}}>Salir</Btn>
       </div>
 
+      {vista === "home" && (
+        <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
+          <Semaforo semaforo={semaforo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }} puedeEditar={puedeEditarSeguimiento} />
+          {puedeCrear && (
+            <button onClick={crear} style={{width:"100%",border:"none",borderRadius:14,cursor:"pointer",background:"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",margin:"4px 0 18px",fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit"}}>
+              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:"50%",background:"rgba(255,255,255,0.25)",fontSize:22,lineHeight:1}}>+</span>
+              Nueva Orden
+            </button>
+          )}
+          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(3,1fr)",gap:16,marginTop:8}}>
+            <div onClick={() => setVista("lista")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
+              <svg width="66" height="66" viewBox="0 0 72 72" style={{display:"block",margin:"0 auto"}}>
+                <defs><linearGradient id="gOrd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fbb040"/><stop offset="1" stopColor="#f57c00"/></linearGradient></defs>
+                <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#gOrd)"/>
+                <g stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 18h18l8 8v28a2 2 0 0 1-2 2H25a2 2 0 0 1-2-2V20a2 2 0 0 1 2-2z"/>
+                  <line x1="28" y1="34" x2="44" y2="34"/>
+                  <line x1="28" y1="42" x2="44" y2="42"/>
+                  <line x1="28" y1="50" x2="38" y2="50"/>
+                </g>
+              </svg>
+              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Órdenes</div>
+              <div style={{fontSize:13,marginTop:6}}>
+                {(homeVencidas>0 || homeVencenHoy>0) ? (
+                  <span>
+                    <span style={{color:"#c0392b",fontWeight:700}}>🔴 {homeVencidas} vencidas</span>
+                    <span style={{color:C.muted}}> · </span>
+                    <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeVencenHoy} vencen hoy</span>
+                  </span>
+                ) : (
+                  <span style={{color:"#4caf7d",fontWeight:700}}>✅ Sin atrasos</span>
+                )}
+              </div>
+            </div>
+            <div onClick={() => setVista("calendario")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
+              <svg width="66" height="66" viewBox="0 0 72 72" style={{display:"block",margin:"0 auto"}}>
+                <defs><linearGradient id="gCal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3aa0ff"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
+                <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#gCal)"/>
+                <g stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="18" y="20" width="36" height="34" rx="4"/>
+                  <line x1="18" y1="30" x2="54" y2="30"/>
+                  <line x1="27" y1="14" x2="27" y2="24"/>
+                  <line x1="45" y1="14" x2="45" y2="24"/>
+                </g>
+                <g fill="#fff"><circle cx="28" cy="40" r="2.5"/><circle cx="36" cy="40" r="2.5"/><circle cx="44" cy="40" r="2.5"/><circle cx="28" cy="48" r="2.5"/><circle cx="36" cy="48" r="2.5"/></g>
+              </svg>
+              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Calendario</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:6,lineHeight:1.5}}>
+                {homeEntregasSemana} entrega{homeEntregasSemana===1?"":"s"} esta semana
+                {homeProxima && <><br/>Próxima: <span style={{color:C.accent,fontWeight:700}}>{homeProxima}</span></>}
+              </div>
+            </div>
+            <div onClick={() => setVista("dashboard")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
+              <svg width="66" height="66" viewBox="0 0 72 72" style={{display:"block",margin:"0 auto"}}>
+                <defs><linearGradient id="gInd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5bd49a"/><stop offset="1" stopColor="#2e9e6b"/></linearGradient></defs>
+                <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#gInd)"/>
+                <path d="M18 44 A18 18 0 1 1 54 44" stroke="#fff" strokeOpacity="0.35" strokeWidth="5" fill="none" strokeLinecap="round"/>
+                <path d="M18 44 A18 18 0 0 1 50 25" stroke="#fff" strokeWidth="5" fill="none" strokeLinecap="round"/>
+                <line x1="36" y1="40" x2="44" y2="30" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
+                <circle cx="36" cy="40" r="3" fill="#fff"/>
+              </svg>
+              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Indicadores</div>
+              <div style={{fontSize:13,marginTop:6}}>
+                {homeCumplimiento!==null ? (
+                  <span style={{color: homeCumplimiento>=95?"#4caf7d":homeCumplimiento>=90?"#f5a623":"#c0392b",fontWeight:700}}>
+                    Cumplimiento fecha: {homeCumplimiento}%
+                  </span>
+                ) : (
+                  <span style={{color:C.muted}}>Cumplimiento fecha: sin datos</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {vista === "lista" && (
   <Lista
     ordenes={ordenes}
@@ -2514,12 +2615,13 @@ const cancelar = async (id) => {
     semaforo={semaforo}
     onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }}
     puedeEditarSeguimiento={puedeEditarSeguimiento}
+    onBack={() => setVista("home")}
   />
 )}
 {vista === "notificaciones" && (
   <div style={{maxWidth:600,margin:"0 auto",padding:"0 16px 40px"}}>
     <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-      <Btn onClick={() => setVista("lista")} variant="ghost" size="sm">← Volver</Btn>
+      <Btn onClick={() => setVista("home")} variant="ghost" size="sm">← Volver</Btn>
       <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>🔔 Notificaciones</div>
       {notifs.length > 0 && (
         <Btn onClick={async () => {
@@ -2564,13 +2666,13 @@ const cancelar = async (id) => {
 {vista === "dashboard" && (
   <Dashboard
     ordenes={ordenes.filter(o => o.etapa !== "cancelada")}
-    onBack={() => setVista("lista")}
+    onBack={() => setVista("home")}
   />
 )}
 {vista === "calendario" && (
   <Calendario
     ordenes={ordenes}
-    onBack={() => setVista("lista")}
+    onBack={() => setVista("home")}
     onSelect={id => { setActiva(id); setVista("detalle"); }}
   />
 )}

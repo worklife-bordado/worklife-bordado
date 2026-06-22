@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
@@ -2204,10 +2204,25 @@ if (usuario) {
     snap => setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
   );
 }
-    const unsub = onSnapshot(collection(db, "ordenes"), snap => {
+    const rolActual = ROLES[usuario.email];
+    const esPriv = rolActual === "admin" || rolActual === "seguimiento";
+    const qOrdenes = esPriv
+      ? collection(db, "ordenes")
+      : query(collection(db, "ordenes"), where("creadoPor", "==", usuario.email));
+    const unsub = onSnapshot(qOrdenes, snap => {
       const data = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       data.sort((a,b) => (a.numero||"").localeCompare(b.numero||""));
       setOrdenes(data);
+      // Mantener el contador global al día (solo quienes ven todas las órdenes)
+      if (esPriv && data.length) {
+        const maxNum = Math.max(4999, ...data.map(o => parseInt(o.numero) || 0));
+        const ref = doc(db, "config", "contador");
+        runTransaction(db, async (tx) => {
+          const s = await tx.get(ref);
+          const actual = s.exists() ? (s.data().valor || 0) : 0;
+          if (maxNum > actual) tx.set(ref, { valor: maxNum }, { merge: true });
+        }).catch(() => {});
+      }
     });
     return () => { unsub(); unsubNotifs(); };
   }, [usuario]);
@@ -2267,8 +2282,20 @@ if (usuario) {
     await syncSeguimiento(orden);
   };
 
+  const obtenerSiguienteNumero = async () => {
+    const ref = doc(db, "config", "contador");
+    const nuevo = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const actual = snap.exists() ? (snap.data().valor || 4999) : 4999;
+      const sig = Math.max(4999, actual) + 1;
+      tx.set(ref, { valor: sig }, { merge: true });
+      return sig;
+    });
+    return String(nuevo);
+  };
   const crear = async () => {
     const n = emptyOrden(ordenes);
+    n.numero = await obtenerSiguienteNumero();
     n.creadoPor = usuario.email;
     n.creadoPorNombre = usuario.displayName || usuario.email;
     await guardarOrden(n);
@@ -2382,7 +2409,7 @@ Object.keys(form).forEach(campo => {
     if (!orig) return;
     const copia = JSON.parse(JSON.stringify(orig));
     copia.id = Date.now();
-    copia.numero = nextNumero([...ordenes, copia]);
+    copia.numero = await obtenerSiguienteNumero();
     copia.fecha = new Date().toISOString().slice(0, 10);
     copia.fechaRequerida = "";
     copia.etapa = "nueva";

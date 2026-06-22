@@ -2148,6 +2148,186 @@ function LoginScreen({ onLogin, error }) {
   );
 }
 
+// ── Kanban / Tablero de Producción ─────────────────────────────────────────
+const KANBAN_COLS = [
+  {id:"nueva",     label:"Nueva",           color:"#8b90a7"},
+  {id:"bordado",   label:"En Bordado",      color:"#5c8fe0"},
+  {id:"calidad",   label:"Control Calidad", color:"#f5a623"},
+  {id:"retrabajo", label:"Retrabajo",       color:"#8e44ad"},
+  {id:"entregada", label:"Entregada",       color:"#4caf7d"},
+];
+const KANBAN_TRANS = {
+  nueva:     ["bordado"],
+  bordado:   ["calidad", "entregada"],
+  calidad:   ["entregada", "retrabajo"],
+  entregada: ["retrabajo"],
+  retrabajo: ["calidad"],
+};
+function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
+  const esMovil = window.innerWidth < 760;
+  const [colSel, setColSel] = useState("nueva");
+  const [menu, setMenu] = useState(null);
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const dias = (s) => { if(!s) return null; const p=String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1)-hoy)/86400000); };
+  const dotColor = (o) => { const d=dias(o.fechaRequerida); if(d===null) return "#6b7280"; if(d<0) return "#c0392b"; if(d===0) return "#f57c00"; if(d<=3) return "#f5a623"; return "#4caf7d"; };
+  const mesesK = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  const fmtF = (s) => { if(!s) return "—"; const p=String(s).split("-").map(Number); return p[2]+" "+mesesK[p[1]-1]; };
+
+  const Card = ({o}) => (
+    <div onClick={() => setMenu(o)} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px",marginBottom:8,cursor:"pointer"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:800,color:C.accent,fontSize:15}}>#{o.numero||"—"}</div>
+        <div style={{width:9,height:9,borderRadius:"50%",background:dotColor(o)}}/>
+      </div>
+      <div style={{color:C.text,fontSize:13,marginTop:3}}>{o.cliente||"Sin cliente"}</div>
+      <div style={{color:C.muted,fontSize:11,marginTop:3}}>Entrega: {fmtF(o.fechaRequerida)}{o.bordador?" · "+o.bordador:""}</div>
+    </div>
+  );
+  const Columna = ({col}) => {
+    const items = ordenes.filter(o => o.etapa === col.id);
+    return (
+      <div style={{flex:esMovil?"none":"1 0 220px", minWidth:esMovil?"100%":220, width:esMovil?"100%":"auto"}}>
+        {!esMovil && (
+          <div style={{display:"flex",alignItems:"center",gap:8,background:C.surface,borderRadius:10,padding:"10px 12px",marginBottom:10, border: col.id==="retrabajo"?"1px solid "+col.color:"none"}}>
+            <div style={{width:9,height:9,borderRadius:"50%",background:col.color}}/>
+            <div style={{fontWeight:700,color:C.text,fontSize:14,flex:1}}>{col.label}</div>
+            <div style={{background:C.card,borderRadius:9,padding:"2px 8px",fontSize:11,color:C.muted,fontWeight:700}}>{items.length}</div>
+          </div>
+        )}
+        {items.length===0 && <div style={{color:C.muted,fontSize:12,textAlign:"center",padding:"14px 0"}}>—</div>}
+        {items.map(o => <Card key={o.id} o={o}/>)}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{maxWidth:1120,margin:"0 auto",padding:"0 12px 40px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+        <Btn onClick={onBack} variant="ghost" size="sm">← Inicio</Btn>
+        <div style={{fontSize:22,fontWeight:800,color:C.text}}>Tablero de Producción</div>
+      </div>
+      {esMovil ? (
+        <div>
+          <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:14,paddingBottom:4}}>
+            {KANBAN_COLS.map(col => {
+              const n = ordenes.filter(o => o.etapa === col.id).length;
+              const activo = colSel === col.id;
+              return (
+                <div key={col.id} onClick={() => setColSel(col.id)} style={{flexShrink:0,padding:"7px 13px",borderRadius:20,cursor:"pointer",background:activo?col.color:C.surface,color:activo?"#fff":C.muted,fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>
+                  {col.label} ({n})
+                </div>
+              );
+            })}
+          </div>
+          <Columna col={KANBAN_COLS.find(c => c.id === colSel)}/>
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:14,overflowX:"auto",alignItems:"flex-start"}}>
+          {KANBAN_COLS.map(col => <Columna key={col.id} col={col}/>)}
+        </div>
+      )}
+      {menu && (
+        <div onClick={() => setMenu(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:1000}}>
+          <div onClick={e => e.stopPropagation()} style={{background:C.surface,borderTopLeftRadius:18,borderTopRightRadius:18,width:"100%",maxWidth:480,padding:"16px 18px 28px",boxShadow:"0 -4px 24px rgba(0,0,0,0.4)"}}>
+            <div style={{width:40,height:4,borderRadius:2,background:C.border,margin:"0 auto 16px"}}/>
+            <div style={{fontWeight:800,color:C.text,fontSize:17}}>Orden #{menu.numero}</div>
+            <div style={{color:C.muted,fontSize:13,marginBottom:16}}>{menu.cliente||"Sin cliente"} · {etapaInfo(menu.etapa).label}</div>
+            <Btn onClick={() => { const o=menu; setMenu(null); onSelectOrden(o.id); }} size="md" style={{width:"100%",marginBottom:puedeMover?16:0}}>Abrir orden</Btn>
+            {puedeMover && (KANBAN_TRANS[menu.etapa]||[]).length>0 && (
+              <div>
+                <div style={{fontSize:12,color:C.muted,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Mover a etapa</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  {(KANBAN_TRANS[menu.etapa]||[]).map(tid => {
+                    const c = KANBAN_COLS.find(k => k.id === tid) || etapaInfo(tid);
+                    return (
+                      <div key={tid} onClick={async () => { const o=menu; setMenu(null); await onMover(o, tid); }} style={{flex:"1 1 45%",textAlign:"center",padding:"12px 10px",borderRadius:10,cursor:"pointer",background:C.card,border:"1px solid "+c.color,color:C.text,fontSize:13,fontWeight:700}}>
+                        {c.label}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Carga por Bordador ─────────────────────────────────────────────────────
+function CargaBordador({ ordenes, onBack, onSelectOrden }) {
+  const [exp, setExp] = useState(null);
+  const activas = ordenes.filter(o => ["nueva","bordado","calidad","retrabajo"].includes(o.etapa));
+  const piezasDe = (o) => (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const dias = (s)=>{ if(!s) return null; const p=String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1)-hoy)/86400000); };
+  const mesesC=["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+  const fmtF=(s)=>{ if(!s) return "—"; const p=String(s).split("-").map(Number); return p[2]+" "+mesesC[p[1]-1]; };
+  const grupos={}; const displayN={};
+  activas.forEach(o=>{ const raw=(o.bordador||"").trim().replace(/\s+/g," "); const key=raw?raw.toLowerCase():"__sin__"; if(!grupos[key]){grupos[key]=[]; displayN[key]=raw||"Sin asignar";} grupos[key].push(o); });
+  let lista = Object.keys(grupos).map(key=>{
+    const nombre=displayN[key];
+    const ords=grupos[key].slice().sort((a,b)=>{ const da=dias(a.fechaRequerida), db=dias(b.fechaRequerida); return (da===null?9999:da)-(db===null?9999:db); });
+    const piezas=ords.reduce((s,o)=>s+piezasDe(o),0);
+    const vencidas=ords.filter(o=>{const d=dias(o.fechaRequerida);return d!==null&&d<0;}).length;
+    const hoyC=ords.filter(o=>dias(o.fechaRequerida)===0).length;
+    const fut=ords.filter(o=>{const d=dias(o.fechaRequerida);return d!==null&&d>=0;});
+    const proxima=fut.length?fmtF(fut[0].fechaRequerida):null;
+    return {nombre,ords,piezas,vencidas,hoyC,proxima};
+  });
+  lista.sort((a,b)=>b.piezas-a.piezas);
+  const maxP=Math.max(1,...lista.map(l=>l.piezas));
+  return (
+    <div style={{maxWidth:760,margin:"0 auto",padding:"0 14px 40px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
+        <Btn onClick={onBack} variant="ghost" size="sm">← Inicio</Btn>
+        <div style={{fontSize:22,fontWeight:800,color:C.text}}>Carga por Bordador</div>
+      </div>
+      <div style={{color:C.muted,fontSize:13,marginBottom:16}}>Órdenes activas · ordenado por piezas</div>
+      {lista.length===0 && <div style={{color:C.muted,textAlign:"center",padding:"30px 0"}}>No hay órdenes activas.</div>}
+      {lista.map(l=>{
+        const alerta = l.nombre==="Sin asignar";
+        const load = l.piezas/maxP;
+        const barColor = alerta ? "#f57c00" : (load>0.8?"#c0392b":load>0.5?"#f5a623":"#4caf7d");
+        const abierto = exp===l.nombre;
+        return (
+          <div key={l.nombre} style={{marginBottom:10}}>
+            <div onClick={()=>setExp(abierto?null:l.nombre)} style={{background:C.surface,border:alerta?"1.5px solid #f57c00":"1px solid "+C.border,borderRadius:12,padding:"14px 16px",cursor:"pointer"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontWeight:800,color:C.text,fontSize:16}}>{l.nombre}</div>
+                <div style={{background:C.card,borderRadius:11,padding:"3px 10px",fontSize:12,fontWeight:700,color:C.muted}}>{l.ords.length} órd.</div>
+              </div>
+              <div style={{background:C.card,borderRadius:5,height:9,marginTop:10,overflow:"hidden"}}>
+                <div style={{background:barColor,height:9,width:Math.max(4,load*100)+"%",borderRadius:5}}/>
+              </div>
+              <div style={{color:C.text,fontSize:13,marginTop:8,fontWeight:700}}>{l.piezas} piezas</div>
+              <div style={{fontSize:12,marginTop:3}}>
+                {l.vencidas>0 && <span style={{color:"#c0392b",fontWeight:700}}>🔴 {l.vencidas} vencidas </span>}
+                {l.hoyC>0 && <span style={{color:"#f57c00",fontWeight:700}}>🟠 {l.hoyC} hoy </span>}
+                {alerta ? <span style={{color:"#f57c00"}}>⚠️ falta asignar bordador</span> : (l.proxima?<span style={{color:C.muted}}>próx. entrega {l.proxima}</span>:null)}
+                <span style={{color:C.accent,marginLeft:6,fontWeight:700}}>{abierto?"▲":"▼"}</span>
+              </div>
+            </div>
+            {abierto && (
+              <div style={{padding:"6px 0 2px"}}>
+                {l.ords.map(o=>(
+                  <div key={o.id} onClick={()=>onSelectOrden(o.id)} style={{display:"flex",alignItems:"center",gap:10,background:C.card,border:"1px solid "+C.border,borderRadius:9,padding:"9px 12px",marginBottom:6,cursor:"pointer",marginLeft:12}}>
+                    <div style={{fontWeight:800,color:C.accent,fontSize:13.5}}>#{o.numero}</div>
+                    <div style={{flex:1,color:C.text,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.cliente||"Sin cliente"}</div>
+                    <div style={{fontSize:10.5,color:"#fff",background:etapaInfo(o.etapa).color,borderRadius:8,padding:"2px 8px",whiteSpace:"nowrap"}}>{etapaInfo(o.etapa).label}</div>
+                    <div style={{color:C.muted,fontSize:11,whiteSpace:"nowrap"}}>{fmtF(o.fechaRequerida)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
@@ -2250,6 +2430,33 @@ if (usuario) {
   const logout = () => signOut(auth);
 
   // ── Permissions helpers ───────────────────────────────────────────────────
+  const moverEtapaKanban = async (orden, nuevaEtapa) => {
+    const permitidas = KANBAN_TRANS[orden.etapa] || [];
+    if (!permitidas.includes(nuevaEtapa)) { alert("Movimiento no permitido."); return; }
+    if (nuevaEtapa === "entregada" && orden.etapa === "bordado") {
+      if (!window.confirm(`⚠️ ATENCIÓN: Estás entregando la orden #${orden.numero} sin pasar por Control Calidad.\n\n¿Estás seguro?`)) return;
+    } else if (nuevaEtapa === "retrabajo") {
+      if (!window.confirm(`⚠️ La orden #${orden.numero} fue reportada con problemas de calidad.\n\n¿Confirmas que regresa a Retrabajo?`)) return;
+    } else if (orden.etapa === "retrabajo") {
+      if (!window.confirm(`¿Confirmas mover la orden #${orden.numero} de Retrabajo a Control Calidad?`)) return;
+    } else {
+      if (!window.confirm(`¿Mover la orden #${orden.numero} a "${etapaInfo(nuevaEtapa).label}"?`)) return;
+    }
+    const actualizada = {
+      ...orden, etapa: nuevaEtapa,
+      historial: [...(orden.historial||[]), { etapa: nuevaEtapa, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(nuevaEtapa).label}" desde el tablero` }],
+    };
+    await guardarOrden(actualizada);
+    if (orden.creadoPor && orden.creadoPor !== usuario.email) {
+      const titulo = `Orden #${orden.numero} actualizada`;
+      const cuerpo = `La etapa cambió a: ${etapaInfo(nuevaEtapa).label}`;
+      try {
+        const snap = await getDocs(query(collection(db, "fcmTokens"), where("email", "==", orden.creadoPor)));
+        snap.forEach(async d => { const t = d.data().token; if (t) await fetch("/api/notify",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:t,titulo,cuerpo})}); });
+        await addDoc(collection(db,"notificaciones"),{para:orden.creadoPor,titulo,cuerpo,ordenId:String(orden.id),leida:false,fecha:serverTimestamp()});
+      } catch(e){}
+    }
+  };
   const puedeCrear     = rol === "admin" || rol === "ventas";
   const puedeEditarOrden = (orden) => {
     if (rol === "admin") return true;
@@ -2560,7 +2767,7 @@ const cancelar = async (id) => {
               Nueva Orden
             </button>
           )}
-          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(3,1fr)",gap:16,marginTop:8}}>
+          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(2,1fr)",gap:16,marginTop:8}}>
             <div onClick={() => setVista("lista")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
               <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
                 <defs><linearGradient id="gOrd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fbb040"/><stop offset="1" stopColor="#f57c00"/></linearGradient></defs>
@@ -2624,6 +2831,37 @@ const cancelar = async (id) => {
                   <span style={{color:C.muted}}>Cumplimiento fecha: sin datos</span>
                 )}
               </div>
+            </div>
+            <div onClick={() => setVista("kanban")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
+              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
+                <defs><linearGradient id="gTab" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c084fc"/><stop offset="1" stopColor="#7c3aed"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gTab)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g fill="#fff">
+                  <rect x="22" y="26" width="13" height="36" rx="3" fillOpacity="0.5"/>
+                  <rect x="22" y="26" width="13" height="13" rx="3"/>
+                  <rect x="38" y="26" width="13" height="36" rx="3" fillOpacity="0.5"/>
+                  <rect x="38" y="26" width="13" height="20" rx="3"/>
+                  <rect x="54" y="26" width="13" height="36" rx="3" fillOpacity="0.5"/>
+                  <rect x="54" y="26" width="13" height="10" rx="3"/>
+                </g>
+              </svg>
+              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Tablero</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:6}}>Producción por etapa</div>
+            </div>
+            <div onClick={() => setVista("carga")} style={{gridColumn: window.innerWidth < 600 ? "auto" : "1 / -1", background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"28px 20px",textAlign:"center",cursor:"pointer"}}>
+              <svg width="58" height="58" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
+                <defs><linearGradient id="gCar" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#22d3ee"/><stop offset="1" stopColor="#0891b2"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCar)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g fill="#fff">
+                  <rect x="22" y="28" width="44" height="9" rx="4.5"/>
+                  <rect x="22" y="42" width="30" height="9" rx="4.5" fillOpacity="0.85"/>
+                  <rect x="22" y="56" width="18" height="9" rx="4.5" fillOpacity="0.7"/>
+                </g>
+              </svg>
+              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Carga por Bordador</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:6}}>Quién está saturado</div>
             </div>
           </div>
         </div>
@@ -2705,6 +2943,24 @@ const cancelar = async (id) => {
     onSelect={id => { setActiva(id); setVista("detalle"); }}
   />
 )}
+
+      {vista === "kanban" && (
+        <Kanban
+          ordenes={ordenes.filter(o => o.etapa !== "cancelada")}
+          onBack={() => setVista("home")}
+          onSelectOrden={id => { setActiva(id); setVista("detalle"); }}
+          onMover={moverEtapaKanban}
+          puedeMover={puedeEditarSeguimiento}
+        />
+      )}
+
+      {vista === "carga" && (
+        <CargaBordador
+          ordenes={ordenes}
+          onBack={() => setVista("home")}
+          onSelectOrden={id => { setActiva(id); setVista("detalle"); }}
+        />
+      )}
 
      {vista === "detalle" && ordenData && (
         <Detalle

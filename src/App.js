@@ -2562,15 +2562,12 @@ const cancelar = async (id) => {
           )}
           <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(3,1fr)",gap:16,marginTop:8}}>
             <div onClick={() => setVista("lista")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 72 72" style={{display:"block",margin:"0 auto"}}>
+              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
                 <defs><linearGradient id="gOrd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fbb040"/><stop offset="1" stopColor="#f57c00"/></linearGradient></defs>
-                <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#gOrd)"/>
-                <g stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 18h18l8 8v28a2 2 0 0 1-2 2H25a2 2 0 0 1-2-2V20a2 2 0 0 1 2-2z"/>
-                  <line x1="28" y1="34" x2="44" y2="34"/>
-                  <line x1="28" y1="42" x2="44" y2="42"/>
-                  <line x1="28" y1="50" x2="38" y2="50"/>
-                </g>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gOrd)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <path d="M22 33 L35 26 Q44 34 53 26 L66 33 L59 43 L56 40 L56 62 L32 62 L32 40 L29 43 Z" stroke="#fff" strokeWidth="3.6" fill="none" strokeLinejoin="round" strokeLinecap="round"/>
+                <circle cx="44" cy="49" r="4.5" stroke="#fff" strokeWidth="2.6" fill="none"/>
               </svg>
               <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Órdenes</div>
               <div style={{fontSize:13,marginTop:6}}>
@@ -2586,16 +2583,21 @@ const cancelar = async (id) => {
               </div>
             </div>
             <div onClick={() => setVista("calendario")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 72 72" style={{display:"block",margin:"0 auto"}}>
+              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
                 <defs><linearGradient id="gCal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3aa0ff"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
-                <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#gCal)"/>
-                <g stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="18" y="20" width="36" height="34" rx="4"/>
-                  <line x1="18" y1="30" x2="54" y2="30"/>
-                  <line x1="27" y1="14" x2="27" y2="24"/>
-                  <line x1="45" y1="14" x2="45" y2="24"/>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCal)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.4" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <path d="M24 42 v-12 a3 3 0 0 1 3 -3 h34 a3 3 0 0 1 3 3 v22 a3 3 0 0 1 -3 3 h-18"/>
+                  <line x1="24" y1="39" x2="64" y2="39"/>
+                  <line x1="34" y1="23" x2="34" y2="32"/>
+                  <line x1="54" y1="23" x2="54" y2="32"/>
                 </g>
-                <g fill="#fff"><circle cx="28" cy="40" r="2.5"/><circle cx="36" cy="40" r="2.5"/><circle cx="44" cy="40" r="2.5"/><circle cx="28" cy="48" r="2.5"/><circle cx="36" cy="48" r="2.5"/></g>
+                <circle cx="37" cy="57" r="11" stroke="#fff" strokeWidth="3.2" fill="#1e4fa3"/>
+                <g stroke="#fff" strokeWidth="2.6" strokeLinecap="round">
+                  <line x1="37" y1="57" x2="37" y2="51"/>
+                  <line x1="37" y1="57" x2="41" y2="59"/>
+                </g>
               </svg>
               <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Calendario</div>
               <div style={{fontSize:13,color:C.muted,marginTop:6,lineHeight:1.5}}>
@@ -2604,13 +2606,13 @@ const cancelar = async (id) => {
               </div>
             </div>
             <div onClick={() => setVista("dashboard")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 72 72" style={{display:"block",margin:"0 auto"}}>
+              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
                 <defs><linearGradient id="gInd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5bd49a"/><stop offset="1" stopColor="#2e9e6b"/></linearGradient></defs>
-                <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#gInd)"/>
-                <path d="M18 44 A18 18 0 1 1 54 44" stroke="#fff" strokeOpacity="0.35" strokeWidth="5" fill="none" strokeLinecap="round"/>
-                <path d="M18 44 A18 18 0 0 1 50 25" stroke="#fff" strokeWidth="5" fill="none" strokeLinecap="round"/>
-                <line x1="36" y1="40" x2="44" y2="30" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
-                <circle cx="36" cy="40" r="3" fill="#fff"/>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gInd)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <circle cx="44" cy="44" r="19" stroke="#fff" strokeOpacity="0.30" strokeWidth="6" fill="none"/>
+                <path d="M44 25 A19 19 0 1 1 25 44" stroke="#fff" strokeWidth="6" fill="none" strokeLinecap="round"/>
+                <text x="44" y="49" fontFamily="Arial" fontSize="14" fontWeight="bold" fill="#fff" textAnchor="middle">%</text>
               </svg>
               <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Indicadores</div>
               <div style={{fontSize:13,marginTop:6}}>

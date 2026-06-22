@@ -2277,6 +2277,7 @@ function CargaBordador({ ordenes, onBack, onSelectOrden }) {
     return {nombre,ords,piezas,vencidas,hoyC,proxima};
   });
   lista.sort((a,b)=>b.piezas-a.piezas);
+  lista = [...lista.filter(l=>l.nombre!=="Sin asignar"), ...lista.filter(l=>l.nombre==="Sin asignar")];
   const maxP=Math.max(1,...lista.map(l=>l.piezas));
   return (
     <div style={{maxWidth:760,margin:"0 auto",padding:"0 14px 40px"}}>
@@ -2311,14 +2312,18 @@ function CargaBordador({ ordenes, onBack, onSelectOrden }) {
             </div>
             {abierto && (
               <div style={{padding:"6px 0 2px"}}>
-                {l.ords.map(o=>(
-                  <div key={o.id} onClick={()=>onSelectOrden(o.id)} style={{display:"flex",alignItems:"center",gap:10,background:C.card,border:"1px solid "+C.border,borderRadius:9,padding:"9px 12px",marginBottom:6,cursor:"pointer",marginLeft:12}}>
+                {l.ords.map(o=>{
+                  const d = dias(o.fechaRequerida);
+                  const uc = d===null ? null : (d<0 ? "#c0392b" : d<=3 ? "#f57c00" : null);
+                  return (
+                  <div key={o.id} onClick={()=>onSelectOrden(o.id)} style={{display:"flex",alignItems:"center",gap:10,background:C.card,border:"1px solid "+C.border,borderLeft:"4px solid "+(uc||C.border),borderRadius:9,padding:"9px 12px",marginBottom:6,cursor:"pointer",marginLeft:12}}>
                     <div style={{fontWeight:800,color:C.accent,fontSize:13.5}}>#{o.numero}</div>
                     <div style={{flex:1,color:C.text,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.cliente||"Sin cliente"}</div>
                     <div style={{fontSize:10.5,color:"#fff",background:etapaInfo(o.etapa).color,borderRadius:8,padding:"2px 8px",whiteSpace:"nowrap"}}>{etapaInfo(o.etapa).label}</div>
-                    <div style={{color:C.muted,fontSize:11,whiteSpace:"nowrap"}}>{fmtF(o.fechaRequerida)}</div>
+                    <div style={{color:uc||C.muted,fontSize:11,fontWeight:uc?700:400,whiteSpace:"nowrap"}}>{fmtF(o.fechaRequerida)}</div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

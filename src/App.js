@@ -1072,7 +1072,36 @@ function PdfModal({ html, onClose }) {
   );
 }
 
-function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar }) {
+// ── Desplegable de bordador (estilizado) ───────────────────────────────────
+function DropdownBordador({ value, opciones, onSelect, onAgregar, disabled, puedeAgregar }) {
+  const [abierto, setAbierto] = useState(false);
+  const box = {width:"100%",background:C.surface,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"11px 14px",fontSize:13,boxSizing:"border-box"};
+  const opt = {padding:"11px 14px",fontSize:13,cursor:"pointer",color:C.text};
+  return (
+    <div style={{position:"relative",marginBottom:20}}>
+      <div onClick={() => { if(!disabled) setAbierto(!abierto); }} style={{...box, cursor:disabled?"default":"pointer", opacity:disabled?0.5:1, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <span style={{color: value?C.text:C.muted}}>{value || "Sin asignar"}</span>
+        <span style={{color:C.muted, fontSize:11}}>▼</span>
+      </div>
+      {abierto && !disabled && (
+        <div>
+          <div onClick={() => setAbierto(false)} style={{position:"fixed",inset:0,zIndex:40}}/>
+          <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:4,background:C.surface,border:"1px solid "+C.border,borderRadius:8,maxHeight:260,overflowY:"auto",zIndex:50,boxShadow:"0 8px 24px rgba(0,0,0,0.45)"}}>
+            <div onClick={() => { onSelect(""); setAbierto(false); }} style={{...opt, color:C.muted}}>Sin asignar</div>
+            {opciones.map(b => (
+              <div key={b} onClick={() => { onSelect(b); setAbierto(false); }} style={{...opt, background: value===b?C.card:"transparent", fontWeight: value===b?700:400}}>{b}</div>
+            ))}
+            {puedeAgregar && (
+              <div onClick={async () => { setAbierto(false); const n=window.prompt("Nombre del nuevo bordador:"); if(n&&n.trim()&&onAgregar){ const a=await onAgregar(n); if(a) onSelect(a); } }} style={{...opt, color:C.accent, fontWeight:700, borderTop:"1px solid "+C.border}}>➕ Agregar nuevo…</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador }) {
   const [pdfHtml, setPdfHtml] = useState(null);
   const [form, setForm] = useState(() => {
   const o = JSON.parse(JSON.stringify(orden));
@@ -1474,12 +1503,13 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         <div>
           <div style={{marginBottom:20}}>
             <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Bordador asignado</div>
-            <input
+            <DropdownBordador
               value={form.bordador||""}
-              onChange={e => setForm(p => ({...p, bordador: e.target.value}))}
-              placeholder="Nombre del bordador..."
+              opciones={bordadores}
+              onSelect={v => setForm(p => ({...p, bordador: v}))}
+              onAgregar={onAgregarBordador}
               disabled={!puedeEditarSeguimiento}
-              style={{width:"100%",background:C.surface,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"10px 14px",fontSize:13,outline:"none",marginBottom:20,boxSizing:"border-box",opacity:puedeEditarSeguimiento?1:0.5}}
+              puedeAgregar={puedeEditarSeguimiento}
             />
             <div style={{fontSize:12,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Mover a etapa</div>
             <div style={{display:"flex",gap:10,flexWrap:"wrap",opacity:puedeEditarSeguimiento?1:0.5}}>
@@ -2256,7 +2286,7 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
 }
 
 // ── Carga por Bordador ─────────────────────────────────────────────────────
-function CargaBordador({ ordenes, onBack, onSelectOrden }) {
+function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministrar }) {
   const [exp, setExp] = useState(null);
   const activas = ordenes.filter(o => ["nueva","bordado","calidad","retrabajo"].includes(o.etapa));
   const piezasDe = (o) => (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
@@ -2283,7 +2313,8 @@ function CargaBordador({ ordenes, onBack, onSelectOrden }) {
     <div style={{maxWidth:760,margin:"0 auto",padding:"0 14px 40px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
         <Btn onClick={onBack} variant="ghost" size="sm">← Inicio</Btn>
-        <div style={{fontSize:22,fontWeight:800,color:C.text}}>Carga por Bordador</div>
+        <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>Carga por Bordador</div>
+        {puedeAdmin && <Btn onClick={onAdministrar} variant="ghost" size="sm">⚙️ Administrar</Btn>}
       </div>
       <div style={{color:C.muted,fontSize:13,marginBottom:16}}>Órdenes activas · ordenado por piezas</div>
       {lista.length===0 && <div style={{color:C.muted,textAlign:"center",padding:"30px 0"}}>No hay órdenes activas.</div>}
@@ -2344,6 +2375,8 @@ export default function App() {
   const [authListo,setAuthListo]= useState(false);  // waiting for Firebase auth check
   const [loginErr, setLoginErr] = useState("");
   const [ordenes,  setOrdenes]  = useState([]);
+  const [bordadores, setBordadores] = useState([]);
+  const [adminBord, setAdminBord] = useState(false);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -2419,6 +2452,45 @@ if (usuario) {
     });
     return unsub;
   }, []);
+
+  // ── Lista de bordadores (config) ──────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "config", "bordadores"), snap => {
+      const l = snap.exists() && Array.isArray(snap.data().lista) ? snap.data().lista : [];
+      setBordadores(l);
+    });
+    return unsub;
+  }, []);
+  // Precarga única: si la lista está vacía y un admin/seguimiento ve todas las órdenes
+  useEffect(() => {
+    const esPriv = rol === "admin" || rol === "seguimiento";
+    if (!esPriv || bordadores.length > 0 || !ordenes.length) return;
+    const set = {};
+    ordenes.forEach(o => { const raw=(o.bordador||"").trim().replace(/\s+/g," "); if(raw){ const k=raw.toLowerCase(); if(!set[k]) set[k]=raw; } });
+    const derived = Object.values(set).sort((a,b)=>a.localeCompare(b));
+    if (derived.length) setDoc(doc(db, "config", "bordadores"), { lista: derived }, { merge: true }).catch(()=>{});
+  }, [ordenes, bordadores, rol]);
+  const agregarBordador = async (nombre) => {
+    const limpio = (nombre||"").trim().replace(/\s+/g," ");
+    if (!limpio) return null;
+    const existe = bordadores.find(b => b.toLowerCase() === limpio.toLowerCase());
+    if (existe) return existe;
+    const nueva = [...bordadores, limpio].sort((a,b)=>a.localeCompare(b));
+    await setDoc(doc(db, "config", "bordadores"), { lista: nueva }, { merge: true });
+    return limpio;
+  };
+  const renombrarBordador = async (viejo, nuevo) => {
+    const limpio = (nuevo||"").trim().replace(/\s+/g," ");
+    if (!limpio || limpio === viejo) return;
+    const nueva = [...new Set(bordadores.map(b => b === viejo ? limpio : b).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    await setDoc(doc(db, "config", "bordadores"), { lista: nueva }, { merge: true });
+    const afectadas = ordenes.filter(o => (o.bordador||"").trim().toLowerCase() === viejo.toLowerCase());
+    for (const o of afectadas) { try { await updateDoc(doc(db, "ordenes", o.id), { bordador: limpio }); } catch(e){} }
+  };
+  const quitarBordador = async (nombre) => {
+    const nueva = bordadores.filter(b => b !== nombre);
+    await setDoc(doc(db, "config", "bordadores"), { lista: nueva }, { merge: true });
+  };
 
   const login = async () => {
     setLoginErr("");
@@ -2964,6 +3036,8 @@ const cancelar = async (id) => {
           ordenes={ordenes}
           onBack={() => setVista("home")}
           onSelectOrden={id => { setActiva(id); setVista("detalle"); }}
+          puedeAdmin={puedeEditarSeguimiento}
+          onAdministrar={() => setAdminBord(true)}
         />
       )}
 
@@ -2979,7 +3053,31 @@ const cancelar = async (id) => {
           onBack={() => setVista("lista")}
           onDelete={cancelar}
           onDuplicar={puedeCrear ? async (form) => { await guardar(form); await duplicar(form.id); } : null}
+          bordadores={bordadores}
+          onAgregarBordador={agregarBordador}
         />
+      )}
+
+      {adminBord && (
+        <div onClick={()=>setAdminBord(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:16}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.surface,borderRadius:14,maxWidth:440,width:"100%",maxHeight:"80vh",overflowY:"auto",padding:20,boxShadow:"0 8px 30px rgba(0,0,0,0.5)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:18,fontWeight:800,color:C.text}}>Administrar bordadores</div>
+              <div onClick={()=>setAdminBord(false)} style={{cursor:"pointer",color:C.muted,fontSize:20,lineHeight:1}}>✕</div>
+            </div>
+            {bordadores.length===0 && <div style={{color:C.muted,fontSize:13,padding:"10px 0"}}>No hay bordadores aún.</div>}
+            {bordadores.map(b => (
+              <div key={b} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid "+C.border}}>
+                <div style={{flex:1,color:C.text,fontSize:14}}>{b}</div>
+                <Btn variant="ghost" size="sm" onClick={async ()=>{ const n=window.prompt("Nuevo nombre para \""+b+"\":", b); if(n&&n.trim()) await renombrarBordador(b, n); }}>Renombrar</Btn>
+                <Btn variant="ghost" size="sm" onClick={async ()=>{ if(window.confirm("¿Quitar \""+b+"\" de la lista? (las órdenes que ya lo tengan no cambian)")) await quitarBordador(b); }} style={{color:"#c0392b"}}>Quitar</Btn>
+              </div>
+            ))}
+            <div style={{marginTop:16}}>
+              <Btn onClick={async ()=>{ const n=window.prompt("Nombre del nuevo bordador:"); if(n&&n.trim()) await agregarBordador(n); }} size="md" style={{width:"100%"}}>➕ Agregar bordador</Btn>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1411,7 +1411,6 @@ const validarYGuardar = (cb) => {
   return (
     <>
     {pdfHtml && <PdfModal html={pdfHtml} onClose={() => setPdfHtml(null)}/>}
-    {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
 {solicitarFirmaModal && (
   <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#0008",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
     <div style={{background:C.card,borderRadius:12,padding:32,maxWidth:400,width:"90%",border:"1px solid "+C.border}}>
@@ -3433,6 +3432,11 @@ const cancelar = async (id) => {
         <div key={n.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
           <div style={{flex:1, cursor:"pointer"}}
             onClick={async () => {
+              if (n.tipo === "resumen") {
+                setVista("lista");
+                try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}
+                return;
+              }
               let id = n.ordenId;
               if (id == null) {
                 const m = String(n.titulo || "").match(/#(\d+)/) || String(n.cuerpo || "").match(/#(\d+)/);
@@ -3448,7 +3452,7 @@ const cancelar = async (id) => {
             }}>
             <div style={{fontWeight:700,color:C.text,fontSize:13}}>{n.titulo}</div>
             <div style={{color:C.muted,fontSize:12,marginTop:2}}>{n.cuerpo}</div>
-            <div style={{color:C.accent||"#F7941D",fontSize:11,marginTop:4}}>Ver orden →</div>
+            <div style={{color:C.accent||"#F7941D",fontSize:11,marginTop:4}}>{n.tipo === "resumen" ? "Ver órdenes →" : "Ver orden →"}</div>
           </div>
           <Btn onClick={async () => {
             await deleteDoc(doc(db, "notificaciones", n.id));
@@ -3540,6 +3544,8 @@ const cancelar = async (id) => {
           </div>
         </div>
       )}
+
+      {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
     </div>
   );
 }

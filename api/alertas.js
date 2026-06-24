@@ -5,7 +5,7 @@
 
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 function ensureApp() {
   if (!getApps().length) {
@@ -67,9 +67,10 @@ export default async function handler(req, res) {
 
     const resultados = [];
 
-    // 4) Por cada usuario con tokens, arma su resumen y envía (silencio si nada urgente)
-    for (const email of Object.keys(tokensPorEmail)) {
-      const rol = ROLES[email] || 'ventas';
+    // 4) Por cada usuario (según ROLES), arma su resumen, escribe la notificación
+    //    dentro de la app y manda push si tiene dispositivos. Silencio si nada urgente.
+    for (const email of Object.keys(ROLES)) {
+      const rol = ROLES[email];
       const esPriv = rol === 'admin' || rol === 'seguimiento';
 
       const suyas = esPriv ? activas : activas.filter((o) => o.creadoPor === email);
@@ -92,8 +93,29 @@ export default async function handler(req, res) {
 
       const titulo = esPriv ? 'WORK-LIFE · Resumen del día' : 'WORK-LIFE · Tus órdenes';
       const cuerpo = partes.join(' · ');
-      const tokens = tokensPorEmail[email];
 
+      // 4a) Notificación DENTRO de la app (campanita). Reemplaza el resumen anterior
+      //     no leído para que solo quede el más reciente y no se acumule.
+      try {
+        const previos = await db.collection('notificaciones').where('para', '==', email).get();
+        const aBorrar = previos.docs.filter((d) => {
+          const x = d.data();
+          return x.tipo === 'resumen' && x.leida === false;
+        });
+        await Promise.all(aBorrar.map((d) => d.ref.delete()));
+        await db.collection('notificaciones').add({
+          para: email, titulo, cuerpo, tipo: 'resumen', leida: false, fecha: FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        resultados.push({ email, notif: false, motivo: e.message });
+      }
+
+      // 4b) Push a sus dispositivos (si tiene)
+      const tokens = tokensPorEmail[email] || [];
+      if (tokens.length === 0) {
+        resultados.push({ email, enviado: false, motivo: 'sin tokens (solo in-app)' });
+        continue;
+      }
       try {
         const resp = await messaging.sendEachForMulticast({
           tokens,

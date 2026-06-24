@@ -3135,21 +3135,29 @@ Object.keys(form).forEach(campo => {
     }
   };
 
-  const duplicar = async (id) => {
-    const orig = ordenes.find(o => o.id == id);
+  // Crea una copia limpia a partir de los datos de una orden, SIN modificar la original
+  const construirCopia = async (orig) => {
     if (!orig) return;
     const copia = JSON.parse(JSON.stringify(orig));
-    copia.id = Date.now();
+    // id de documento único (texto) — evita chocar/sobrescribir otras órdenes
+    copia.id = "o" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    copia.seguimientoToken = genToken();   // seguimiento propio, no compartido con la original
     copia.numero = await obtenerSiguienteNumero();
     copia.fecha = new Date().toISOString().slice(0, 10);
     copia.fechaRequerida = "";
+    copia.fechaReprogramada = "";
     copia.etapa = "nueva";
+    copia.bordador = "";
     copia.creadoPor = usuario.email;
     copia.creadoPorNombre = usuario.displayName || usuario.email;
-    copia.historial = [{ etapa:"nueva", fecha: new Date().toISOString(), nota: "Duplicada de orden #"+orig.numero+" por "+usuario.email }];
+    copia.historial = [{ etapa:"nueva", fecha: new Date().toISOString(), nota: "Duplicada de orden #"+(orig.numero||"")+" por "+(usuario.displayName||usuario.email) }];
     await guardarOrden(copia);
     setActiva(copia.id);
     setVista("detalle");
+  };
+  const duplicar = async (id) => {
+    const orig = ordenes.find(o => o.id == id);
+    await construirCopia(orig);
   };
 const cancelar = async (id) => {
     const orden = ordenes.find(o => o.id == id);
@@ -3525,7 +3533,7 @@ const cancelar = async (id) => {
           onSave={guardar}
           onBack={() => setVista("lista")}
           onDelete={cancelar}
-          onDuplicar={puedeCrear ? async (form) => { await guardar(form); await duplicar(form.id); } : null}
+          onDuplicar={puedeCrear ? (form) => construirCopia(form) : null}
           bordadores={bordadores}
           onAgregarBordador={agregarBordador}
         />

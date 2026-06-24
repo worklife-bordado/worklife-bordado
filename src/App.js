@@ -1026,7 +1026,141 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
 }
 
 // ── Detalle ───────────────────────────────────────────────────────────────────
-function PdfModal({ html, onClose }) {
+// ── Rutas: helpers y generadores de PDF ───────────────────────────────────
+function escHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function resumenRuta(ruta){
+  const paradas = (ruta && ruta.paradas) || [];
+  const entregas = paradas.filter(p => p.tipo === "E");
+  const entregasOk = entregas.filter(p => p.estatus === "ok").length;
+  const noCompletadas = entregas.filter(p => p.estatus === "x").length;
+  const incidenciasCount = paradas.filter(p => p.estatus === "inc").length;
+  const cumplimiento = entregas.length ? Math.round(entregasOk / entregas.length * 100) : 0;
+  const d = (ruta && ruta.docsEntregados) || {};
+  const docsOk = ["facturas","albaranes","ordenes","listas","hoja"].every(k => d[k]);
+  return { cumplimiento, entregasTotal: entregas.length, entregasOk, noCompletadas, incidenciasCount, docsOk };
+}
+const RUTA_PDF_CSS = `
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { font-family: Arial, Helvetica, sans-serif; color:#1a1a1a; }
+  @page { size: letter portrait; margin: 0; }
+  .page { width:215.9mm; min-height:279.4mm; }
+  @media print { .page { width:215.9mm; height:279.4mm; page-break-after:avoid; page-break-inside:avoid; } }
+  .hd { background:#182B55; color:#fff; display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }
+  .hd img { height:42px; }
+  .hd h1 { font-size:18px; letter-spacing:1px; font-weight:800; }
+  .hd .folio { font-size:10px; text-align:right; line-height:1.6; }
+  .body { padding:8mm 12mm; }
+  .sec { font-size:12px; font-weight:bold; color:#182B55; margin:13px 0 5px; }
+  .sec span { font-weight:normal; font-size:10px; color:#666; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { border:1px solid #999; padding:5px 6px; font-size:10.5px; text-align:left; vertical-align:top; }
+  th { background:#e8e8e8; }
+  .leg { font-size:9px; color:#666; margin-top:4px; }
+  .firmas { display:flex; justify-content:space-between; margin-top:46px; }
+  .firma { width:44%; text-align:center; border-top:1px solid #333; padding-top:6px; font-size:10px; }
+  .resumen { display:flex; gap:8px; margin-top:6px; }
+  .resumen .box { flex:1; border:1px solid #999; padding:6px 8px; font-size:10px; }
+  .resumen .box b { display:block; font-size:14px; color:#182B55; }
+`;
+function buildHojaRutaHtml(ruta){
+  const paradas = (ruta.paradas) || [];
+  const total = Math.max(8, paradas.length);
+  let filasProg = "";
+  for (let i=0;i<total;i++){
+    const p = paradas[i];
+    filasProg += `<tr><td style="text-align:center">${i+1}</td><td>${p?escHtml(p.horario):""}</td><td>${p?escHtml(p.cliente):""}</td><td>${p?escHtml(p.direccion):""}</td><td>${p?escHtml(p.contacto):""}</td><td>${p?escHtml(p.noPedido):""}</td><td style="text-align:center">${p?escHtml(p.tipo):""}</td></tr>`;
+  }
+  let filasRes = "";
+  for (let i=0;i<total;i++){
+    const p = paradas[i];
+    filasRes += `<tr><td style="text-align:center">${i+1}</td><td>${p?escHtml(p.cliente):""}</td><td style="text-align:center;white-space:nowrap">OK&nbsp;/&nbsp;X&nbsp;/&nbsp;Inc</td><td></td><td></td></tr>`;
+  }
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><h1>HOJA DE RUTA DIARIA</h1></div>
+    <div class="body">
+      <div class="sec">DATOS GENERALES DEL DÍA</div>
+      <table>
+        <tr><th>Fecha</th><th>Responsable</th><th>Km inicial</th><th>Km final</th></tr>
+        <tr><td>${escHtml(fmtDate(ruta.fecha))}</td><td>${escHtml(ruta.responsable)}</td><td>${escHtml(ruta.kmInicial)}</td><td>${escHtml(ruta.kmFinal)||"___________"}</td></tr>
+      </table>
+      <div class="sec">PARADAS PROGRAMADAS</div>
+      <table>
+        <tr><th style="width:24px">#</th><th style="width:60px">Horario</th><th>Cliente / Destino</th><th>Dirección</th><th>Contacto</th><th style="width:70px">No. Pedido</th><th style="width:42px">Tipo</th></tr>
+        ${filasProg}
+      </table>
+      <div class="leg">Tipo:  E = Entrega a cliente   ·   B = Llevar a externo   ·   R = Recoger de externo   ·   D = Devolución</div>
+      <div class="sec">RESULTADO DE CADA PARADA <span>(el chofer llena a mano)</span></div>
+      <table>
+        <tr><th style="width:24px">#</th><th>Cliente / Destino</th><th style="width:130px">Estatus</th><th style="width:70px">Hora real</th><th>Observaciones / Incidencias</th></tr>
+        ${filasRes}
+      </table>
+      <div class="leg">Estatus:  OK = Completado correctamente   ·   X = No completado   ·   Inc = Incidencia (describir en observaciones)</div>
+    </div>
+  </div></body></html>`;
+}
+function buildCierreRutaHtml(ruta){
+  const paradas = (ruta.paradas) || [];
+  const entregas = paradas.filter(p => p.tipo === "E");
+  const externos = paradas.filter(p => ["B","R","D"].includes(p.tipo));
+  const r = resumenRuta(ruta);
+  const estTxt = (e) => e === "ok" ? "✓" : e === "x" ? "✗" : e === "inc" ? "Inc" : "—";
+  const filasEnt = entregas.length ? entregas.map((p,i) =>
+    `<tr><td style="text-align:center">${i+1}</td><td>${escHtml(p.cliente)}</td><td>${escHtml(p.noPedido)}</td><td>${escHtml(p.horaReal)}</td><td style="text-align:center">${estTxt(p.estatus)}</td><td style="text-align:center">${p.docs?"Sí":"No"}</td><td>${escHtml(p.obs)}</td></tr>`
+  ).join("") : `<tr><td colspan="7" style="text-align:center;color:#888">Sin entregas registradas</td></tr>`;
+  const tipoExt = { B:"Entrega", R:"Recogida", D:"Devolución" };
+  const filasExt = externos.length ? externos.map((p,i) =>
+    `<tr><td style="text-align:center">${i+1}</td><td>${escHtml(p.cliente)}</td><td style="text-align:center">${tipoExt[p.tipo]||escHtml(p.tipo)}</td><td>${escHtml(p.noPedido)}</td><td>${escHtml(p.obs)}</td></tr>`
+  ).join("") : `<tr><td colspan="5" style="text-align:center;color:#888">Sin movimientos con externos</td></tr>`;
+  const d = ruta.docsEntregados || {};
+  const chk = (v) => v ? "&#9745;" : "&#9744;";
+  const docsRows = [
+    ["facturas","Facturas firmadas por clientes (una por pedido entregado)"],
+    ["albaranes","Albaranes de salida firmados por clientes"],
+    ["ordenes","Órdenes de trabajo firmadas por externos (entregas y recogidas)"],
+    ["listas","Listas de empaque firmadas por clientes"],
+    ["hoja","Esta hoja de cierre de ruta completada"],
+  ].map(([k,t]) => `<tr><td style="width:28px;text-align:center;font-size:14px">${chk(d[k])}</td><td>${t}</td></tr>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><div><h1>REPORTE DE CIERRE DE RUTA</h1></div><div class="folio">Folio: ${escHtml(ruta.id)}<br/>Fecha: ${escHtml(fmtDate(ruta.fecha))}</div></div>
+    <div class="body">
+      <div class="sec">DATOS GENERALES</div>
+      <table>
+        <tr><th>Hora salida bodega</th><th>Hora regreso bodega</th><th>Km inicial</th><th>Km final</th></tr>
+        <tr><td>${escHtml(ruta.horaSalida)}</td><td>${escHtml(ruta.horaRegreso)}</td><td>${escHtml(ruta.kmInicial)}</td><td>${escHtml(ruta.kmFinal)}</td></tr>
+      </table>
+      <div class="sec">RESUMEN DE ENTREGAS A CLIENTES</div>
+      <table>
+        <tr><th style="width:24px">#</th><th>Cliente</th><th style="width:70px">No. Pedido</th><th style="width:70px">Hora entrega</th><th style="width:50px">Estatus</th><th style="width:60px">Docs firm.</th><th>Observaciones</th></tr>
+        ${filasEnt}
+      </table>
+      <div class="sec">RESUMEN DE MOVIMIENTOS CON EXTERNOS</div>
+      <table>
+        <tr><th style="width:24px">#</th><th>Proveedor externo</th><th style="width:90px">Tipo</th><th style="width:80px">No. Orden</th><th>Observaciones</th></tr>
+        ${filasExt}
+      </table>
+      <div class="sec">DOCUMENTOS QUE ENTREGA ANDRÉS A KRISIA</div>
+      <table>${docsRows}</table>
+      <div class="sec">RESUMEN DEL DÍA</div>
+      <div class="resumen">
+        <div class="box">Entregas completadas<b>${r.entregasOk} / ${r.entregasTotal}</b></div>
+        <div class="box">No completadas<b>${r.noCompletadas}</b></div>
+        <div class="box">Incidencias<b>${r.incidenciasCount}</b></div>
+        <div class="box">Docs a Krisia<b>${r.docsOk?"Sí":"No"}</b></div>
+        <div class="box">Cumplimiento<b>${r.cumplimiento}%</b></div>
+      </div>
+      <div class="sec">INCIDENCIAS DEL DÍA</div>
+      <table><tr><td style="height:48px">${escHtml(ruta.incidencias)}</td></tr></table>
+      <div class="firmas">
+        <div class="firma">Andrés — Auxiliar de Logística<br/>Fecha: ______________</div>
+        <div class="firma">Krisia — Coordinadora de Operaciones<br/>Fecha: ______________</div>
+      </div>
+    </div>
+  </div></body></html>`;
+}
+
+function PdfModal({ html, onClose, titulo = "Autorización de Trabajo", archivo = "OrdenBordado.html" }) {
   if (!html) return null;
 
   const handleDownload = () => {
@@ -1277,6 +1411,7 @@ const validarYGuardar = (cb) => {
   return (
     <>
     {pdfHtml && <PdfModal html={pdfHtml} onClose={() => setPdfHtml(null)}/>}
+    {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
 {solicitarFirmaModal && (
   <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"#0008",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
     <div style={{background:C.card,borderRadius:12,padding:32,maxWidth:400,width:"90%",border:"1px solid "+C.border}}>
@@ -2378,6 +2513,213 @@ function ModTile({ onClick, children, label, stat, badge, badgeColor }) {
   );
 }
 
+// ── Rutas (hoja de ruta diaria + cierre) ───────────────────────────────────
+const RUTA_TIPOS = [
+  { v:"E", lbl:"Entrega a cliente", col:"#4caf7d" },
+  { v:"B", lbl:"Llevar a externo", col:"#5c8fe0" },
+  { v:"R", lbl:"Recoger de externo", col:"#a855f7" },
+  { v:"D", lbl:"Devolución", col:"#f57c00" },
+];
+function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
+function nuevaParada(tipo){
+  return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaReal:"", docs:false, obs:"" };
+}
+function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) {
+  const [r, setR] = useState(null);
+  const [guardando, setGuardando] = useState(false);
+  const iS = { background:C.bg, border:"1px solid "+C.border, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13, outline:"none", fontFamily:"inherit", width:"100%" };
+  const lbl = { fontSize:11, color:C.muted, marginBottom:4, display:"block" };
+
+  const abrir = (ruta) => setR({
+    docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false },
+    incidencias:"", paradas:[], horaSalida:"", horaRegreso:"", kmInicial:"", kmFinal:"", responsable:"Andrés", estado:"planeada",
+    ...ruta,
+    paradas:(ruta.paradas||[]).map(p => ({ ...nuevaParada(p.tipo), ...p })),
+    docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false, ...(ruta.docsEntregados||{}) },
+  });
+  const nueva = () => setR({
+    id: Date.now(),
+    fecha: new Date().toISOString().slice(0,10),
+    responsable:"Andrés", kmInicial:"", kmFinal:"", horaSalida:"", horaRegreso:"",
+    paradas:[], docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false },
+    incidencias:"", estado:"planeada",
+  });
+  const set = (k,v) => setR(p => ({ ...p, [k]:v }));
+  const setP = (i,k,v) => setR(p => ({ ...p, paradas: p.paradas.map((x,idx)=> idx===i?{...x,[k]:v}:x) }));
+  const quitarP = (i) => setR(p => ({ ...p, paradas: p.paradas.filter((_,idx)=>idx!==i) }));
+  const addActividad = () => setR(p => ({ ...p, paradas:[...p.paradas, nuevaParada("R")] }));
+  const addEntregasHoy = () => setR(p => {
+    const yaIds = new Set(p.paradas.map(x=>x.ordenId).filter(Boolean));
+    const cand = (ordenes||[]).filter(o => o.fechaRequerida === p.fecha && o.etapa !== "cancelada" && !yaIds.has(o.id));
+    const nuevas = cand.map(o => ({ ...nuevaParada("E"), cliente:o.cliente||"", noPedido:String(o.numero||""), ordenId:o.id }));
+    if (nuevas.length === 0) { alert("No hay órdenes con fecha de entrega "+fmtDate(p.fecha)+" para agregar (o ya están en la ruta)."); return p; }
+    return { ...p, paradas:[...p.paradas, ...nuevas] };
+  });
+  const setDocE = (k,v) => setR(p => ({ ...p, docsEntregados:{ ...p.docsEntregados, [k]:v } }));
+  const guardar = async (estado) => {
+    setGuardando(true);
+    try { await onGuardar(estado ? { ...r, estado } : r); setR(null); } catch(e){ alert("Error al guardar: "+e.message); }
+    setGuardando(false);
+  };
+
+  // ── LISTA / HISTORIAL ──
+  if (!r) {
+    const ordenadas = [...(rutas||[])].sort((a,b) => (b.fecha||"").localeCompare(a.fecha||""));
+    return (
+      <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18, flexWrap:"wrap", gap:10}}>
+          <div style={{fontSize:22, fontWeight:800, color:C.text}}>🚚 Rutas</div>
+          <button onClick={nueva} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>+ Nueva ruta del día</button>
+        </div>
+        {ordenadas.length === 0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay rutas. Crea la primera con "Nueva ruta del día".</div>}
+        {ordenadas.map(ruta => {
+          const res = resumenRuta(ruta);
+          const cerrada = ruta.estado === "cerrada";
+          return (
+            <div key={ruta.id} onClick={()=>abrir(ruta)} style={{background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:15, fontWeight:700, color:C.text}}>{fmtDate(ruta.fecha)} · {ruta.responsable||"—"}</div>
+                <div style={{fontSize:12, color:C.muted, marginTop:3}}>{(ruta.paradas||[]).length} paradas · {res.entregasTotal} entregas</div>
+              </div>
+              <div style={{display:"flex", alignItems:"center", gap:10}}>
+                {cerrada
+                  ? <span style={{fontSize:13, fontWeight:800, color: res.cumplimiento>=90?"#4caf7d":res.cumplimiento>=70?"#f5a623":"#c0392b"}}>{res.cumplimiento}% cumplimiento</span>
+                  : <span style={{fontSize:12, fontWeight:700, color:"#f5a623", background:"rgba(245,166,35,.15)", padding:"4px 10px", borderRadius:20}}>Planeada</span>}
+                {cerrada && <span style={{fontSize:11, fontWeight:700, color:"#4caf7d", background:"rgba(76,175,125,.15)", padding:"4px 10px", borderRadius:20}}>Cerrada</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── EDITOR ──
+  const res = resumenRuta(r);
+  return (
+    <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
+        <div style={{fontSize:20, fontWeight:800, color:C.text}}>🚚 {r.estado==="cerrada"?"Ruta":"Hoja de Ruta"} — {fmtDate(r.fecha)}</div>
+        <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
+      </div>
+
+      {/* Datos generales */}
+      <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
+        <div><label style={lbl}>Fecha</label><input type="date" value={r.fecha} onChange={e=>set("fecha",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Responsable (chofer)</label><input value={r.responsable} onChange={e=>set("responsable",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Km inicial</label><input value={r.kmInicial} onChange={e=>set("kmInicial",e.target.value)} style={iS}/></div>
+      </div>
+
+      {/* Paradas */}
+      <div style={{fontSize:15, fontWeight:800, color:C.text, marginBottom:10}}>Paradas y actividades del día</div>
+      <div style={{display:"flex", gap:8, flexWrap:"wrap", marginBottom:14}}>
+        <button onClick={addEntregasHoy} style={{border:"none", borderRadius:9, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"10px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>+ Agregar entregas de hoy</button>
+        <button onClick={addActividad} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.text, padding:"10px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>+ Agregar actividad</button>
+      </div>
+      {r.paradas.length === 0 && <div style={{color:C.muted, fontSize:13, padding:"10px 0 16px"}}>Sin paradas todavía. Usa los botones de arriba para agregarlas.</div>}
+      {r.paradas.map((p,i) => {
+        const ti = tipoInfo(p.tipo);
+        return (
+          <div key={i} style={{background:C.card, border:"1px solid "+C.border, borderRadius:11, padding:"12px 14px", marginBottom:10}}>
+            <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
+              <span style={{fontSize:13, fontWeight:800, color:C.muted}}>{i+1}</span>
+              <select value={p.tipo} onChange={e=>setP(i,"tipo",e.target.value)} style={{...iS, width:"auto", borderColor:ti.col, color:ti.col, fontWeight:700}}>
+                {RUTA_TIPOS.map(t => <option key={t.v} value={t.v} style={{color:C.text}}>{t.v} · {t.lbl}</option>)}
+              </select>
+              {p.ordenId && <span style={{fontSize:10, color:"#4caf7d"}}>desde orden</span>}
+              <button onClick={()=>quitarP(i)} title="Quitar parada" style={{marginLeft:"auto", border:"1px solid "+C.border, background:C.bg, color:"#c0392b", borderRadius:8, width:30, height:30, cursor:"pointer", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>✕</button>
+            </div>
+            <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:8}}>
+              <input value={p.horario} onChange={e=>setP(i,"horario",e.target.value)} placeholder="Horario (ej. 09:00)" style={iS}/>
+              <input value={p.cliente} onChange={e=>setP(i,"cliente",e.target.value)} placeholder="Cliente / Destino" style={iS}/>
+              <input value={p.noPedido} onChange={e=>setP(i,"noPedido",e.target.value)} placeholder="No. Pedido / Orden" style={iS}/>
+              <input value={p.direccion} onChange={e=>setP(i,"direccion",e.target.value)} placeholder="Dirección" style={iS}/>
+              <input value={p.contacto} onChange={e=>setP(i,"contacto",e.target.value)} placeholder="Contacto" style={iS}/>
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{marginTop:8, marginBottom:24}}>
+        <button onClick={()=>onImprimirHoja(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir hoja (carta)</button>
+      </div>
+
+      {/* ── Cierre de Ruta ── */}
+      <div style={{borderTop:"1px solid "+C.border, paddingTop:18}}>
+        <div style={{fontSize:17, fontWeight:800, color:C.text, marginBottom:6}}>Cierre de Ruta</div>
+        {/* Resumen automático */}
+        <div style={{border:"2px solid #4caf7d", background:"rgba(76,175,125,.10)", borderRadius:12, padding:"14px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:18, flexWrap:"wrap"}}>
+          <div style={{fontSize:32, fontWeight:800, color: res.cumplimiento>=90?"#4caf7d":res.cumplimiento>=70?"#f5a623":"#c0392b"}}>{res.cumplimiento}%</div>
+          <div style={{fontSize:13, color:C.text, lineHeight:1.7}}>
+            <div>Cumplimiento del día (automático)</div>
+            <div style={{color:C.muted}}>{res.entregasOk}/{res.entregasTotal} entregas · {res.incidenciasCount} incidencia(s) · Docs: {res.docsOk?"Sí":"No"}</div>
+          </div>
+        </div>
+
+        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
+          <div><label style={lbl}>Hora salida bodega</label><input value={r.horaSalida} onChange={e=>set("horaSalida",e.target.value)} placeholder="08:30" style={iS}/></div>
+          <div><label style={lbl}>Hora regreso bodega</label><input value={r.horaRegreso} onChange={e=>set("horaRegreso",e.target.value)} placeholder="16:45" style={iS}/></div>
+          <div><label style={lbl}>Km final</label><input value={r.kmFinal} onChange={e=>set("kmFinal",e.target.value)} style={iS}/></div>
+        </div>
+
+        {/* Resultado por parada */}
+        <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:10}}>Resultado de cada parada</div>
+        {r.paradas.length === 0 && <div style={{color:C.muted, fontSize:13, marginBottom:14}}>Agrega paradas arriba para registrar su resultado.</div>}
+        {r.paradas.map((p,i) => {
+          const ti = tipoInfo(p.tipo);
+          const esEntrega = p.tipo === "E";
+          return (
+            <div key={i} style={{background:C.card, border:"1px solid "+C.border, borderRadius:11, padding:"12px 14px", marginBottom:10}}>
+              <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:10, flexWrap:"wrap"}}>
+                <span style={{fontSize:12, fontWeight:800, color:C.muted}}>{i+1}</span>
+                <span style={{fontSize:10.5, fontWeight:700, color:"#fff", background:ti.col, borderRadius:10, padding:"2px 9px"}}>{p.tipo}</span>
+                <span style={{fontSize:13.5, fontWeight:700, color:C.text}}>{p.cliente||"(sin nombre)"}</span>
+                {p.noPedido && <span style={{fontSize:12, color:C.accent}}>#{p.noPedido}</span>}
+              </div>
+              <div style={{display:"flex", alignItems:"center", gap:6, flexWrap:"wrap"}}>
+                {[["ok","✓","#4caf7d"],["x","✗","#c0392b"],["inc","Inc","#f5a623"]].map(([v,t,c]) => (
+                  <button key={v} onClick={()=>setP(i,"estatus", p.estatus===v?"":v)} style={{border:"1px solid "+c, borderRadius:18, cursor:"pointer", background: p.estatus===v?c:C.surface, color: p.estatus===v?"#fff":c, padding:"6px 14px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>{t}</button>
+                ))}
+                <input value={p.horaReal} onChange={e=>setP(i,"horaReal",e.target.value)} placeholder="Hora real" style={{...iS, width:90}}/>
+                {esEntrega && (
+                  <span style={{display:"flex", alignItems:"center", gap:6, marginLeft:4}}>
+                    <span style={{fontSize:12, color:C.muted}}>Docs:</span>
+                    <button onClick={()=>setP(i,"docs",true)} style={{border:"1px solid #4caf7d", borderRadius:16, cursor:"pointer", background:p.docs?"#4caf7d":C.surface, color:p.docs?"#fff":"#4caf7d", padding:"6px 12px", fontSize:11.5, fontWeight:700, fontFamily:"inherit"}}>Sí</button>
+                    <button onClick={()=>setP(i,"docs",false)} style={{border:"1px solid "+C.border, borderRadius:16, cursor:"pointer", background:!p.docs?C.muted:C.surface, color:!p.docs?"#fff":C.muted, padding:"6px 12px", fontSize:11.5, fontWeight:700, fontFamily:"inherit"}}>No</button>
+                  </span>
+                )}
+              </div>
+              <input value={p.obs} onChange={e=>setP(i,"obs",e.target.value)} placeholder="Observaciones" style={{...iS, marginTop:8}}/>
+            </div>
+          );
+        })}
+
+        {/* Documentos a Krisia */}
+        <div style={{fontSize:14, fontWeight:800, color:C.text, margin:"16px 0 10px"}}>Documentos que entrega Andrés a Krisia</div>
+        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:8, marginBottom:18}}>
+          {[["facturas","Facturas firmadas por clientes"],["albaranes","Albaranes de salida firmados"],["ordenes","Órdenes de trabajo de externos"],["listas","Listas de empaque firmadas"],["hoja","Esta hoja de cierre completada"]].map(([k,t]) => (
+            <label key={k} style={{display:"flex", alignItems:"center", gap:10, cursor:"pointer", color:C.text, fontSize:13}}>
+              <span onClick={()=>setDocE(k, !r.docsEntregados[k])} style={{width:22, height:22, borderRadius:6, flexShrink:0, border:"2px solid "+(r.docsEntregados[k]?"#4caf7d":C.muted), background:r.docsEntregados[k]?"#4caf7d":"transparent", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:13, fontWeight:800}}>{r.docsEntregados[k]?"✓":""}</span>
+              <span onClick={()=>setDocE(k, !r.docsEntregados[k])}>{t}</span>
+            </label>
+          ))}
+        </div>
+
+        {/* Incidencias */}
+        <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:8}}>Incidencias del día</div>
+        <textarea value={r.incidencias} onChange={e=>set("incidencias",e.target.value)} placeholder="Describe cualquier incidencia (cliente cerrado, dirección incorrecta, etc.)" style={{...iS, minHeight:64, resize:"vertical", marginBottom:18}}/>
+
+        {/* Acciones */}
+        <div style={{display:"flex", gap:10, flexWrap:"wrap", marginBottom:30}}>
+          <button onClick={()=>onImprimirCierre(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir cierre (firmas)</button>
+          <button disabled={guardando} onClick={()=>guardar(null)} style={{border:"1px solid "+C.border, borderRadius:10, cursor:"pointer", background:C.surface, color:C.text, padding:"11px 18px", fontSize:14, fontWeight:700, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar"}</button>
+          <button disabled={guardando} onClick={()=>guardar("cerrada")} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#4caf7d", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>Guardar y cerrar ruta</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Tareas pendientes (personales) ─────────────────────────────────────────
 function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
   const [texto, setTexto] = useState("");
@@ -2436,6 +2778,8 @@ export default function App() {
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
   const [tareas, setTareas] = useState([]);
+  const [rutas, setRutas] = useState([]);
+  const [rutaPdf, setRutaPdf] = useState(null);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -2570,6 +2914,23 @@ if (usuario) {
     });
   };
   const completarTarea = async (id) => { try { await deleteDoc(doc(db, "tareas", id)); } catch (e) {} };
+
+  // ── Rutas (hoja de ruta diaria + cierre) ──────────────────────────────────
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    const unsub = onSnapshot(collection(db, "rutas"), snap => {
+      setRutas(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    return unsub;
+  }, [usuario, rol]);
+  const guardarRuta = async (ruta) => {
+    const id = String(ruta.id);
+    const payload = { ...ruta, id, actualizadoPor: usuario.email, actualizado: new Date().toISOString() };
+    await setDoc(doc(db, "rutas", id), payload, { merge: true });
+  };
+  const imprimirHojaRuta = (ruta) => setRutaPdf({ html: buildHojaRutaHtml(ruta), titulo: "Hoja de Ruta Diaria", archivo: "HojaRuta_"+ruta.fecha+".html" });
+  const imprimirCierreRuta = (ruta) => setRutaPdf({ html: buildCierreRutaHtml(ruta), titulo: "Cierre de Ruta", archivo: "CierreRuta_"+ruta.fecha+".html" });
 
   const login = async () => {
     setLoginErr("");
@@ -3005,6 +3366,23 @@ const cancelar = async (id) => {
               </svg>
             </ModTile>
 
+            {puedeEditarSeguimiento && (
+            <ModTile onClick={() => setVista("rutas")} label="Rutas"
+              stat={<span style={{color:C.muted}}>{rutas.length>0 ? rutas.length+" registrada"+(rutas.length===1?"":"s") : "Crear ruta"}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gRut" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#818cf8"/><stop offset="1" stopColor="#4f46e5"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gRut)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.4" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <rect x="20" y="34" width="28" height="20" rx="2"/>
+                  <path d="M48 40 h9 l7 7 v7 h-16 z"/>
+                </g>
+                <circle cx="31" cy="58" r="5" fill="#fff"/>
+                <circle cx="56" cy="58" r="5" fill="#fff"/>
+              </svg>
+            </ModTile>
+            )}
+
           </div>
 
           <Pendientes
@@ -3111,6 +3489,16 @@ const cancelar = async (id) => {
           onSelectOrden={id => { setActiva(id); setVista("detalle"); }}
           puedeAdmin={puedeEditarSeguimiento}
           onAdministrar={() => setAdminBord(true)}
+        />
+      )}
+
+      {vista === "rutas" && puedeEditarSeguimiento && (
+        <Rutas
+          rutas={rutas}
+          ordenes={ordenes}
+          onGuardar={guardarRuta}
+          onImprimirHoja={imprimirHojaRuta}
+          onImprimirCierre={imprimirCierreRuta}
         />
       )}
 

@@ -2378,6 +2378,50 @@ function ModTile({ onClick, children, label, stat, badge, badgeColor }) {
   );
 }
 
+// ── Tareas pendientes (personales) ─────────────────────────────────────────
+function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
+  const [texto, setTexto] = useState("");
+  const [para, setPara] = useState(asignables[0].email);
+  const [completando, setCompletando] = useState([]);
+  const [confirm, setConfirm] = useState("");
+  const agregar = async () => {
+    const t = texto.trim(); if (!t) return;
+    await onAgregar(t, esAdmin ? para : null);
+    setTexto("");
+    if (esAdmin && para !== asignables[0].email) {
+      const lbl = (asignables.find(a => a.email === para) || {}).label || "usuario";
+      setConfirm("✓ Tarea asignada a " + lbl);
+      setTimeout(() => setConfirm(""), 2500);
+    }
+  };
+  const marcar = (id) => { setCompletando(c => [...c, id]); setTimeout(() => onCompletar(id), 650); };
+  return (
+    <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"20px 18px",marginTop:24}}>
+      <div style={{fontSize:17,fontWeight:800,color:C.text,marginBottom:14}}>📋 Pendientes</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+        <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") agregar(); }} placeholder="Escribe una tarea..." style={{flex:"1 1 180px",minWidth:0,background:C.bg,border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"11px 14px",fontSize:14,outline:"none"}}/>
+        {esAdmin && (
+          <select value={para} onChange={e=>setPara(e.target.value)} title="Asignar a" style={{background:C.bg,border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"11px 12px",fontSize:13,outline:"none"}}>
+            {asignables.map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
+          </select>
+        )}
+        <button onClick={agregar} style={{border:"none",borderRadius:9,cursor:"pointer",background:C.accent,color:"#1a1d27",padding:"11px 18px",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>Agregar</button>
+      </div>
+      {confirm && <div style={{color:"#4caf7d",fontSize:13,fontWeight:700,marginBottom:10}}>{confirm}</div>}
+      {tareas.length === 0 && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>No tienes pendientes 🎉</div>}
+      {tareas.map(t => {
+        const done = completando.includes(t.id);
+        return (
+          <div key={t.id} onClick={()=>!done && marcar(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 4px",borderBottom:"1px solid "+C.border,cursor:"pointer",opacity:done?0.4:1,transition:"opacity 0.35s"}}>
+            <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
+            <div style={{flex:1,color:C.text,fontSize:14,textDecoration:done?"line-through":"none"}}>{t.texto}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
@@ -2391,6 +2435,7 @@ export default function App() {
   const [ordenes,  setOrdenes]  = useState([]);
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
+  const [tareas, setTareas] = useState([]);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -2505,6 +2550,26 @@ if (usuario) {
     const nueva = bordadores.filter(b => b !== nombre);
     await setDoc(doc(db, "config", "bordadores"), { lista: nueva }, { merge: true });
   };
+
+  // ── Tareas pendientes (personales) ────────────────────────────────────────
+  useEffect(() => {
+    if (!usuario?.email) return;
+    const q = query(collection(db, "tareas"), where("para", "==", usuario.email));
+    const unsub = onSnapshot(q, snap => {
+      const arr = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      arr.sort((a, b) => (a.fecha?.seconds || 0) - (b.fecha?.seconds || 0));
+      setTareas(arr);
+    });
+    return unsub;
+  }, [usuario]);
+  const agregarTarea = async (texto, paraEmail) => {
+    const target = (rol === "admin" && paraEmail) ? paraEmail : usuario.email;
+    await addDoc(collection(db, "tareas"), {
+      texto, para: target, creadoPor: usuario.email,
+      creadoPorNombre: usuario.displayName || usuario.email, fecha: serverTimestamp(),
+    });
+  };
+  const completarTarea = async (id) => { try { await deleteDoc(doc(db, "tareas", id)); } catch (e) {} };
 
   const login = async () => {
     setLoginErr("");
@@ -2941,6 +3006,14 @@ const cancelar = async (id) => {
             </ModTile>
 
           </div>
+
+          <Pendientes
+            tareas={tareas}
+            onAgregar={agregarTarea}
+            onCompletar={completarTarea}
+            esAdmin={rol === "admin"}
+            asignables={[{email: usuario.email, label: "Yo"}, ...Object.keys(ROLES).filter(e => e !== usuario.email).map(e => ({email: e, label: e.split("@")[0] + " · " + ROLES[e]}))]}
+          />
         </div>
       )}
 

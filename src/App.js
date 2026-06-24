@@ -2728,6 +2728,191 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
 }
 
 // ── Tareas pendientes (personales) ─────────────────────────────────────────
+// ── Remisiones de muestras físicas ─────────────────────────────────────────
+function nuevaPrendaRem(){ return { cantidad:"", concepto:"", talla:"", color:"", devuelta:false, fechaDevuelta:"" }; }
+function resumenRemision(rem){
+  const prendas = (rem && rem.prendas) || [];
+  const totalItems = prendas.length;
+  const totalPiezas = prendas.reduce((s,p)=> s + (parseInt(p.cantidad)||0), 0);
+  const devItems = prendas.filter(p=>p.devuelta);
+  const devPiezas = devItems.reduce((s,p)=> s + (parseInt(p.cantidad)||0), 0);
+  const pendPiezas = totalPiezas - devPiezas;
+  let estado = "prestamo";
+  if (totalItems>0 && devItems.length===totalItems) estado="devuelta";
+  else if (devItems.length>0) estado="parcial";
+  return { totalItems, totalPiezas, devItems:devItems.length, devPiezas, pendPiezas, estado };
+}
+function buildRemisionHtml(rem){
+  const prendas = (rem.prendas)||[];
+  const total = Math.max(8, prendas.length);
+  let filas="";
+  for(let i=0;i<total;i++){
+    const p=prendas[i];
+    filas += `<tr><td style="text-align:center">${i+1}</td><td style="text-align:center">${p?escHtml(p.cantidad):""}</td><td>${p?escHtml(p.concepto):""}</td><td style="text-align:center">${p?escHtml(p.talla):""}</td><td>${p?escHtml(p.color):""}</td></tr>`;
+  }
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><div><h1>REMISIÓN DE MUESTRAS</h1></div><div class="folio">No. ${escHtml(rem.numero)}<br/>Fecha: ${escHtml(fmtDate(rem.fecha))}</div></div>
+    <div class="body">
+      <div class="sec">DATOS DEL CLIENTE</div>
+      <table>
+        <tr><th style="width:120px">Empresa</th><td colspan="3">${escHtml(rem.cliente)}</td></tr>
+        <tr><th>Contacto</th><td>${escHtml(rem.contactoNombre)}</td><th style="width:90px">Teléfono</th><td>${escHtml(rem.contactoTelefono)}</td></tr>
+        <tr><th>Celular</th><td>${escHtml(rem.contactoCelular)}</td><th>Correo</th><td>${escHtml(rem.contactoCorreo)}</td></tr>
+      </table>
+      <div class="sec">RELACIÓN DE PRENDAS / MUESTRAS</div>
+      <table>
+        <tr><th style="width:24px">#</th><th style="width:55px">Cant.</th><th>Concepto</th><th style="width:60px">Talla</th><th style="width:120px">Color</th></tr>
+        ${filas}
+      </table>
+      ${rem.comentarios ? `<div class="sec">OBSERVACIONES</div><div style="font-size:11px;border:1px solid #999;padding:8px;min-height:38px">${escHtml(rem.comentarios)}</div>` : ""}
+      <div class="leg" style="margin-top:8px">Las prendas/muestras descritas se entregan al cliente en calidad de <b>PRÉSTAMO</b>. El cliente se compromete a devolverlas en las mismas condiciones en que las recibió. Favor de firmar y sellar de recibido.</div>
+      <div class="firmas">
+        <div class="firma">Entregó — WORK-LIFE</div>
+        <div class="firma">Recibió — Nombre, firma y sello del cliente</div>
+      </div>
+    </div>
+  </div></body></html>`;
+}
+function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) {
+  const [r, setR] = useState(null);
+  const [guardando, setGuardando] = useState(false);
+  const iS = { background:C.bg, border:"1px solid "+C.border, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13, outline:"none", fontFamily:"inherit", width:"100%" };
+  const lbl = { fontSize:11, color:C.muted, marginBottom:4, display:"block" };
+
+  const abrir = (rem) => setR({ prendas:[], comentarios:"", ...rem, prendas:(rem.prendas||[]).map(p=>({ ...nuevaPrendaRem(), ...p })) });
+  const nueva = () => setR({
+    id:null, numero:"", fecha:new Date().toISOString().slice(0,10),
+    cliente:"", contactoNombre:"", contactoTelefono:"", contactoCelular:"", contactoCorreo:"",
+    prendas:[nuevaPrendaRem()], comentarios:"", estado:"prestamo",
+  });
+  const set = (k,v)=> setR(p=>({...p,[k]:v}));
+  const setPr = (i,k,v)=> setR(p=>({...p, prendas:p.prendas.map((x,idx)=> idx===i?{...x,[k]:v}:x)}));
+  const addPr = ()=> setR(p=>({...p, prendas:[...p.prendas, nuevaPrendaRem()]}));
+  const quitarPr = (i)=> setR(p=>({...p, prendas:p.prendas.filter((_,idx)=>idx!==i)}));
+  const toggleDev = (i)=> setR(p=>({...p, prendas:p.prendas.map((x,idx)=> idx===i?{...x, devuelta:!x.devuelta, fechaDevuelta: !x.devuelta ? new Date().toISOString().slice(0,10) : ""}:x)}));
+  const guardar = async ()=>{
+    if(!(r.cliente||"").trim()){ alert("Indica la empresa cliente."); return; }
+    setGuardando(true);
+    try { const saved = await onGuardar(r); if(saved) setR(saved); } catch(e){ alert("Error al guardar: "+e.message); }
+    setGuardando(false);
+  };
+  const imprimir = ()=>{
+    if(!r.numero){ alert("Guarda la remisión primero para asignarle número."); return; }
+    onImprimir(r);
+  };
+
+  // ── LISTA ──
+  if(!r){
+    const ordenadas = [...(remisiones||[])].sort((a,b)=> (b.fecha||"").localeCompare(a.fecha||"") || (parseInt(b.numero)||0)-(parseInt(a.numero)||0));
+    const enPrestamo = ordenadas.filter(x=> resumenRemision(x).estado!=="devuelta");
+    const piezasFuera = enPrestamo.reduce((s,x)=> s + resumenRemision(x).pendPiezas, 0);
+    return (
+      <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:10}}>
+          <div style={{fontSize:22, fontWeight:800, color:C.text}}>📦 Remisiones de muestras</div>
+          <button onClick={nueva} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>+ Nueva remisión</button>
+        </div>
+        <div style={{display:"flex", gap:10, marginBottom:16, flexWrap:"wrap"}}>
+          <div style={{flex:1, minWidth:140, background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px"}}>
+            <div style={{fontSize:12, color:C.muted}}>En préstamo</div>
+            <div style={{fontSize:22, fontWeight:800, color:"#f5a623"}}>{enPrestamo.length}</div>
+          </div>
+          <div style={{flex:1, minWidth:140, background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px"}}>
+            <div style={{fontSize:12, color:C.muted}}>Piezas fuera de bodega</div>
+            <div style={{fontSize:22, fontWeight:800, color:C.text}}>{piezasFuera}</div>
+          </div>
+        </div>
+        {ordenadas.length===0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay remisiones. Crea la primera con "Nueva remisión".</div>}
+        {ordenadas.map(rem=>{
+          const res = resumenRemision(rem);
+          const col = res.estado==="devuelta" ? "#4caf7d" : res.estado==="parcial" ? "#f5a623" : "#c0392b";
+          const txt = res.estado==="devuelta" ? "Devuelta" : res.estado==="parcial" ? "Parcial" : "En préstamo";
+          return (
+            <div key={rem.id} onClick={()=>abrir(rem)} style={{background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:15, fontWeight:700, color:C.text}}>No. {rem.numero||"—"} · {rem.cliente||"—"}</div>
+                <div style={{fontSize:12, color:C.muted, marginTop:3}}>{fmtDate(rem.fecha)} · {res.totalPiezas} pza · {res.devPiezas} devueltas</div>
+              </div>
+              <span style={{fontSize:12, fontWeight:800, color:col, background:col+"22", padding:"4px 12px", borderRadius:20, whiteSpace:"nowrap"}}>{txt}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── EDITOR ──
+  const res = resumenRemision(r);
+  return (
+    <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
+        <div style={{fontSize:20, fontWeight:800, color:C.text}}>📦 Remisión {r.numero?("No. "+r.numero):"(nueva)"}</div>
+        <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
+      </div>
+
+      {/* Datos generales */}
+      <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:16}}>
+        <div><label style={lbl}>Fecha</label><input type="date" value={r.fecha} onChange={e=>set("fecha",e.target.value)} style={iS}/></div>
+        <div style={{gridColumn:"span 2"}}><label style={lbl}>Empresa cliente</label><input value={r.cliente} onChange={e=>set("cliente",e.target.value)} style={iS} placeholder="Nombre de la empresa"/></div>
+      </div>
+
+      {/* Contacto */}
+      <div style={{fontSize:13, fontWeight:800, color:C.text, margin:"6px 0 8px"}}>Contacto</div>
+      <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
+        <div><label style={lbl}>Nombre</label><input value={r.contactoNombre} onChange={e=>set("contactoNombre",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Teléfono</label><input value={r.contactoTelefono} onChange={e=>set("contactoTelefono",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Celular</label><input value={r.contactoCelular} onChange={e=>set("contactoCelular",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Correo</label><input value={r.contactoCorreo} onChange={e=>set("contactoCorreo",e.target.value)} style={iS}/></div>
+      </div>
+
+      {/* Prendas */}
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+        <div style={{fontSize:13, fontWeight:800, color:C.text}}>Prendas / muestras</div>
+        <button onClick={addPr} style={{border:"1px solid "+C.border, borderRadius:8, cursor:"pointer", background:C.surface, color:C.text, padding:"6px 12px", fontSize:12, fontWeight:700, fontFamily:"inherit"}}>+ Agregar prenda</button>
+      </div>
+      {r.prendas.map((p,i)=>(
+        <div key={i} style={{background:p.devuelta?"rgba(76,175,125,.08)":C.card, border:"1px solid "+(p.devuelta?"#4caf7d55":C.border), borderRadius:10, padding:"10px 12px", marginBottom:8}}>
+          <div style={{display:"grid", gridTemplateColumns:"64px 1fr 64px 1fr 28px", gap:8, alignItems:"end"}}>
+            <div><label style={lbl}>Cant.</label><input value={p.cantidad} onChange={e=>setPr(i,"cantidad",e.target.value)} style={iS} inputMode="numeric"/></div>
+            <div><label style={lbl}>Concepto</label><input value={p.concepto} onChange={e=>setPr(i,"concepto",e.target.value)} style={iS} placeholder="Ej. Camisola industrial"/></div>
+            <div><label style={lbl}>Talla</label><input value={p.talla} onChange={e=>setPr(i,"talla",e.target.value)} style={iS}/></div>
+            <div><label style={lbl}>Color</label><input value={p.color} onChange={e=>setPr(i,"color",e.target.value)} style={iS}/></div>
+            <button onClick={()=>quitarPr(i)} title="Quitar" style={{border:"none", background:"transparent", color:C.muted, fontSize:20, cursor:"pointer", paddingBottom:6}}>×</button>
+          </div>
+          <div style={{marginTop:8}}>
+            <label style={{display:"inline-flex", alignItems:"center", gap:7, fontSize:12, color:p.devuelta?"#4caf7d":C.muted, cursor:"pointer", fontWeight:700}}>
+              <input type="checkbox" checked={!!p.devuelta} onChange={()=>toggleDev(i)} style={{width:16,height:16,accentColor:"#4caf7d"}}/>
+              {p.devuelta ? ("Devuelta a bodega"+(p.fechaDevuelta?(" · "+fmtDate(p.fechaDevuelta)):"")) : "Marcar como devuelta"}
+            </label>
+          </div>
+        </div>
+      ))}
+
+      {/* Observaciones */}
+      <div style={{marginTop:14}}>
+        <label style={lbl}>Observaciones</label>
+        <textarea value={r.comentarios} onChange={e=>set("comentarios",e.target.value)} style={{...iS, minHeight:60, resize:"vertical"}}/>
+      </div>
+
+      {/* Resumen */}
+      <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"12px 14px", margin:"16px 0", display:"flex", gap:22, flexWrap:"wrap"}}>
+        <div><div style={{fontSize:11, color:C.muted}}>Total piezas</div><div style={{fontSize:18, fontWeight:800, color:C.text}}>{res.totalPiezas}</div></div>
+        <div><div style={{fontSize:11, color:C.muted}}>Devueltas</div><div style={{fontSize:18, fontWeight:800, color:"#4caf7d"}}>{res.devPiezas}</div></div>
+        <div><div style={{fontSize:11, color:C.muted}}>Pendientes</div><div style={{fontSize:18, fontWeight:800, color: res.pendPiezas>0?"#f5a623":"#4caf7d"}}>{res.pendPiezas}</div></div>
+      </div>
+
+      {/* Acciones */}
+      <div style={{display:"flex", gap:10, flexWrap:"wrap", marginTop:10, alignItems:"center"}}>
+        <button onClick={imprimir} style={{border:"1px solid "+C.border, borderRadius:10, cursor:"pointer", background:C.surface, color:C.text, padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir remisión</button>
+        <button onClick={guardar} disabled={guardando} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 22px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar"}</button>
+        {esAdmin && r.id && <button onClick={async()=>{ if(window.confirm("¿Eliminar esta remisión? No se puede deshacer.")){ await onEliminar(r.id); setR(null); } }} style={{border:"1px solid #c0392b55", borderRadius:10, cursor:"pointer", background:"transparent", color:"#c0392b", padding:"11px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit", marginLeft:"auto"}}>Eliminar</button>}
+      </div>
+      {!r.numero && <div style={{fontSize:11, color:C.muted, marginTop:8}}>El número de remisión se asigna automáticamente al guardar.</div>}
+    </div>
+  );
+}
+
 function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
   const [texto, setTexto] = useState("");
   const [para, setPara] = useState(asignables[0].email);
@@ -2787,6 +2972,8 @@ export default function App() {
   const [tareas, setTareas] = useState([]);
   const [rutas, setRutas] = useState([]);
   const [rutaPdf, setRutaPdf] = useState(null);
+  const [remisiones, setRemisiones] = useState([]);
+  const [remisionPdf, setRemisionPdf] = useState(null);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -2938,6 +3125,37 @@ if (usuario) {
   };
   const imprimirHojaRuta = (ruta) => setRutaPdf({ html: buildHojaRutaHtml(ruta), titulo: "Hoja de Ruta Diaria", archivo: "HojaRuta_"+ruta.fecha+".html" });
   const imprimirCierreRuta = (ruta) => setRutaPdf({ html: buildCierreRutaHtml(ruta), titulo: "Cierre de Ruta", archivo: "CierreRuta_"+ruta.fecha+".html" });
+
+  // ── Remisiones de muestras físicas ────────────────────────────────────────
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    const unsub = onSnapshot(collection(db, "remisiones"), snap => {
+      setRemisiones(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    return unsub;
+  }, [usuario, rol]);
+  const obtenerSiguienteNumeroRemision = async () => {
+    const ref = doc(db, "config", "contadorRemisiones");
+    const nuevo = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const actual = snap.exists() ? (snap.data().valor || 999) : 999;
+      const sig = Math.max(999, actual) + 1;
+      tx.set(ref, { valor: sig }, { merge: true });
+      return sig;
+    });
+    return String(nuevo);
+  };
+  const guardarRemision = async (rem) => {
+    let r = { ...rem };
+    if (!r.id) r.id = "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    if (!r.numero) r.numero = await obtenerSiguienteNumeroRemision();
+    r = { ...r, creadoPor: r.creadoPor || usuario.email, creadoPorNombre: r.creadoPorNombre || (usuario.displayName || usuario.email), actualizado: new Date().toISOString() };
+    await setDoc(doc(db, "remisiones", String(r.id)), r, { merge: true });
+    return r;
+  };
+  const eliminarRemision = async (id) => { try { await deleteDoc(doc(db, "remisiones", String(id))); } catch (e) { alert("Error al eliminar: " + e.message); } };
+  const imprimirRemision = (rem) => setRemisionPdf({ html: buildRemisionHtml(rem), titulo: "Remisión No. " + (rem.numero || ""), archivo: "Remision_" + (rem.numero || "nueva") + ".html" });
 
   const login = async () => {
     setLoginErr("");
@@ -3398,6 +3616,22 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {puedeEditarSeguimiento && (
+            <ModTile onClick={() => setVista("remisiones")} label="Remisiones"
+              stat={<span style={{color:C.muted}}>{(() => { const n = remisiones.filter(x => resumenRemision(x).estado !== "devuelta").length; return n>0 ? n+" en préstamo" : (remisiones.length>0 ? "Todo en bodega" : "Crear remisión"); })()}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gRem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#2dd4bf"/><stop offset="1" stopColor="#0d9488"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gRem)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.2" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <path d="M28 30 h26 l8 8 v22 a2 2 0 0 1 -2 2 h-30 a2 2 0 0 1 -2 -2 z"/>
+                  <path d="M54 30 v8 h8"/>
+                  <path d="M32 48 h20 M32 55 h14"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
           </div>
 
           <Pendientes
@@ -3522,6 +3756,16 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "remisiones" && puedeEditarSeguimiento && (
+        <Remisiones
+          remisiones={remisiones}
+          onGuardar={guardarRemision}
+          onImprimir={imprimirRemision}
+          onEliminar={eliminarRemision}
+          esAdmin={rol === "admin"}
+        />
+      )}
+
      {vista === "detalle" && ordenData && (
         <Detalle
           key={ordenData.id}
@@ -3562,6 +3806,7 @@ const cancelar = async (id) => {
       )}
 
       {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
+      {remisionPdf && <PdfModal html={remisionPdf.html} titulo={remisionPdf.titulo} archivo={remisionPdf.archivo} onClose={() => setRemisionPdf(null)}/>}
     </div>
   );
 }

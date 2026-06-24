@@ -2364,6 +2364,20 @@ function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministr
   );
 }
 
+// ── Ficha de módulo estilo Odoo (ícono + badge + etiqueta + mini-dato) ──────
+function ModTile({ onClick, children, label, stat, badge, badgeColor }) {
+  return (
+    <div onClick={onClick} style={{textAlign:"center",cursor:"pointer"}}>
+      <div style={{position:"relative",width:72,height:72,margin:"0 auto"}}>
+        {children}
+        {badge>0 && <span style={{position:"absolute",top:-6,right:-6,minWidth:22,height:22,padding:"0 5px",borderRadius:11,background:badgeColor,color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",border:"2px solid "+C.bg,boxSizing:"border-box"}}>{badge}</span>}
+      </div>
+      <div style={{fontSize:14,fontWeight:800,color:C.text,marginTop:10}}>{label}</div>
+      <div style={{fontSize:12,marginTop:4,minHeight:16}}>{stat}</div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
@@ -2806,6 +2820,8 @@ const cancelar = async (id) => {
     }
   });
   const homeCumplimiento = _conFecha ? Math.round(_onTime/_conFecha*100) : null;
+  const homeActivasCount = ordenes.filter(o => _homeAct.includes(o.etapa)).length;
+  const homeSinAsignar = ordenes.filter(o => _homeAct.includes(o.etapa) && !(o.bordador||"").trim()).length;
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Barlow','Segoe UI',sans-serif"}}>
@@ -2836,38 +2852,37 @@ const cancelar = async (id) => {
       </div>
 
       {vista === "home" && (
-        <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
-          <Semaforo semaforo={semaforo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }} puedeEditar={puedeEditarSeguimiento} />
-          {puedeCrear && (
-            <button onClick={crear} style={{width:"100%",border:"none",borderRadius:14,cursor:"pointer",background:"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",margin:"4px 0 18px",fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit"}}>
-              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:"50%",background:"rgba(255,255,255,0.25)",fontSize:22,lineHeight:1}}>+</span>
-              Nueva Orden
-            </button>
-          )}
-          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "1fr" : "repeat(2,1fr)",gap:16,marginTop:8}}>
-            <div onClick={() => setVista("lista")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
+        <div style={{maxWidth:1140,margin:"0 auto",padding:"0 16px 40px"}}>
+          <div style={{display:"flex", gap:14, flexDirection: window.innerWidth < 760 ? "column" : "row", alignItems:"stretch"}}>
+            <div style={{flex: window.innerWidth < 760 ? "none" : 1, minWidth:0}}>
+              <Semaforo semaforo={semaforo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }} puedeEditar={puedeEditarSeguimiento} />
+            </div>
+            {puedeCrear && (
+              <button onClick={crear} style={{width: window.innerWidth < 760 ? "100%" : 260, flexShrink:0, border:"none",borderRadius:14,cursor:"pointer",background:"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",marginBottom:20,fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit"}}>
+                <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:"50%",background:"rgba(255,255,255,0.25)",fontSize:22,lineHeight:1}}>+</span>
+                Nueva Orden
+              </button>
+            )}
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(2,1fr)" : "repeat(5,1fr)",gap:18,marginTop:10}}>
+
+            <ModTile onClick={() => setVista("lista")} label="Órdenes" badge={homeVencidas} badgeColor="#c0392b"
+              stat={homeVencenHoy>0 ? <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeVencenHoy} vencen hoy</span>
+                  : homeVencidas>0 ? <span style={{color:"#c0392b",fontWeight:700}}>🔴 {homeVencidas} vencidas</span>
+                  : <span style={{color:"#4caf7d",fontWeight:700}}>✅ Sin atrasos</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gOrd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fbb040"/><stop offset="1" stopColor="#f57c00"/></linearGradient></defs>
                 <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gOrd)"/>
                 <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
                 <path d="M22 33 L35 26 Q44 34 53 26 L66 33 L59 43 L56 40 L56 62 L32 62 L32 40 L29 43 Z" stroke="#fff" strokeWidth="3.6" fill="none" strokeLinejoin="round" strokeLinecap="round"/>
                 <circle cx="44" cy="49" r="4.5" stroke="#fff" strokeWidth="2.6" fill="none"/>
               </svg>
-              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Órdenes</div>
-              <div style={{fontSize:13,marginTop:6}}>
-                {(homeVencidas>0 || homeVencenHoy>0) ? (
-                  <span>
-                    <span style={{color:"#c0392b",fontWeight:700}}>🔴 {homeVencidas} vencidas</span>
-                    <span style={{color:C.muted}}> · </span>
-                    <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeVencenHoy} vencen hoy</span>
-                  </span>
-                ) : (
-                  <span style={{color:"#4caf7d",fontWeight:700}}>✅ Sin atrasos</span>
-                )}
-              </div>
-            </div>
-            <div onClick={() => setVista("calendario")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
+            </ModTile>
+
+            <ModTile onClick={() => setVista("calendario")} label="Calendario"
+              stat={<span style={{color:C.muted}}>{homeEntregasSemana>0 ? homeEntregasSemana+" esta semana" : (homeProxima ? "Próx. "+homeProxima : "Sin entregas")}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gCal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3aa0ff"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
                 <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCal)"/>
                 <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
@@ -2883,14 +2898,11 @@ const cancelar = async (id) => {
                   <line x1="37" y1="57" x2="41" y2="59"/>
                 </g>
               </svg>
-              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Calendario</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:6,lineHeight:1.5}}>
-                {homeEntregasSemana} entrega{homeEntregasSemana===1?"":"s"} esta semana
-                {homeProxima && <><br/>Próxima: <span style={{color:C.accent,fontWeight:700}}>{homeProxima}</span></>}
-              </div>
-            </div>
-            <div onClick={() => setVista("dashboard")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
+            </ModTile>
+
+            <ModTile onClick={() => setVista("dashboard")} label="Indicadores"
+              stat={homeCumplimiento!==null ? <span style={{color: homeCumplimiento>=95?"#4caf7d":homeCumplimiento>=90?"#f5a623":"#c0392b",fontWeight:700}}>{homeCumplimiento}% cumpl.</span> : <span style={{color:C.muted}}>Sin datos</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gInd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5bd49a"/><stop offset="1" stopColor="#2e9e6b"/></linearGradient></defs>
                 <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gInd)"/>
                 <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
@@ -2898,19 +2910,11 @@ const cancelar = async (id) => {
                 <path d="M44 25 A19 19 0 1 1 25 44" stroke="#fff" strokeWidth="6" fill="none" strokeLinecap="round"/>
                 <text x="44" y="49" fontFamily="Arial" fontSize="14" fontWeight="bold" fill="#fff" textAnchor="middle">%</text>
               </svg>
-              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Indicadores</div>
-              <div style={{fontSize:13,marginTop:6}}>
-                {homeCumplimiento!==null ? (
-                  <span style={{color: homeCumplimiento>=95?"#4caf7d":homeCumplimiento>=90?"#f5a623":"#c0392b",fontWeight:700}}>
-                    Cumplimiento fecha: {homeCumplimiento}%
-                  </span>
-                ) : (
-                  <span style={{color:C.muted}}>Cumplimiento fecha: sin datos</span>
-                )}
-              </div>
-            </div>
-            <div onClick={() => setVista("kanban")} style={{background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"34px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="66" height="66" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
+            </ModTile>
+
+            <ModTile onClick={() => setVista("kanban")} label="Tablero"
+              stat={<span style={{color:C.muted}}>{homeActivasCount} activa{homeActivasCount===1?"":"s"}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gTab" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c084fc"/><stop offset="1" stopColor="#7c3aed"/></linearGradient></defs>
                 <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gTab)"/>
                 <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
@@ -2923,23 +2927,19 @@ const cancelar = async (id) => {
                   <rect x="54" y="26" width="13" height="10" rx="3"/>
                 </g>
               </svg>
-              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Tablero</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:6}}>Producción por etapa</div>
-            </div>
-            <div onClick={() => setVista("carga")} style={{gridColumn: window.innerWidth < 600 ? "auto" : "1 / -1", background:C.surface,border:"1px solid "+C.border,borderTop:"3px solid "+C.accent,borderRadius:14,padding:"28px 20px",textAlign:"center",cursor:"pointer"}}>
-              <svg width="58" height="58" viewBox="0 0 88 88" style={{display:"block",margin:"0 auto"}}>
-                <defs><linearGradient id="gCar" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#22d3ee"/><stop offset="1" stopColor="#0891b2"/></linearGradient></defs>
-                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCar)"/>
+            </ModTile>
+
+            <ModTile onClick={() => setVista("carga")} label="Bordadores" badge={homeSinAsignar} badgeColor="#f57c00"
+              stat={homeSinAsignar>0 ? <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeSinAsignar} sin asignar</span> : <span style={{color:C.muted}}>{bordadores.length} bordador{bordadores.length===1?"":"es"}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gBor" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#2dd4bf"/><stop offset="1" stopColor="#0d9488"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gBor)"/>
                 <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
-                <g fill="#fff">
-                  <rect x="22" y="28" width="44" height="9" rx="4.5"/>
-                  <rect x="22" y="42" width="30" height="9" rx="4.5" fillOpacity="0.85"/>
-                  <rect x="22" y="56" width="18" height="9" rx="4.5" fillOpacity="0.7"/>
-                </g>
+                <circle cx="44" cy="34" r="9" stroke="#fff" strokeWidth="3.5" fill="none"/>
+                <path d="M27 60 v-3 a17 17 0 0 1 34 0 v3" stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
               </svg>
-              <div style={{fontSize:20,fontWeight:800,color:C.text,marginTop:10}}>Carga por Bordador</div>
-              <div style={{fontSize:13,color:C.muted,marginTop:6}}>Quién está saturado</div>
-            </div>
+            </ModTile>
+
           </div>
         </div>
       )}

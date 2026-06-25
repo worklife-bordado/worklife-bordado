@@ -2508,14 +2508,15 @@ function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministr
 
 // ── Ficha de módulo estilo Odoo (ícono + badge + etiqueta + mini-dato) ──────
 function ModTile({ onClick, children, label, stat, badge, badgeColor }) {
+  const mob = typeof window !== "undefined" && window.innerWidth < 600;
   return (
     <div onClick={onClick} style={{textAlign:"center",cursor:"pointer"}}>
-      <div style={{position:"relative",width:72,height:72,margin:"0 auto"}}>
+      <div className="modtile-ico" style={{position:"relative",width:"100%",maxWidth:72,aspectRatio:"1 / 1",margin:"0 auto"}}>
         {children}
         {badge>0 && <span style={{position:"absolute",top:-6,right:-6,minWidth:22,height:22,padding:"0 5px",borderRadius:11,background:badgeColor,color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",border:"2px solid "+C.bg,boxSizing:"border-box"}}>{badge}</span>}
       </div>
-      <div style={{fontSize:14,fontWeight:800,color:C.text,marginTop:10}}>{label}</div>
-      <div style={{fontSize:12,marginTop:4,minHeight:16}}>{stat}</div>
+      <div style={{fontSize:mob?12:14,fontWeight:800,color:C.text,marginTop:mob?6:10,lineHeight:1.15}}>{label}</div>
+      <div style={{fontSize:mob?10:12,marginTop:4,minHeight:14}}>{stat}</div>
     </div>
   );
 }
@@ -2720,7 +2721,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
         <div style={{display:"flex", gap:10, flexWrap:"wrap", marginBottom:30}}>
           <button onClick={()=>onImprimirCierre(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir cierre (firmas)</button>
           <button disabled={guardando} onClick={()=>guardar(null)} style={{border:"1px solid "+C.border, borderRadius:10, cursor:"pointer", background:C.surface, color:C.text, padding:"11px 18px", fontSize:14, fontWeight:700, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar"}</button>
-          <button disabled={guardando} onClick={()=>guardar("cerrada")} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#4caf7d", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>Guardar y cerrar ruta</button>
+          <button disabled={guardando} onClick={()=>{ if(window.confirm("¿Ya llenaste el apartado \"Cierre de Ruta\" (resultado de cada parada, documentos entregados, etc.)?\n\nAl cerrar, la ruta quedará marcada como CERRADA y se calculará el cumplimiento.")){ guardar("cerrada"); } }} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#4caf7d", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>Guardar y cerrar ruta</button>
         </div>
       </div>
     </div>
@@ -3524,7 +3525,8 @@ const cancelar = async (id) => {
             )}
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(2,1fr)" : "repeat(5,1fr)",gap:18,marginTop:10}}>
+          <style>{`.modtile-ico svg{width:100%;height:100%;display:block}`}</style>
+          <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(4,1fr)" : "repeat(5,1fr)",gap: window.innerWidth < 600 ? 10 : 18,marginTop:10}}>
 
             <ModTile onClick={() => setVista("lista")} label="Órdenes" badge={homeVencidas} badgeColor="#c0392b"
               stat={homeVencenHoy>0 ? <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeVencenHoy} vencen hoy</span>

@@ -1568,19 +1568,23 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                     placeholder="Logo del catálogo o nuevo…" style={campoStyle}/>
                   {logoFoco === p.key && (() => {
                     const q = (pos.logotipos||"").trim().toLowerCase();
-                    const opts = (catalogoLogos||[])
-                      .filter(l => l.nombre && (!q || l.nombre.toLowerCase().includes(q)))
-                      .sort((a,b) => (a.nombre||"").localeCompare(b.nombre||""))
-                      .slice(0, 10);
+                    const base = (catalogoLogos||[]).filter(l => l.nombre);
+                    let opts = base.filter(l => l.nombre.toLowerCase().includes(q));
+                    // Vacío, sin coincidencias, o el valor ya es un logo del catálogo → muestra todos (para poder cambiarlo)
+                    if (!q || opts.length === 0 || base.some(l => l.nombre.toLowerCase() === q)) opts = base;
+                    opts = opts.sort((a,b) => (a.nombre||"").localeCompare(b.nombre||"")).slice(0, 12);
                     if (opts.length === 0) return null;
                     return (
                       <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:C.surface,border:"1px solid "+C.border,borderRadius:8,marginTop:2,maxHeight:200,overflowY:"auto",boxShadow:"0 6px 20px rgba(0,0,0,.45)"}}>
-                        {opts.map(l => (
-                          <div key={l.id||l.nombre} onMouseDown={(e) => { e.preventDefault(); updPos(p.key, "logotipos", l.nombre); setLogoFoco(null); }}
-                            style={{padding:"8px 10px",fontSize:12,color:C.text,cursor:"pointer",borderBottom:"1px solid "+C.border}}>
-                            {l.nombre}
-                          </div>
-                        ))}
+                        {opts.map(l => {
+                          const sel = l.nombre.toLowerCase() === q;
+                          return (
+                            <div key={l.id||l.nombre} onMouseDown={(e) => { e.preventDefault(); updPos(p.key, "logotipos", l.nombre); setLogoFoco(null); }}
+                              style={{padding:"8px 10px",fontSize:12,color:C.text,cursor:"pointer",borderBottom:"1px solid "+C.border,background:sel?C.accentGlow:"transparent",fontWeight:sel?700:400}}>
+                              {l.nombre}{sel?"  ✓":""}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })()}

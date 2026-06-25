@@ -1338,7 +1338,13 @@ useEffect(() => {
   const [linkFirma, setLinkFirma] = useState("");
   const upd = (f, v) => { if (!puedeEditar) return; setForm(p => ({ ...p, [f]: v })); };
   const updPos = (key, field, val) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], [field]: val } } }));
-  const handleLogoUpload = (key, dataUrl) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], logoImg: dataUrl } } }));
+  const handleLogoUpload = (key, dataUrl) => setForm(p => {
+    const prev = p.posiciones[key] || emptyPosicion();
+    // Si la posición no tenía logo, es un logo NUEVO → empezar limpio (sin datos fantasma).
+    // Si ya tenía logo (estás "Cambiando" la imagen), conserva técnica/medida/colores/nombre.
+    const base = prev.logoImg ? prev : emptyPosicion();
+    return { ...p, posiciones: { ...p.posiciones, [key]: { ...base, logoImg: dataUrl } } };
+  });
   const handleClearLogo = (key) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: emptyPosicion() } }));
 
   // ── Prendas handlers ──────────────────────────────────────────────────────

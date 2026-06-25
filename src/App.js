@@ -2949,6 +2949,305 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
   );
 }
 
+// ── Pago a bordadores (liquidación mensual) ─────────────────────────────────
+const MESES_NOMBRE = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+function nombreMesAnio(mes){ const [y,m]=(mes||"").split("-"); const n=MESES_NOMBRE[(parseInt(m)||1)-1]||""; return (n.charAt(0).toUpperCase()+n.slice(1))+" "+y; }
+function fmtMoney(n){ const x=Number(n)||0; return x.toLocaleString("es-MX",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fechaPagoDeMes(mes){ const [y,m]=(mes||"").split("-").map(Number); const d=new Date(y, m, 1); return d.toISOString().slice(0,10); }
+function periodoDeMes(mes){ const [y,m]=(mes||"").split("-").map(Number); const fin=new Date(y, m, 0); return { inicio: `${mes}-01`, fin: fin.toISOString().slice(0,10) }; }
+function fechaBordadoTerminado(orden){
+  const h = orden.historial||[];
+  const find = (et) => { const e = h.find(x => x.etapa===et); return e && e.fecha ? String(e.fecha).slice(0,10) : null; };
+  return find("calidad") || find("entregada") || (h.length ? String(h[h.length-1].fecha||"").slice(0,10) : "") || (orden.fecha||"").slice(0,10) || null;
+}
+// Prenda a la que pertenece cada posición (por la vista que la contiene en PINS)
+const KEY_TO_GARMENT = (() => {
+  const m = {};
+  Object.entries(PINS||{}).forEach(([viewId, pins]) => {
+    const pre = (viewId||"").split("_")[0];
+    (pins||[]).forEach(pin => { if (m[pin.key]===undefined) m[pin.key]=pre; });
+  });
+  return m;
+})();
+const GARMENT_SYNS = {
+  playera: ["playera","camiseta","polo","franela","t-shirt","tshirt","jersey"],
+  camisa: ["camisa","camisola","filipina","blusa"],
+  pantalon: ["pantal","short","bermuda","jean","mezclilla"],
+  gorra: ["gorra","cachucha","cap","cofia"],
+  costado: ["chaleco","chamarra","chaqueta","saco","overol","bata","mandil"],
+};
+function sumTallas(prenda){ return Object.values((prenda&&prenda.tallas)||{}).reduce((s,v)=> s+(parseInt(v)||0),0); }
+function totalPrendasOrden(orden){ return (orden.prendas||[]).reduce((s,p)=> s+sumTallas(p),0); }
+function cantidadPorPrefijo(orden, prefijo){
+  const syns = GARMENT_SYNS[prefijo] || [];
+  let suma=0, hubo=false;
+  (orden.prendas||[]).forEach(p => {
+    const d=(p.descripcion||"").toLowerCase();
+    if (syns.some(s => d.includes(s))) { suma += sumTallas(p); hubo=true; }
+  });
+  return hubo ? suma : totalPrendasOrden(orden);
+}
+function posLabelDe(key){ const p=POSICIONES.find(x=>x.key===key); return p?p.label:key; }
+
+function buildReciboHtml(rec){
+  const meslbl = nombreMesAnio(rec.mes);
+  let filas = "";
+  rec.ordenes.forEach(o => {
+    o.lineas.forEach((l,i) => {
+      filas += `<tr>
+        <td>${i===0?escHtml("#"+(o.numero||"")+(o.cliente?(" · "+o.cliente):"")):""}</td>
+        <td>${escHtml(l.logoName||"—")}</td>
+        <td>${escHtml(l.posLabel||"")}</td>
+        <td style="text-align:center">${parseInt(l.cantidad)||0}</td>
+        <td style="text-align:right">$${fmtMoney(l.precio)}</td>
+        <td style="text-align:right">$${fmtMoney((Number(l.precio)||0)*(parseInt(l.cantidad)||0))}</td>
+      </tr>`;
+    });
+  });
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd">
+      <img src="${LOGO_WL}"/>
+      <h1>RECIBO DE PAGO DE BORDADOS</h1>
+      <div class="folio">${escHtml(rec.bordador)}<br/>${meslbl}</div>
+    </div>
+    <div class="body">
+      <div class="sec">PERIODO <span>(bordados terminados en el mes)</span></div>
+      <table><tr>
+        <th style="width:22%">Bordador</th><td>${escHtml(rec.bordador)}</td>
+        <th style="width:14%">Periodo</th><td>${meslbl}</td>
+        <th style="width:16%">Fecha de pago</th><td>${escHtml(rec.fechaPago)}</td>
+      </tr></table>
+      <div class="sec">DETALLE DE BORDADOS</div>
+      <table>
+        <tr><th>Orden</th><th>Logo</th><th>Posición</th><th style="width:48px">Cant.</th><th style="width:64px">P. unit.</th><th style="width:74px">Importe</th></tr>
+        ${filas || `<tr><td colspan="6" style="text-align:center;color:#777">Sin bordados en el periodo</td></tr>`}
+      </table>
+      <div class="resumen">
+        <div class="box">Total de bordados<b>${rec.totalBordados||0}</b></div>
+        <div class="box">Total a pagar<b>$${fmtMoney(rec.total)}</b></div>
+      </div>
+      <div class="leg">Recibí de WORK-LIFE la cantidad indicada por concepto de los bordados detallados, quedando conforme.</div>
+      <div class="firmas">
+        <div class="firma">Entregó — WORK-LIFE</div>
+        <div class="firma">Recibí de conformidad<br/>${escHtml(rec.bordador)}</div>
+      </div>
+    </div>
+  </div>
+  </body></html>`;
+}
+
+function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiquidacion, liquidaciones, onImprimir }) {
+  const defMes = (() => { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
+  const [mes, setMes] = useState(defMes);
+  const [overrides, setOverrides] = useState({});
+  const [guardando, setGuardando] = useState(false);
+  const [verCat, setVerCat] = useState(false);
+
+  useEffect(() => {
+    const saved = (liquidaciones||[]).find(l => (l.id||l.mes) === mes);
+    setOverrides(saved && saved.overrides ? saved.overrides : {});
+  }, [mes, liquidaciones]);
+
+  const cambiarMes = (delta) => {
+    const [y,m]=mes.split("-").map(Number);
+    const d=new Date(y, m-1+delta, 1);
+    setMes(d.toISOString().slice(0,7));
+  };
+  const periodo = periodoDeMes(mes);
+  const fechaPago = fechaPagoDeMes(mes);
+
+  const precioDe = (nombre) => {
+    const q=(nombre||"").trim().toLowerCase();
+    if (!q) return null;
+    const l=(catalogoLogos||[]).find(x => (x.nombreLower || (x.nombre||"").toLowerCase()) === q);
+    const p = l ? l.precio : undefined;
+    return (p===null||p===undefined||p==="") ? null : Number(p);
+  };
+
+  // construir liquidación del mes
+  const ordenesMes = (ordenes||[]).filter(o => (o.etapa==="calidad"||o.etapa==="entregada") && (fechaBordadoTerminado(o)||"").slice(0,7)===mes);
+  const grupos = {};
+  const logosUsados = {};
+  ordenesMes.forEach(o => {
+    const b = (o.bordador||"").trim() || "(sin bordador)";
+    const lineas = [];
+    Object.entries(o.posiciones||{}).forEach(([key,pos]) => {
+      if (!pos || !pos.logoImg) return;
+      const logoName=(pos.logotipos||"").trim();
+      const prefijo=KEY_TO_GARMENT[key]||"";
+      const lineId=o.id+":"+key;
+      const cantDefault = prefijo ? cantidadPorPrefijo(o, prefijo) : totalPrendasOrden(o);
+      const cantidad = overrides[lineId]!==undefined ? overrides[lineId] : cantDefault;
+      const precio = precioDe(logoName);
+      if (logoName) logosUsados[logoName.toLowerCase()] = logoName;
+      lineas.push({ lineId, key, logoName, posLabel: posLabelDe(key), prefijo, cantidad, precio });
+    });
+    if (!lineas.length) return;
+    if (!grupos[b]) grupos[b]=[];
+    grupos[b].push({ id:o.id, numero:o.numero, cliente:o.cliente, fecha:fechaBordadoTerminado(o), etapa:o.etapa, lineas });
+  });
+
+  const sinPrecio = Object.values(logosUsados).filter(n => precioDe(n)===null);
+
+  const subtotalLinea = (l) => (Number(l.precio)||0) * (parseInt(l.cantidad)||0);
+  const totalOrden = (ord) => ord.lineas.reduce((s,l)=> s+subtotalLinea(l), 0);
+  const bordadosOrden = (ord) => ord.lineas.reduce((s,l)=> s+(parseInt(l.cantidad)||0), 0);
+  const totalBordador = (lista) => lista.reduce((s,ord)=> s+totalOrden(ord), 0);
+  const bordadosBordador = (lista) => lista.reduce((s,ord)=> s+bordadosOrden(ord), 0);
+  const totalMes = Object.values(grupos).reduce((s,lista)=> s+totalBordador(lista), 0);
+
+  const setCant = (lineId, v) => setOverrides(prev => ({ ...prev, [lineId]: Math.max(0, parseInt(v)||0) }));
+
+  const guardar = async () => {
+    setGuardando(true);
+    try {
+      const snapshot = Object.entries(grupos).map(([bordador, lista]) => ({
+        bordador, total: totalBordador(lista), bordados: bordadosBordador(lista),
+        ordenes: lista.map(ord => ({ numero:ord.numero, cliente:ord.cliente||"", fecha:ord.fecha, lineas: ord.lineas.map(l=>({ logoName:l.logoName, posLabel:l.posLabel, cantidad:parseInt(l.cantidad)||0, precio:l.precio })) }))
+      }));
+      await onGuardarLiquidacion(mes, { mes, overrides, total: totalMes, snapshot, generadoEl: new Date().toISOString() });
+      alert("Liquidación de "+nombreMesAnio(mes)+" guardada.");
+    } catch(e){ alert("Error al guardar: "+e.message); }
+    setGuardando(false);
+  };
+
+  const imprimir = (bordador, lista) => {
+    const rec = { bordador, mes, fechaPago, ordenes: lista, totalBordados: bordadosBordador(lista), total: totalBordador(lista) };
+    onImprimir(buildReciboHtml(rec), "Recibo "+bordador+" "+mes);
+  };
+
+  const card={background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:"16px 18px",marginBottom:14};
+  const ordBox={background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"10px 12px",marginBottom:8};
+  const priceInput={width:72,background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"5px 7px",fontSize:12,outline:"none"};
+
+  const listaBordadores = Object.keys(grupos).sort((a,b)=> a==="(sin bordador)"?1:(b==="(sin bordador)"?-1:a.localeCompare(b)));
+
+  return (
+    <div style={{maxWidth:900,margin:"0 auto",padding:"0 4px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}}>
+        <div style={{fontSize:22,fontWeight:800,color:C.text}}>💰 Pago a bordadores</div>
+        <div style={{display:"flex",alignItems:"center",gap:14,background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"8px 14px"}}>
+          <span onClick={()=>cambiarMes(-1)} style={{color:C.muted,cursor:"pointer",fontSize:18,userSelect:"none"}}>‹</span>
+          <span style={{fontWeight:700,color:C.text,minWidth:120,textAlign:"center"}}>{nombreMesAnio(mes)}</span>
+          <span onClick={()=>cambiarMes(1)} style={{color:C.muted,cursor:"pointer",fontSize:18,userSelect:"none"}}>›</span>
+        </div>
+      </div>
+
+      <div style={{background:C.card,border:"1px solid "+C.border,borderLeft:"4px solid "+C.accent,borderRadius:10,padding:"12px 16px",marginBottom:14,fontSize:13,color:C.text}}>
+        Periodo: <b>{fmtDate(periodo.inicio)} – {fmtDate(periodo.fin)}</b> &nbsp;·&nbsp; Se paga el <b>{fmtDate(fechaPago)}</b> &nbsp;·&nbsp; Órdenes que entraron a <b>Control de calidad / Entregada</b> en el mes.
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <button onClick={()=>setVerCat(v=>!v)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"8px 13px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🏷️ {verCat?"Ocultar":"Ver / editar"} catálogo de precios ({(catalogoLogos||[]).length})</button>
+        {verCat && (
+          <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px",marginTop:8,display:"flex",flexWrap:"wrap",gap:10}}>
+            {(catalogoLogos||[]).slice().sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(l => {
+              const sinP = l.precio===null||l.precio===undefined||l.precio==="";
+              return (
+                <div key={(l.id||l.nombre)+"_"+(l.precio??"")} style={{display:"flex",alignItems:"center",gap:6,background:C.surface,border:"1px solid "+(sinP?C.accent+"66":C.border),borderRadius:8,padding:"6px 10px"}}>
+                  <span style={{fontSize:12.5,color:C.text}}>{l.nombre}</span>
+                  <span style={{color:C.muted}}>$</span>
+                  <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); onSetPrecioLogo(l.id, v===""?null:Number(v)); }} style={priceInput}/>
+                </div>
+              );
+            })}
+            {(catalogoLogos||[]).length===0 && <div style={{color:C.muted,fontSize:12}}>Aún no hay logos en el catálogo.</div>}
+          </div>
+        )}
+      </div>
+
+      {sinPrecio.length>0 && (
+        <div style={{background:"#2a1f0e",border:"1px solid "+C.accent+"66",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.accent,marginBottom:8}}>⚠️ Logos sin precio usados este mes — captura su precio:</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
+            {sinPrecio.map(n => {
+              const l=(catalogoLogos||[]).find(x => (x.nombreLower||(x.nombre||"").toLowerCase())===n.toLowerCase());
+              return (
+                <div key={n} style={{display:"flex",alignItems:"center",gap:6,background:C.surface,border:"1px solid "+C.border,borderRadius:8,padding:"6px 10px"}}>
+                  <span style={{fontSize:12.5,color:C.text}}>{n}</span>
+                  <span style={{color:C.muted}}>$</span>
+                  <input type="number" defaultValue="" placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); if(l) onSetPrecioLogo(l.id, v===""?null:Number(v)); }} style={priceInput}/>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Al capturar el precio queda guardado en el catálogo para los pagos siguientes.</div>
+        </div>
+      )}
+
+      {listaBordadores.length===0 && (
+        <div style={{background:C.card,border:"1px dashed "+C.border,borderRadius:12,padding:30,textAlign:"center",color:C.muted}}>
+          No hay órdenes que hayan terminado bordado en {nombreMesAnio(mes)}.
+        </div>
+      )}
+
+      {listaBordadores.map(b => {
+        const lista=grupos[b];
+        const sinB = b==="(sin bordador)";
+        return (
+          <div key={b} style={card}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div>
+                <div style={{fontSize:17,fontWeight:800,color:sinB?C.muted:C.text}}>{b}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{lista.length} {lista.length===1?"orden":"órdenes"} · {bordadosBordador(lista)} bordados</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:12,color:C.muted}}>Total a pagar</div>
+                <div style={{fontSize:22,fontWeight:800,color:C.success}}>${fmtMoney(totalBordador(lista))}</div>
+              </div>
+            </div>
+
+            {sinB && <div style={{fontSize:12,color:C.accent,marginBottom:8}}>Estas órdenes no tienen bordador asignado; asígnalo en la orden para incluirlas en un pago.</div>}
+
+            {lista.map(ord => (
+              <div key={ord.id} style={ordBox}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700,marginBottom:8,color:C.text}}>
+                  <span>Orden #{ord.numero}{ord.cliente?(" · "+ord.cliente):""}</span>
+                  <span style={{color:C.muted,fontWeight:600}}>{ord.etapa==="calidad"?"Calidad":"Entregada"} · {fmtDate(ord.fecha)}</span>
+                </div>
+                {ord.lineas.map(l => (
+                  <div key={l.lineId} style={{display:"grid",gridTemplateColumns:"1.3fr 90px 70px 78px 80px",gap:8,alignItems:"center",fontSize:12.5,padding:"6px 0",borderTop:"1px solid "+C.border}}>
+                    <span style={{fontWeight:700,color:l.logoName?C.text:C.muted}}>{l.logoName||"(sin nombre)"}</span>
+                    <span style={{color:C.muted,fontSize:11}}>{l.posLabel}</span>
+                    <span style={{textAlign:"right",color: l.precio===null?C.accent:C.muted}}>{l.precio===null?"sin precio":("$"+fmtMoney(l.precio))}</span>
+                    <span style={{display:"flex",alignItems:"center",gap:5,justifyContent:"flex-end"}}>
+                      <span style={{color:C.muted,fontSize:11}}>cant</span>
+                      <input type="number" value={l.cantidad} onChange={e=>setCant(l.lineId, e.target.value)} style={{width:52,background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"4px 6px",textAlign:"center",fontSize:12,outline:"none"}}/>
+                    </span>
+                    <span style={{textAlign:"right",fontWeight:700,color: l.precio===null?C.muted:C.text}}>{l.precio===null?"—":("$"+fmtMoney(subtotalLinea(l)))}</span>
+                  </div>
+                ))}
+                <div style={{display:"flex",justifyContent:"flex-end",gap:16,fontSize:12,color:C.muted,marginTop:6,paddingTop:6,borderTop:"1px dashed "+C.border}}>
+                  <span>Bordados: <b style={{color:C.text}}>{bordadosOrden(ord)}</b></span>
+                  <span>Subtotal: <b style={{color:C.text}}>${fmtMoney(totalOrden(ord))}</b></span>
+                </div>
+              </div>
+            ))}
+
+            {!sinB && (
+              <div style={{display:"flex",justifyContent:"flex-end",marginTop:10}}>
+                <button onClick={()=>imprimir(b, lista)} style={{border:"1px solid "+C.border,borderRadius:9,background:C.surface,color:C.text,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨️ Imprimir recibo</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {listaBordadores.length>0 && (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"16px 20px",marginTop:8}}>
+          <div style={{fontSize:14,color:C.muted,fontWeight:700}}>Total del mes</div>
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{fontSize:24,fontWeight:800,color:C.accent}}>${fmtMoney(totalMes)}</div>
+            <button disabled={guardando} onClick={guardar} style={{border:"none",borderRadius:10,background:C.accent,color:"#1a1d27",padding:"11px 18px",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar liquidación"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
   const [texto, setTexto] = useState("");
   const [para, setPara] = useState(asignables[0].email);
@@ -3011,6 +3310,8 @@ export default function App() {
   const [rutaPdf, setRutaPdf] = useState(null);
   const [remisiones, setRemisiones] = useState([]);
   const [remisionPdf, setRemisionPdf] = useState(null);
+  const [liquidaciones, setLiquidaciones] = useState([]);
+  const [pagoPdf, setPagoPdf] = useState(null);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -3193,6 +3494,24 @@ if (usuario) {
   };
   const eliminarRemision = async (id) => { try { await deleteDoc(doc(db, "remisiones", String(id))); } catch (e) { alert("Error al eliminar: " + e.message); } };
   const imprimirRemision = (rem) => setRemisionPdf({ html: buildRemisionHtml(rem), titulo: "Remisión No. " + (rem.numero || ""), archivo: "Remision_" + (rem.numero || "nueva") + ".html" });
+
+  // ── Pago a bordadores ──
+  useEffect(() => {
+    if (!usuario?.email || rol !== "admin") return;
+    const unsub = onSnapshot(collection(db, "liquidaciones"), snap => {
+      setLiquidaciones(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    return unsub;
+  }, [usuario, rol]);
+  const setPrecioLogo = async (logoId, precio) => {
+    if (!logoId) return;
+    try { await setDoc(doc(db, "logos", logoId), { precio: (precio===null||precio===undefined||isNaN(precio)) ? null : Number(precio) }, { merge: true }); }
+    catch (e) { alert("Error al guardar precio: " + e.message); }
+  };
+  const guardarLiquidacion = async (mes, data) => {
+    await setDoc(doc(db, "liquidaciones", String(mes)), { ...data, generadoPor: usuario.email }, { merge: true });
+  };
+  const imprimirRecibo = (html, titulo) => setPagoPdf({ html, titulo: titulo || "Recibo de pago", archivo: (titulo || "Recibo").replace(/\s+/g, "_") + ".html" });
 
   const login = async () => {
     setLoginErr("");
@@ -3714,6 +4033,18 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {rol === "admin" && (
+            <ModTile onClick={() => setVista("pagos")} label="Pago bordadores"
+              stat={<span style={{color:C.muted}}>{(() => { const sp = logosCatalogo.filter(l => l.precio===null||l.precio===undefined||l.precio==="").length; return sp>0 ? sp+" sin precio" : "Liquidación mensual"; })()}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gPago" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fbbf24"/><stop offset="1" stopColor="#d97706"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gPago)"/>
+                <circle cx="44" cy="44" r="20" fill="none" stroke="#fff" strokeWidth="3.4"/>
+                <text x="44" y="53" fontSize="26" fontWeight="800" fill="#fff" textAnchor="middle" fontFamily="Arial">$</text>
+              </svg>
+            </ModTile>
+            )}
+
           </div>
 
           <Pendientes
@@ -3848,6 +4179,17 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "pagos" && rol === "admin" && (
+        <PagoBordadores
+          ordenes={ordenes}
+          catalogoLogos={logosCatalogo}
+          onSetPrecioLogo={setPrecioLogo}
+          onGuardarLiquidacion={guardarLiquidacion}
+          liquidaciones={liquidaciones}
+          onImprimir={imprimirRecibo}
+        />
+      )}
+
      {vista === "detalle" && ordenData && (
         <Detalle
           key={ordenData.id}
@@ -3890,6 +4232,7 @@ const cancelar = async (id) => {
 
       {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
       {remisionPdf && <PdfModal html={remisionPdf.html} titulo={remisionPdf.titulo} archivo={remisionPdf.archivo} onClose={() => setRemisionPdf(null)}/>}
+      {pagoPdf && <PdfModal html={pagoPdf.html} titulo={pagoPdf.titulo} archivo={pagoPdf.archivo} onClose={() => setPagoPdf(null)}/>}
     </div>
   );
 }

@@ -1260,6 +1260,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   return o;
 });
   const [tab, setTab] = useState("info");
+  const [logoFoco, setLogoFoco] = useState(null);
   const [historialOrden, setHistorialOrden] = useState([]);
 useEffect(() => {
     if (!orden?.id) return;
@@ -1539,9 +1540,6 @@ await setDoc(doc(db, "solicitudesFirma", token), {
       {/* ── POSICIONES ── */}
       {tab === "pos" && (
         <div>
-          <datalist id="wl-logos-cat">
-            {catalogoLogos.map(l => <option key={l.id||l.nombre} value={l.nombre} />)}
-          </datalist>
           <div style={{display:"grid",gridTemplateColumns:"90px 1fr 1fr 90px 1fr",gap:"0 8px",padding:"6px 8px",fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border,marginBottom:4}}>
             <span>Pos.</span><span>Técnica</span><span>Medida</span><span>Colores</span><span>Logotipos</span>
           </div>
@@ -1553,18 +1551,40 @@ await setDoc(doc(db, "solicitudesFirma", token), {
           {POSICIONES.filter(p => form.posiciones[p.key]?.logoImg).map(p => {
             const pos = form.posiciones[p.key] || emptyPosicion();
             const activa = pos.tecnica || pos.medida || pos.colores || pos.logotipos;
+            const campoStyle = {background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,padding:"5px 8px",fontSize:12,outline:"none",width:"100%"};
             return (
               <div key={p.key} style={{display:"grid",gridTemplateColumns:"90px 1fr 1fr 90px 1fr",gap:"4px 8px",padding:"5px 8px",borderRadius:7,background:C.accentGlow,border:"1px solid "+C.accent+"44",marginBottom:3,alignItems:"center"}}>
                 <div>
                   <span style={{fontWeight:800,color:C.accent,fontSize:13,marginRight:4}}>{p.key}</span>
                   <span style={{fontSize:10,color:C.muted}}>{p.label}</span>
                 </div>
-                {["tecnica","medida","colores","logotipos"].map(f => (
-                  <input key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)}
-                    list={f === "logotipos" ? "wl-logos-cat" : undefined}
-                    placeholder={f === "logotipos" ? "Logo del catálogo o nuevo…" : undefined}
-                    style={{background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,padding:"5px 8px",fontSize:12,outline:"none",width:"100%"}}/>
+                {["tecnica","medida","colores"].map(f => (
+                  <input key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)} style={campoStyle}/>
                 ))}
+                <div style={{position:"relative"}}>
+                  <input value={pos.logotipos||""} onChange={e => updPos(p.key, "logotipos", e.target.value)}
+                    onFocus={() => setLogoFoco(p.key)}
+                    onBlur={() => setTimeout(() => setLogoFoco(prev => prev===p.key?null:prev), 150)}
+                    placeholder="Logo del catálogo o nuevo…" style={campoStyle}/>
+                  {logoFoco === p.key && (() => {
+                    const q = (pos.logotipos||"").trim().toLowerCase();
+                    const opts = (catalogoLogos||[])
+                      .filter(l => l.nombre && (!q || l.nombre.toLowerCase().includes(q)))
+                      .sort((a,b) => (a.nombre||"").localeCompare(b.nombre||""))
+                      .slice(0, 10);
+                    if (opts.length === 0) return null;
+                    return (
+                      <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:C.surface,border:"1px solid "+C.border,borderRadius:8,marginTop:2,maxHeight:200,overflowY:"auto",boxShadow:"0 6px 20px rgba(0,0,0,.45)"}}>
+                        {opts.map(l => (
+                          <div key={l.id||l.nombre} onMouseDown={(e) => { e.preventDefault(); updPos(p.key, "logotipos", l.nombre); setLogoFoco(null); }}
+                            style={{padding:"8px 10px",fontSize:12,color:C.text,cursor:"pointer",borderBottom:"1px solid "+C.border}}>
+                            {l.nombre}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             );
           })}
@@ -3263,6 +3283,24 @@ if (usuario) {
       }
     } catch (e) { console.log("upsertLogosDeOrden error:", e); }
   };
+  // Importación única: trae al catálogo los logos ya nombrados en órdenes existentes
+  useEffect(() => {
+    if (!usuario?.email || !ordenes.length) return;
+    const existentes = new Set(logosCatalogo.map(l => logoSlug(l.nombre)));
+    const faltantes = new Map();
+    ordenes.forEach(o => Object.values(o.posiciones || {}).forEach(p => {
+      const n = (p && p.logotipos || "").trim();
+      if (!n) return;
+      const id = logoSlug(n);
+      if (id && !existentes.has(id) && !faltantes.has(id)) faltantes.set(id, n);
+    }));
+    if (faltantes.size === 0) return;
+    (async () => {
+      for (const [id, n] of faltantes) {
+        try { await setDoc(doc(db, "logos", id), { nombre: n, nombreLower: n.toLowerCase(), creado: new Date().toISOString(), creadoPor: usuario.email, importado: true }, { merge: true }); } catch (e) {}
+      }
+    })();
+  }, [ordenes, logosCatalogo, usuario]);
 
   const obtenerSiguienteNumero = async () => {
     const ref = doc(db, "config", "contador");

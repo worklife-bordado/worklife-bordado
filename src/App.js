@@ -1339,7 +1339,7 @@ useEffect(() => {
   const upd = (f, v) => { if (!puedeEditar) return; setForm(p => ({ ...p, [f]: v })); };
   const updPos = (key, field, val) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], [field]: val } } }));
   const handleLogoUpload = (key, dataUrl) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], logoImg: dataUrl } } }));
-  const handleClearLogo = (key) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: { ...p.posiciones[key], logoImg: null } } }));
+  const handleClearLogo = (key) => setForm(p => ({ ...p, posiciones: { ...p.posiciones, [key]: emptyPosicion() } }));
 
   // ── Prendas handlers ──────────────────────────────────────────────────────
   const setDescripcion = (idx, val) => setForm(p => {

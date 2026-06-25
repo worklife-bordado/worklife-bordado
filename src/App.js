@@ -1243,7 +1243,7 @@ function DropdownBordador({ value, opciones, onSelect, onAgregar, disabled, pued
   );
 }
 
-function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador }) {
+function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [] }) {
   const [pdfHtml, setPdfHtml] = useState(null);
   const [form, setForm] = useState(() => {
   const o = JSON.parse(JSON.stringify(orden));
@@ -1539,6 +1539,9 @@ await setDoc(doc(db, "solicitudesFirma", token), {
       {/* ── POSICIONES ── */}
       {tab === "pos" && (
         <div>
+          <datalist id="wl-logos-cat">
+            {catalogoLogos.map(l => <option key={l.id||l.nombre} value={l.nombre} />)}
+          </datalist>
           <div style={{display:"grid",gridTemplateColumns:"90px 1fr 1fr 90px 1fr",gap:"0 8px",padding:"6px 8px",fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border,marginBottom:4}}>
             <span>Pos.</span><span>Técnica</span><span>Medida</span><span>Colores</span><span>Logotipos</span>
           </div>
@@ -1558,6 +1561,8 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                 </div>
                 {["tecnica","medida","colores","logotipos"].map(f => (
                   <input key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)}
+                    list={f === "logotipos" ? "wl-logos-cat" : undefined}
+                    placeholder={f === "logotipos" ? "Logo del catálogo o nuevo…" : undefined}
                     style={{background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,padding:"5px 8px",fontSize:12,outline:"none",width:"100%"}}/>
                 ))}
               </div>
@@ -2968,6 +2973,7 @@ export default function App() {
   const [authListo,setAuthListo]= useState(false);  // waiting for Firebase auth check
   const [loginErr, setLoginErr] = useState("");
   const [ordenes,  setOrdenes]  = useState([]);
+  const [logosCatalogo, setLogosCatalogo] = useState([]);
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
   const [tareas, setTareas] = useState([]);
@@ -3230,6 +3236,32 @@ if (usuario) {
     if (!orden.seguimientoToken) orden = { ...orden, seguimientoToken: genToken() };
     await setDoc(doc(db, "ordenes", String(orden.id)), orden);
     await syncSeguimiento(orden);
+    await upsertLogosDeOrden(orden);
+  };
+  // Catálogo de logos (para autocompletado en la orden y precios en Pago a bordadores)
+  useEffect(() => {
+    if (!usuario?.email) return;
+    const unsub = onSnapshot(collection(db, "logos"), snap => {
+      setLogosCatalogo(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    return unsub;
+  }, [usuario]);
+  const logoSlug = (nombre) => (nombre||"").trim().toLowerCase().replace(/[^a-z0-9áéíóúüñ]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120);
+  // Da de alta (sin precio) los logos nuevos que aparezcan en una orden, sin tocar precios existentes
+  const upsertLogosDeOrden = async (orden) => {
+    try {
+      const nombres = new Set();
+      Object.values(orden.posiciones || {}).forEach(p => {
+        const n = (p && p.logotipos || "").trim();
+        if (n) nombres.add(n);
+      });
+      const existentes = new Set(logosCatalogo.map(l => logoSlug(l.nombre)));
+      for (const n of nombres) {
+        const id = logoSlug(n);
+        if (!id || existentes.has(id)) continue;
+        await setDoc(doc(db, "logos", id), { nombre: n, nombreLower: n.toLowerCase(), creado: new Date().toISOString(), creadoPor: usuario.email }, { merge: true });
+      }
+    } catch (e) { console.log("upsertLogosDeOrden error:", e); }
   };
 
   const obtenerSiguienteNumero = async () => {
@@ -3782,6 +3814,7 @@ const cancelar = async (id) => {
           onDuplicar={puedeCrear ? (form) => construirCopia(form) : null}
           bordadores={bordadores}
           onAgregarBordador={agregarBordador}
+          catalogoLogos={logosCatalogo}
         />
       )}
 

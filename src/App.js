@@ -220,6 +220,17 @@ async function recomprimirOrden(orden) {
     return cambiado ? { ...orden, posiciones: nuevo } : orden;
   } catch (e) { return orden; }
 }
+// Carga el lector de Excel (SheetJS) desde internet solo cuando se necesita
+function cargarXLSX() {
+  return new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error("No se pudo iniciar el lector de Excel"));
+    s.onerror = () => reject(new Error("No se pudo cargar el lector de Excel (¿sin internet?)"));
+    document.head.appendChild(s);
+  });
+}
 
 // ── Seguimiento público para el cliente ─────────────────────────────────────
 function genToken() {
@@ -3100,12 +3111,47 @@ function buildReciboHtml(rec){
   </body></html>`;
 }
 
-function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiquidacion, liquidaciones, onImprimir }) {
+function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiquidacion, liquidaciones, onImprimir, onImportarLogos }) {
   const defMes = (() => { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
   const [mes, setMes] = useState(defMes);
   const [overrides, setOverrides] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [verCat, setVerCat] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const fileXlsxRef = useRef(null);
+
+  const handleExcel = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (e.target) e.target.value = "";
+    if (!file) return;
+    setImportando(true);
+    try {
+      const XLSX = await cargarXLSX();
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
+      if (!rows.length) { alert("El archivo está vacío."); setImportando(false); return; }
+      let nameCol = 0, priceCol = 1, startRow = 0;
+      const header = rows[0].map(c => String(c==null?"":c).toLowerCase().trim());
+      const ni = header.findIndex(h => /logo|nombre|logotipo/.test(h));
+      const pi = header.findIndex(h => /precio|costo|price|importe|valor/.test(h));
+      if (ni !== -1 || pi !== -1) { nameCol = ni!==-1?ni:0; priceCol = pi!==-1?pi:(ni===1?0:1); startRow = 1; }
+      const filas = [];
+      for (let i = startRow; i < rows.length; i++) {
+        const r = rows[i]; if (!r) continue;
+        const nombre = String(r[nameCol]==null?"":r[nameCol]).trim();
+        if (!nombre) continue;
+        filas.push({ nombre, precio: r[priceCol] });
+      }
+      if (!filas.length) { alert("No encontré filas con nombre de logo. Revisa que la primera columna sea el nombre del logo."); setImportando(false); return; }
+      const n = await onImportarLogos(filas);
+      alert("Listo: " + n + " logo(s) dados de alta o actualizados.");
+    } catch (err) {
+      alert("No se pudo importar: " + (err.message || err));
+    }
+    setImportando(false);
+  };
 
   useEffect(() => {
     const saved = (liquidaciones||[]).find(l => (l.id||l.mes) === mes);
@@ -3202,7 +3248,10 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       </div>
 
       <div style={{marginBottom:14}}>
-        <button onClick={()=>setVerCat(v=>!v)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"8px 13px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🏷️ {verCat?"Ocultar":"Ver / editar"} catálogo de precios ({(catalogoLogos||[]).length})</button>
+        <button onClick={()=>setVerCat(v=>!v)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"8px 13px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:8}}>🏷️ {verCat?"Ocultar":"Ver / editar"} catálogo de precios ({(catalogoLogos||[]).length})</button>
+        <input ref={fileXlsxRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={handleExcel}/>
+        <button disabled={importando} onClick={()=>fileXlsxRef.current && fileXlsxRef.current.click()} style={{background:C.accent,border:"none",borderRadius:9,color:"#1a1d27",padding:"8px 13px",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:importando?0.6:1}}>{importando?"Importando…":"📥 Importar Excel"}</button>
+        <div style={{fontSize:11,color:C.muted,marginTop:6}}>El Excel debe tener dos columnas: <b style={{color:C.text}}>Logo</b> y <b style={{color:C.text}}>Precio</b> (con encabezados en la primera fila). Importar no borra precios existentes si la celda viene vacía.</div>
         {verCat && (
           <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px",marginTop:8,display:"flex",flexWrap:"wrap",gap:10}}>
             {(catalogoLogos||[]).slice().sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(l => {
@@ -3580,6 +3629,21 @@ if (usuario) {
     await setDoc(doc(db, "liquidaciones", String(mes)), { ...data, generadoPor: usuario.email }, { merge: true });
   };
   const imprimirRecibo = (html, titulo) => setPagoPdf({ html, titulo: titulo || "Recibo de pago", archivo: (titulo || "Recibo").replace(/\s+/g, "_") + ".html" });
+  const importarLogos = async (filas) => {
+    let n = 0;
+    for (const f of filas) {
+      const nombre = String(f.nombre || "").trim();
+      if (!nombre) continue;
+      const id = logoSlug(nombre);
+      if (!id) continue;
+      const limpio = String(f.precio ?? "").replace(/[^0-9.]/g, "");
+      const precio = limpio === "" ? null : Number(limpio);
+      const datos = { nombre, nombreLower: nombre.toLowerCase(), creado: new Date().toISOString(), creadoPor: usuario.email };
+      if (precio !== null && !isNaN(precio)) datos.precio = precio; // solo sobrescribe precio si viene en el Excel
+      try { await setDoc(doc(db, "logos", id), datos, { merge: true }); n++; } catch (e) {}
+    }
+    return n;
+  };
 
   const login = async () => {
     setLoginErr("");
@@ -4257,6 +4321,7 @@ const cancelar = async (id) => {
           onGuardarLiquidacion={guardarLiquidacion}
           liquidaciones={liquidaciones}
           onImprimir={imprimirRecibo}
+          onImportarLogos={importarLogos}
         />
       )}
 

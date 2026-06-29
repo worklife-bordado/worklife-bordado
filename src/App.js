@@ -964,6 +964,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
       if (!etapasActivas.includes(o.etapa) || !o.fechaRequerida) return false;
       return match && diasRest(o.fechaRequerida) > 3;
     }
+    if (filtro === "porLiberar") return match && o.etapa === "nueva" && o.liberada === false;
     return match && (filtro === "todas" || o.etapa === filtro);
   });
 
@@ -993,6 +994,19 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
 </Btn>
 </div>
       </div>
+
+      {(() => {
+        const porLiberar = ordenes.filter(o => o.etapa === "nueva" && o.liberada === false);
+        if (!porLiberar.length) return null;
+        const activo = filtro === "porLiberar";
+        return (
+          <div onClick={() => setFiltro(activo ? "todas" : "porLiberar")}
+            style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:activo?C.accentGlow:"#2a1f0e",border:"2px solid "+C.accent,borderRadius:10,padding:"11px 16px",marginBottom:14,cursor:"pointer"}}>
+            <div style={{fontSize:13,color:C.accent,fontWeight:700}}>⏳ {porLiberar.length} {porLiberar.length===1?"orden":"órdenes"} por liberar a producción <span style={{color:C.muted,fontWeight:400}}>— Seguimiento no las trabaja hasta que las marques como listas.</span></div>
+            <div style={{fontSize:12,color:C.accent,fontWeight:800,whiteSpace:"nowrap"}}>{activo?"Ver todas":"Revisar →"}</div>
+          </div>
+        );
+      })()}
 
       <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(2,1fr)" : "repeat(4,1fr)",gap:10,marginBottom:20}}>
         {(() => {
@@ -4134,6 +4148,7 @@ const cancelar = async (id) => {
   const homeCumplimiento = _entregadasCump.length ? Math.round(_aTiempoCump.length / _entregadasCump.length * 100) : null;
   const homeActivasCount = ordenes.filter(o => _homeAct.includes(o.etapa) && cuentaParaIndicadores(o)).length;
   const homeSinAsignar = ordenes.filter(o => _homeAct.includes(o.etapa) && !(o.bordador||"").trim() && cuentaParaIndicadores(o)).length;
+  const homePorLiberar = ordenes.filter(o => o.etapa === "nueva" && o.liberada === false).length;
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Barlow','Segoe UI',sans-serif"}}>
@@ -4178,6 +4193,15 @@ const cancelar = async (id) => {
           </div>
 
           <style>{`.modtile-ico svg{width:100%;height:100%;display:block}`}</style>
+          {puedeCrear && homePorLiberar > 0 && (
+            <div onClick={() => setVista("lista")}
+              style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"#2a1f0e",border:"2px solid "+C.accent,borderRadius:14,padding:"13px 18px",marginTop:10,cursor:"pointer"}}>
+              <div style={{fontSize:14,color:C.accent,fontWeight:800}}>⏳ Tienes {homePorLiberar} {homePorLiberar===1?"orden":"órdenes"} por liberar a producción
+                <div style={{fontSize:12,color:C.muted,fontWeight:400,marginTop:2}}>Hasta que las marques como listas, Seguimiento no puede trabajarlas.</div>
+              </div>
+              <div style={{fontSize:13,color:C.accent,fontWeight:800,whiteSpace:"nowrap"}}>Revisar →</div>
+            </div>
+          )}
           <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(4,1fr)" : "repeat(5,1fr)",gap: window.innerWidth < 600 ? 10 : 18,marginTop:10}}>
 
             <ModTile onClick={() => setVista("lista")} label="Órdenes" badge={homeVencidas} badgeColor="#c0392b"

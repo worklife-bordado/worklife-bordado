@@ -3111,14 +3111,43 @@ function buildReciboHtml(rec){
   </body></html>`;
 }
 
-function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiquidacion, liquidaciones, onImprimir, onImportarLogos }) {
+function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiquidacion, liquidaciones, onImprimir, onImportarLogos, onRenombrarLogo, onBorrarLogo }) {
   const defMes = (() => { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
   const [mes, setMes] = useState(defMes);
   const [overrides, setOverrides] = useState({});
   const [guardando, setGuardando] = useState(false);
   const [verCat, setVerCat] = useState(false);
   const [importando, setImportando] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoPrecio, setNuevoPrecio] = useState("");
+  const [procesando, setProcesando] = useState(false);
   const fileXlsxRef = useRef(null);
+
+  const agregarLogo = async () => {
+    const n = nuevoNombre.trim();
+    if (!n) { alert("Escribe el nombre del logo."); return; }
+    setProcesando(true);
+    try { await onImportarLogos([{ nombre: n, precio: nuevoPrecio }]); setNuevoNombre(""); setNuevoPrecio(""); }
+    catch (e) { alert("No se pudo agregar: " + (e.message || e)); }
+    setProcesando(false);
+  };
+  const renombrar = async (l) => {
+    const nuevo = window.prompt("Nuevo nombre para el logo:", l.nombre || "");
+    if (nuevo === null) return;
+    if (!nuevo.trim()) { alert("El nombre no puede estar vacío."); return; }
+    setProcesando(true);
+    const r = await onRenombrarLogo(l, nuevo);
+    setProcesando(false);
+    if (!r.ok) alert(r.msg || "No se pudo renombrar.");
+    else if (r.nOrdenes) alert("Renombrado. Se actualizaron " + r.nOrdenes + " orden(es) que lo usaban.");
+  };
+  const borrar = async (l) => {
+    if (!window.confirm("¿Borrar el logo \"" + l.nombre + "\" del catálogo?\n\nNo se borra de las órdenes; solo deja de tener precio asignado.")) return;
+    setProcesando(true);
+    const r = await onBorrarLogo(l);
+    setProcesando(false);
+    if (!r.ok) alert(r.msg || "No se pudo borrar.");
+  };
 
   const handleExcel = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -3253,18 +3282,29 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
         <button disabled={importando} onClick={()=>fileXlsxRef.current && fileXlsxRef.current.click()} style={{background:C.accent,border:"none",borderRadius:9,color:"#1a1d27",padding:"8px 13px",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:importando?0.6:1}}>{importando?"Importando…":"📥 Importar Excel"}</button>
         <div style={{fontSize:11,color:C.muted,marginTop:6}}>El Excel debe tener dos columnas: <b style={{color:C.text}}>Logo</b> y <b style={{color:C.text}}>Precio</b> (con encabezados en la primera fila). Importar no borra precios existentes si la celda viene vacía.</div>
         {verCat && (
-          <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px",marginTop:8,display:"flex",flexWrap:"wrap",gap:10}}>
-            {(catalogoLogos||[]).slice().sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(l => {
-              const sinP = l.precio===null||l.precio===undefined||l.precio==="";
-              return (
-                <div key={(l.id||l.nombre)+"_"+(l.precio??"")} style={{display:"flex",alignItems:"center",gap:6,background:C.surface,border:"1px solid "+(sinP?C.accent+"66":C.border),borderRadius:8,padding:"6px 10px"}}>
-                  <span style={{fontSize:12.5,color:C.text}}>{l.nombre}</span>
-                  <span style={{color:C.muted}}>$</span>
-                  <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); onSetPrecioLogo(l.id, v===""?null:Number(v)); }} style={priceInput}/>
-                </div>
-              );
-            })}
-            {(catalogoLogos||[]).length===0 && <div style={{color:C.muted,fontSize:12}}>Aún no hay logos en el catálogo.</div>}
+          <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px",marginTop:8}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",paddingBottom:10,marginBottom:10,borderBottom:"1px solid "+C.border}}>
+              <input value={nuevoNombre} onChange={e=>setNuevoNombre(e.target.value)} placeholder="Nombre del logo nuevo" style={{flex:"1 1 180px",background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"7px 10px",fontSize:13,outline:"none"}}/>
+              <span style={{color:C.muted}}>$</span>
+              <input value={nuevoPrecio} onChange={e=>setNuevoPrecio(e.target.value)} type="number" placeholder="Precio" style={{width:90,background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"7px 10px",fontSize:13,outline:"none"}}/>
+              <button disabled={procesando} onClick={agregarLogo} style={{background:C.success,border:"none",borderRadius:7,color:"#0f1117",padding:"8px 14px",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:procesando?0.6:1}}>+ Agregar</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:360,overflowY:"auto"}}>
+              {(catalogoLogos||[]).slice().sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).map(l => {
+                const sinP = l.precio===null||l.precio===undefined||l.precio==="";
+                return (
+                  <div key={(l.id||l.nombre)+"_"+(l.precio??"")} style={{display:"flex",alignItems:"center",gap:8,background:C.surface,border:"1px solid "+(sinP?C.accent+"55":C.border),borderRadius:8,padding:"7px 10px"}}>
+                    <span style={{flex:1,minWidth:0,fontSize:13,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.nombre}</span>
+                    <span style={{color:C.muted}}>$</span>
+                    <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); onSetPrecioLogo(l.id, v===""?null:Number(v)); }} style={priceInput}/>
+                    <button title="Renombrar" disabled={procesando} onClick={()=>renombrar(l)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"5px 9px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                    <button title="Borrar" disabled={procesando} onClick={()=>borrar(l)} style={{background:"transparent",border:"1px solid #e06a6a66",borderRadius:6,color:"#e06a6a",padding:"5px 9px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                  </div>
+                );
+              })}
+              {(catalogoLogos||[]).length===0 && <div style={{color:C.muted,fontSize:12}}>Aún no hay logos en el catálogo.</div>}
+            </div>
+            <div style={{fontSize:11,color:C.muted,marginTop:10}}>✏️ Renombrar también corrige el nombre en las órdenes que lo usan (para no romper el cálculo). 🗑 Borrar solo lo quita del catálogo.</div>
           </div>
         )}
       </div>
@@ -3643,6 +3683,45 @@ if (usuario) {
       try { await setDoc(doc(db, "logos", id), datos, { merge: true }); n++; } catch (e) {}
     }
     return n;
+  };
+  const borrarLogo = async (logo) => {
+    try { await deleteDoc(doc(db, "logos", logo.id || logoSlug(logo.nombre))); return { ok: true }; }
+    catch (e) { return { ok: false, msg: e.message }; }
+  };
+  const renombrarLogo = async (logo, nuevoNombre) => {
+    const nuevo = (nuevoNombre || "").trim();
+    if (!nuevo) return { ok: false, msg: "El nombre no puede estar vacío." };
+    const viejo = (logo.nombre || "").trim();
+    if (nuevo === viejo) return { ok: false, msg: "Es el mismo nombre." };
+    const viejoSlug = logo.id || logoSlug(viejo);
+    const nuevoSlug = logoSlug(nuevo);
+    if (!nuevoSlug) return { ok: false, msg: "Nombre inválido." };
+    // 1) Actualizar órdenes que usan el nombre viejo (para no romper el empate de precios)
+    let nOrdenes = 0;
+    for (const o of ordenes) {
+      const cambios = {};
+      Object.entries(o.posiciones || {}).forEach(([k, p]) => {
+        if (p && (p.logotipos || "").trim().toLowerCase() === viejo.toLowerCase()) cambios[k] = { logotipos: nuevo };
+      });
+      if (Object.keys(cambios).length) {
+        try { await setDoc(doc(db, "ordenes", String(o.id)), { posiciones: cambios }, { merge: true }); nOrdenes++; } catch (e) {}
+      }
+    }
+    // 2) Catálogo
+    try {
+      if (nuevoSlug === viejoSlug) {
+        await setDoc(doc(db, "logos", viejoSlug), { nombre: nuevo, nombreLower: nuevo.toLowerCase() }, { merge: true });
+      } else {
+        const target = logosCatalogo.find(l => (l.id || logoSlug(l.nombre)) === nuevoSlug);
+        const targetPrecio = target && target.precio !== null && target.precio !== undefined && target.precio !== "";
+        const datos = { nombre: nuevo, nombreLower: nuevo.toLowerCase(), creado: new Date().toISOString(), creadoPor: usuario.email };
+        const p = logo.precio;
+        if (!targetPrecio && p !== null && p !== undefined && p !== "") datos.precio = Number(p);
+        await setDoc(doc(db, "logos", nuevoSlug), datos, { merge: true });
+        if (viejoSlug) await deleteDoc(doc(db, "logos", viejoSlug));
+      }
+    } catch (e) { return { ok: false, msg: e.message }; }
+    return { ok: true, nOrdenes };
   };
 
   const login = async () => {
@@ -4322,6 +4401,8 @@ const cancelar = async (id) => {
           liquidaciones={liquidaciones}
           onImprimir={imprimirRecibo}
           onImportarLogos={importarLogos}
+          onRenombrarLogo={renombrarLogo}
+          onBorrarLogo={borrarLogo}
         />
       )}
 

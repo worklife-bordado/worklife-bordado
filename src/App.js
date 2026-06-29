@@ -214,7 +214,7 @@ function fechaLiberacion(o) {
   return (o && o.fecha) ? String(o.fecha).slice(0, 10) : "";
 }
 // ¿Cuenta para indicadores? Excluye solo los borradores: en "nueva" y sin liberar.
-function cuentaParaIndicadores(o) { return !(o && o.liberada === false && o.etapa === "nueva"); }
+function cuentaParaIndicadores(o) { return !(o && !o.liberada && o.etapa === "nueva"); }
 
 // ── Compresión de imágenes de logo (evita topar el límite de 1MB de Firestore) ──
 function comprimirImagen(dataUrl, maxDim, cb) {
@@ -964,7 +964,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
       if (!etapasActivas.includes(o.etapa) || !o.fechaRequerida) return false;
       return match && diasRest(o.fechaRequerida) > 3;
     }
-    if (filtro === "porLiberar") return match && o.etapa === "nueva" && o.liberada === false;
+    if (filtro === "porLiberar") return match && o.etapa === "nueva" && !o.liberada;
     return match && (filtro === "todas" || o.etapa === filtro);
   });
 
@@ -996,7 +996,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
       </div>
 
       {(() => {
-        const porLiberar = ordenes.filter(o => o.etapa === "nueva" && o.liberada === false);
+        const porLiberar = ordenes.filter(o => o.etapa === "nueva" && !o.liberada);
         if (!porLiberar.length) return null;
         const activo = filtro === "porLiberar";
         return (
@@ -1105,7 +1105,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
                 </div>
                 <div style={{flex:1}}>
                   <div style={{fontWeight:700,color:C.text}}>{o.cliente||"Sin cliente"}</div>
-                  {o.etapa === "nueva" && o.liberada === false && (
+                  {o.etapa === "nueva" && !o.liberada && (
                     <div style={{display:"inline-block",fontSize:10,fontWeight:800,color:C.accent,background:C.accentGlow,border:"1px solid "+C.accent+"55",borderRadius:5,padding:"1px 7px",marginTop:3}}>⏳ Por liberar a producción</div>
                   )}
                   <div style={{fontSize:11,color:C.muted}}>Cot: {o.noCotizacion||"—"} · {fmtDate(o.fecha)}</div>
@@ -1607,7 +1607,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>
       </div>
 
-      {puedeEditar && (
+      {puedeEditar && form.etapa === "nueva" && (
         form.liberada ? (
           <div style={{background:"#13351f",border:"1px solid "+C.success,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#cdeed9",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <span>✅ <b>Liberada para producción</b> — Seguimiento ya puede ver y trabajar esta orden.</span>
@@ -3572,7 +3572,7 @@ if (usuario) {
       // Seguimiento no ve órdenes nuevas que el vendedor aún no marca como listas.
       // (Las órdenes previas, sin el campo, se siguen viendo con normalidad.)
       const data = rolActual === "seguimiento"
-        ? all.filter(o => !(o.etapa === "nueva" && o.liberada === false))
+        ? all.filter(o => !(o.etapa === "nueva" && !o.liberada))
         : all;
       setOrdenes(data);
       // Mantener el contador global al día (solo quienes ven todas las órdenes)
@@ -4148,7 +4148,7 @@ const cancelar = async (id) => {
   const homeCumplimiento = _entregadasCump.length ? Math.round(_aTiempoCump.length / _entregadasCump.length * 100) : null;
   const homeActivasCount = ordenes.filter(o => _homeAct.includes(o.etapa) && cuentaParaIndicadores(o)).length;
   const homeSinAsignar = ordenes.filter(o => _homeAct.includes(o.etapa) && !(o.bordador||"").trim() && cuentaParaIndicadores(o)).length;
-  const homePorLiberar = ordenes.filter(o => o.etapa === "nueva" && o.liberada === false).length;
+  const homePorLiberar = ordenes.filter(o => o.etapa === "nueva" && !o.liberada).length;
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Barlow','Segoe UI',sans-serif"}}>

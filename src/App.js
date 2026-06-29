@@ -146,8 +146,22 @@ function mkTallas() {
   return t;
 }
 function emptyPrenda() {
-  return { descripcion: "", tallas: mkTallas() };
+  return { descripcion: "", tipo: "", tallas: mkTallas() };
 }
+// Tipos de prenda (para el cálculo automático de pago a bordadores)
+const TIPOS_PRENDA = [
+  { v: "tops",    l: "Tops" },
+  { v: "bottoms", l: "Bottoms" },
+  { v: "gorras",  l: "Gorras" },
+];
+// Mapeo posición → tipo de prenda
+const KEY_TO_TIPO = (() => {
+  const m = {};
+  ["A","B","E","W","V","U","F","G","H","C","D","S","T","C1","C2","C3","C4","C5","C6","C7"].forEach(k => m[k] = "tops");
+  ["I","J","K","L"].forEach(k => m[k] = "bottoms");
+  ["R","M","N","Q","O","P"].forEach(k => m[k] = "gorras");
+  return m;
+})();
 function emptyPosicion() {
   return { tecnica:"", medida:"", colores:"", logotipos:"", logoImg:null };
 }
@@ -1318,6 +1332,7 @@ function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onS
   // Ensure every prenda has a complete tallas object
   o.prendas = (o.prendas && o.prendas.length ? o.prendas : [emptyPrenda()]).map(p => ({
     descripcion: p.descripcion || "",
+    tipo: p.tipo || "",
     tallas: (() => { const t = mkTallas(); TALLAS.forEach(k => { t[k] = (p.tallas && p.tallas[k] != null) ? p.tallas[k] : ""; }); return t; })(),
   }));
   // Ensure every position key exists
@@ -1418,6 +1433,10 @@ useEffect(() => {
   // ── Prendas handlers ──────────────────────────────────────────────────────
   const setDescripcion = (idx, val) => setForm(p => {
     const prendas = p.prendas.map((pr, i) => i === idx ? { ...pr, descripcion: val } : pr);
+    return { ...p, prendas };
+  });
+  const setTipoPrenda = (idx, val) => setForm(p => {
+    const prendas = p.prendas.map((pr, i) => i === idx ? { ...pr, tipo: val } : pr);
     return { ...p, prendas };
   });
   const setTalla = (idx, talla, val) => setForm(p => {
@@ -1710,6 +1729,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
               <thead>
                 <tr>
                   <th style={{background:C.card,color:C.muted,padding:"6px 10px",textAlign:"left",fontSize:10,border:"1px solid "+C.border,minWidth:170,verticalAlign:"bottom"}}>Descripción</th>
+                  <th style={{background:C.card,color:C.muted,padding:"6px 8px",textAlign:"left",fontSize:10,border:"1px solid "+C.border,minWidth:110,verticalAlign:"bottom"}}>Tipo <span style={{color:C.accent}}>(para pago)</span></th>
                   {TALLA_GRUPOS.map(g => (
                     <th key={g.ropa} style={{background:C.card,padding:0,border:"1px solid "+C.border,minWidth:46,textAlign:"center"}}>
                       <div style={{color:C.accent,fontWeight:800,fontSize:10,padding:"2px 2px",borderBottom:"1px solid "+C.border}}>{g.ropa}</div>
@@ -1730,6 +1750,13 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                         <input value={prenda.descripcion} onChange={e => setDescripcion(idx, e.target.value)}
                           placeholder="Ej. Polo manga corta azul"
                           style={{background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,padding:"4px 8px",fontSize:12,outline:"none",width:"100%",minWidth:150}}/>
+                      </td>
+                      <td style={{padding:"3px 5px",border:"1px solid "+C.border,verticalAlign:"middle"}}>
+                        <select value={prenda.tipo||""} onChange={e => setTipoPrenda(idx, e.target.value)}
+                          style={{background:C.surface,border:"1px solid "+(prenda.tipo?C.border:C.accent+"88"),borderRadius:5,color:prenda.tipo?C.text:C.muted,padding:"4px 6px",fontSize:12,outline:"none",width:"100%",minWidth:100}}>
+                          <option value="">— Elegir —</option>
+                          {TIPOS_PRENDA.map(t => <option key={t.v} value={t.v} style={{color:"#000"}}>{t.l}</option>)}
+                        </select>
                       </td>
                       {TALLA_GRUPOS.map(g => (
                         <td key={g.ropa} style={{padding:"2px",border:"1px solid "+C.border,verticalAlign:"middle",textAlign:"center"}}>
@@ -3053,30 +3080,23 @@ function fechaBordadoTerminado(orden){
   return find("calidad") || find("entregada") || (h.length ? String(h[h.length-1].fecha||"").slice(0,10) : "") || (orden.fecha||"").slice(0,10) || null;
 }
 // Prenda a la que pertenece cada posición (por la vista que la contiene en PINS)
-const KEY_TO_GARMENT = (() => {
-  const m = {};
-  Object.entries(PINS||{}).forEach(([viewId, pins]) => {
-    const pre = (viewId||"").split("_")[0];
-    (pins||[]).forEach(pin => { if (m[pin.key]===undefined) m[pin.key]=pre; });
-  });
-  return m;
-})();
 const GARMENT_SYNS = {
-  playera: ["playera","camiseta","polo","franela","t-shirt","tshirt","jersey"],
-  camisa: ["camisa","camisola","filipina","blusa"],
-  pantalon: ["pantal","short","bermuda","jean","mezclilla"],
-  gorra: ["gorra","cachucha","cap","cofia"],
-  costado: ["chaleco","chamarra","chaqueta","saco","overol","bata","mandil"],
+  tops: ["playera","camiseta","polo","camisa","camisola","filipina","blusa","franela","chaleco","chamarra","chaqueta","saco","sudadera","hoodie","jersey","bata","overol","t-shirt","tshirt"],
+  bottoms: ["pantal","short","bermuda","jean","mezclilla","falda"],
+  gorras: ["gorra","cachucha","cap","cofia"],
 };
 function sumTallas(prenda){ return Object.values((prenda&&prenda.tallas)||{}).reduce((s,v)=> s+(parseInt(v)||0),0); }
 function totalPrendasOrden(orden){ return (orden.prendas||[]).reduce((s,p)=> s+sumTallas(p),0); }
-function cantidadPorPrefijo(orden, prefijo){
-  const syns = GARMENT_SYNS[prefijo] || [];
+function cantidadPorTipo(orden, tipo){
+  const prendas = orden.prendas || [];
+  // 1) Exacto: prendas etiquetadas con este tipo
   let suma=0, hubo=false;
-  (orden.prendas||[]).forEach(p => {
-    const d=(p.descripcion||"").toLowerCase();
-    if (syns.some(s => d.includes(s))) { suma += sumTallas(p); hubo=true; }
-  });
+  prendas.forEach(p => { if (p.tipo && p.tipo === tipo) { suma += sumTallas(p); hubo=true; } });
+  if (hubo) return suma;
+  // 2) Respaldo: palabra clave en la descripción (órdenes sin tipo etiquetado)
+  const syns = GARMENT_SYNS[tipo] || [];
+  suma=0; hubo=false;
+  prendas.forEach(p => { const d=(p.descripcion||"").toLowerCase(); if (syns.some(s => d.includes(s))) { suma += sumTallas(p); hubo=true; } });
   return hubo ? suma : totalPrendasOrden(orden);
 }
 function posLabelDe(key){ const p=POSICIONES.find(x=>x.key===key); return p?p.label:key; }
@@ -3231,13 +3251,13 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
     Object.entries(o.posiciones||{}).forEach(([key,pos]) => {
       if (!pos || !pos.logoImg) return;
       const logoName=(pos.logotipos||"").trim();
-      const prefijo=KEY_TO_GARMENT[key]||"";
+      const tipo=KEY_TO_TIPO[key]||"";
       const lineId=o.id+":"+key;
-      const cantDefault = prefijo ? cantidadPorPrefijo(o, prefijo) : totalPrendasOrden(o);
+      const cantDefault = tipo ? cantidadPorTipo(o, tipo) : totalPrendasOrden(o);
       const cantidad = overrides[lineId]!==undefined ? overrides[lineId] : cantDefault;
       const precio = precioDe(logoName);
       if (logoName) logosUsados[logoName.toLowerCase()] = logoName;
-      lineas.push({ lineId, key, logoName, posLabel: posLabelDe(key), prefijo, cantidad, precio });
+      lineas.push({ lineId, key, logoName, posLabel: posLabelDe(key), prefijo: tipo, cantidad, precio });
     });
     if (!lineas.length) return;
     if (!grupos[b]) grupos[b]=[];

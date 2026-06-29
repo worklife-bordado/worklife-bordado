@@ -174,6 +174,7 @@ function emptyOrden(ordenes) {
     comentarios: "",
     etapa: "nueva",
     bordador: "",
+    liberada: false,
     historial: [{ etapa:"nueva", fecha: new Date().toISOString(), nota:"Orden creada" }],
   };
 }
@@ -183,6 +184,42 @@ function fmtDate(iso) {
   return d+"/"+m+"/"+y;
 }
 function etapaInfo(id) { return ETAPAS.find(e => e.id === id) || ETAPAS[0]; }
+
+// ── Compresión de imágenes de logo (evita topar el límite de 1MB de Firestore) ──
+function comprimirImagen(dataUrl, maxDim, cb) {
+  try {
+    if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image")) { cb(dataUrl); return; }
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const escala = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * escala));
+        const h = Math.max(1, Math.round(img.height * escala));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        cb(canvas.toDataURL("image/png"));
+      } catch (e) { cb(dataUrl); }
+    };
+    img.onerror = () => cb(dataUrl);
+    img.src = dataUrl;
+  } catch (e) { cb(dataUrl); }
+}
+// Re-comprime las imágenes de logo grandes de una orden (PNG es sin pérdida, no degrada)
+async function recomprimirOrden(orden) {
+  try {
+    const pos = orden.posiciones || {};
+    let cambiado = false;
+    const nuevo = { ...pos };
+    for (const [k, p] of Object.entries(pos)) {
+      if (p && typeof p.logoImg === "string" && p.logoImg.length > 150000) {
+        const small = await new Promise(res => comprimirImagen(p.logoImg, 640, res));
+        if (small && small.length < p.logoImg.length) { nuevo[k] = { ...p, logoImg: small }; cambiado = true; }
+      }
+    }
+    return cambiado ? { ...orden, posiciones: nuevo } : orden;
+  } catch (e) { return orden; }
+}
 
 // ── Seguimiento público para el cliente ─────────────────────────────────────
 function genToken() {
@@ -719,7 +756,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
     const file = e.target.files[0];
     if (!file || !pending) return;
     const r = new FileReader();
-    r.onload = ev => onLogoUpload(pending, ev.target.result);
+    r.onload = ev => comprimirImagen(ev.target.result, 640, (small) => onLogoUpload(pending, small));
     r.readAsDataURL(file);
     e.target.value = "";
   };
@@ -1012,6 +1049,9 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
                 </div>
                 <div style={{flex:1}}>
                   <div style={{fontWeight:700,color:C.text}}>{o.cliente||"Sin cliente"}</div>
+                  {o.etapa === "nueva" && o.liberada === false && (
+                    <div style={{display:"inline-block",fontSize:10,fontWeight:800,color:C.accent,background:C.accentGlow,border:"1px solid "+C.accent+"55",borderRadius:5,padding:"1px 7px",marginTop:3}}>⏳ Por liberar a producción</div>
+                  )}
                   <div style={{fontSize:11,color:C.muted}}>Cot: {o.noCotizacion||"—"} · {fmtDate(o.fecha)}</div>
                   {o.creadoPorNombre && <div style={{fontSize:10,color:C.accent,marginTop:2}}>👤 {o.creadoPorNombre}</div>}
                   {o.bordador && <div style={{fontSize:10,color:"#4caf7d",marginTop:1}}>✂️ {o.bordador}</div>}
@@ -1414,14 +1454,23 @@ if (id === "entregada" && form.etapa === "bordado") {
     {id:"pos",l:"Posiciones"},{id:"prendas",l:"Prendas"},{id:"seg",l:"Seguimiento"},
     {id:"chat",l:"💬 Chat"},{id:"historial",l:"Historial"},
   ];
-const validarYGuardar = (cb) => {
+const validarYGuardar = async (cb) => {
     if (!form.fechaRequerida || !form.noCotizacion) {
       alert("Por favor llena los campos obligatorios:\n" + 
         (!form.fechaRequerida ? "• Fecha Requerida\n" : "") +
         (!form.noCotizacion ? "• No. Cotización\n" : ""));
       return;
     }
-    cb();
+    try {
+      await cb();
+    } catch (e) {
+      const msg = (e && e.message) || String(e);
+      if (/longer than|exceeds|1048|too large|size/i.test(msg)) {
+        alert("No se pudo guardar: la orden es demasiado grande (límite de Firestore).\n\nVuelve a intentar Guardar una vez más: las imágenes grandes se comprimen al guardar y debería caber. Si sigue fallando, reemplaza algún logo por una imagen más ligera.");
+      } else {
+        alert("No se pudo guardar: " + msg);
+      }
+    }
   };
   return (
     <>
@@ -1496,6 +1545,20 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         <Btn onClick={() => validarYGuardar(() => onSave(form))} size="sm">💾 Guardar</Btn>
         <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>
       </div>
+
+      {puedeEditar && (
+        form.liberada ? (
+          <div style={{background:"#13351f",border:"1px solid "+C.success,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#cdeed9",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span>✅ <b>Liberada para producción</b> — Seguimiento ya puede ver y trabajar esta orden.</span>
+            <Btn onClick={async () => { const f = { ...form, liberada:false, historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberación retirada"}] }; setForm(f); await onSave(f); }} variant="ghost" size="sm">Quitar liberación</Btn>
+          </div>
+        ) : (
+          <div style={{background:C.accentGlow,border:"1px solid "+C.accent,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:C.accent,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <span>⏳ <b>Pendiente de liberar</b> — Seguimiento NO ve esta orden todavía. Cuando esté completa y autorizada por el cliente, márcala lista.</span>
+            <Btn onClick={async () => { const f = { ...form, liberada:true, historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberada para producción"}] }; setForm(f); await onSave(f); }} size="sm">✅ Marcar lista para trabajar</Btn>
+          </div>
+        )
+      )}
 
       {!puedeEditar && (
         <div style={{background:C.accentGlow,border:"1px solid "+C.accent,borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:C.accent}}>
@@ -1794,7 +1857,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
 
       <div style={{marginTop:28,display:"flex",gap:10,justifyContent:"flex-end"}}>
         <Btn onClick={onBack} variant="ghost">Cancelar</Btn>
-        <Btn onClick={() => validarYGuardar(() => { onSave(form); onBack(); })}>💾 Guardar y volver</Btn>
+        <Btn onClick={() => validarYGuardar(async () => { await onSave(form); onBack(); })}>💾 Guardar y volver</Btn>
       </div>
     </div>
     </>
@@ -3363,12 +3426,17 @@ if (usuario) {
       ? collection(db, "ordenes")
       : query(collection(db, "ordenes"), where("creadoPor", "==", usuario.email));
     const unsub = onSnapshot(qOrdenes, snap => {
-      const data = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-      data.sort((a,b) => (a.numero||"").localeCompare(b.numero||""));
+      const all = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+      all.sort((a,b) => (a.numero||"").localeCompare(b.numero||""));
+      // Seguimiento no ve órdenes nuevas que el vendedor aún no marca como listas.
+      // (Las órdenes previas, sin el campo, se siguen viendo con normalidad.)
+      const data = rolActual === "seguimiento"
+        ? all.filter(o => !(o.etapa === "nueva" && o.liberada === false))
+        : all;
       setOrdenes(data);
       // Mantener el contador global al día (solo quienes ven todas las órdenes)
-      if (esPriv && data.length) {
-        const maxNum = Math.max(4999, ...data.map(o => parseInt(o.numero) || 0));
+      if (esPriv && all.length) {
+        const maxNum = Math.max(4999, ...all.map(o => parseInt(o.numero) || 0));
         const ref = doc(db, "config", "contador");
         runTransaction(db, async (tx) => {
           const s = await tx.get(ref);
@@ -3583,6 +3651,7 @@ if (usuario) {
   // Guarda en "ordenes" y actualiza el seguimiento público
   const guardarOrden = async (orden) => {
     if (!orden.seguimientoToken) orden = { ...orden, seguimientoToken: genToken() };
+    orden = await recomprimirOrden(orden);
     await setDoc(doc(db, "ordenes", String(orden.id)), orden);
     await syncSeguimiento(orden);
     await upsertLogosDeOrden(orden);
@@ -3766,6 +3835,7 @@ Object.keys(form).forEach(campo => {
     copia.fechaReprogramada = "";
     copia.etapa = "nueva";
     copia.bordador = "";
+    copia.liberada = false;
     copia.creadoPor = usuario.email;
     copia.creadoPorNombre = usuario.displayName || usuario.email;
     copia.historial = [{ etapa:"nueva", fecha: new Date().toISOString(), nota: "Duplicada de orden #"+(orig.numero||"")+" por "+(usuario.displayName||usuario.email) }];

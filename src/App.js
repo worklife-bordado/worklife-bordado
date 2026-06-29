@@ -185,6 +185,23 @@ function fmtDate(iso) {
 }
 function etapaInfo(id) { return ETAPAS.find(e => e.id === id) || ETAPAS[0]; }
 
+// Fecha de liberación a producción (para indicadores).
+// Una orden no pudo entrar a producción antes de liberarse: tomamos la fecha MÁS TEMPRANA entre
+// la fecha de liberación registrada y la primera vez que salió de "nueva". Esto corrige las
+// liberaciones masivas tardías (p. ej. confirmar hoy órdenes viejas ya entregadas).
+function fechaLiberacion(o) {
+  const fl = (o && o.fechaLiberada) ? String(o.fechaLiberada).slice(0, 10) : null;
+  const h = (o && o.historial) || [];
+  const prod = h.find(x => x.etapa && x.etapa !== "nueva");
+  const fp = (prod && prod.fecha) ? String(prod.fecha).slice(0, 10) : null;
+  if (fl && fp) return fl < fp ? fl : fp;
+  if (fl) return fl;
+  if (fp) return fp;
+  return (o && o.fecha) ? String(o.fecha).slice(0, 10) : "";
+}
+// ¿Cuenta para indicadores? Excluye solo los borradores: en "nueva" y sin liberar.
+function cuentaParaIndicadores(o) { return !(o && o.liberada === false && o.etapa === "nueva"); }
+
 // ── Compresión de imágenes de logo (evita topar el límite de 1MB de Firestore) ──
 function comprimirImagen(dataUrl, maxDim, cb) {
   try {
@@ -1561,12 +1578,12 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         form.liberada ? (
           <div style={{background:"#13351f",border:"1px solid "+C.success,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:"#cdeed9",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <span>✅ <b>Liberada para producción</b> — Seguimiento ya puede ver y trabajar esta orden.</span>
-            <Btn onClick={async () => { const f = { ...form, liberada:false, historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberación retirada"}] }; setForm(f); await onSave(f); }} variant="ghost" size="sm">Quitar liberación</Btn>
+            <Btn onClick={async () => { const f = { ...form, liberada:false, fechaLiberada: null, historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberación retirada"}] }; setForm(f); await onSave(f); }} variant="ghost" size="sm">Quitar liberación</Btn>
           </div>
         ) : (
           <div style={{background:C.accentGlow,border:"1px solid "+C.accent,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:C.accent,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <span>⏳ <b>Pendiente de liberar</b> — Seguimiento NO ve esta orden todavía. Cuando esté completa y autorizada por el cliente, márcala lista.</span>
-            <Btn onClick={async () => { const f = { ...form, liberada:true, historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberada para producción"}] }; setForm(f); await onSave(f); }} size="sm">✅ Marcar lista para trabajar</Btn>
+            <Btn onClick={async () => { const f = { ...form, liberada:true, fechaLiberada: new Date().toISOString(), historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberada para producción"}] }; setForm(f); await onSave(f); }} size="sm">✅ Marcar lista para trabajar</Btn>
           </div>
         )
       )}
@@ -1888,15 +1905,16 @@ function Dashboard({ ordenes, onBack }) {
   };
 
 const ordensFiltradas = ordenes.filter(o => {
-  const fechaCreacion = o.fecha ? o.fecha.slice(0, 10) : "";
+  if (!cuentaParaIndicadores(o)) return false;
+  const fechaLib = fechaLiberacion(o);
   const fechaEntrega = getFechaEtapa(o, "entregada");
   const fechaEntregaStr = fechaEntrega ? fechaEntrega.toISOString().slice(0, 10) : "";
-  return (fechaCreacion >= desde && fechaCreacion <= hasta) ||
+  return (fechaLib >= desde && fechaLib <= hasta) ||
          (fechaEntregaStr >= desde && fechaEntregaStr <= hasta);
 });
 const calcPromedio = (etapaInicio, etapaFin) => {
     const tiempos = ordensFiltradas.map(o => {
-      const inicio = etapaInicio === "nueva" ? new Date(o.fecha) : getFechaEtapa(o, etapaInicio);
+      const inicio = etapaInicio === "nueva" ? new Date(fechaLiberacion(o)) : getFechaEtapa(o, etapaInicio);
       const fin = getFechaEtapa(o, etapaFin);
       if (!inicio || !fin) return null;
       const dias = (fin - inicio) / (1000 * 60 * 60 * 24);
@@ -4073,7 +4091,7 @@ const cancelar = async (id) => {
   const _homeHoy = new Date(); _homeHoy.setHours(0,0,0,0);
   const _homeAct = ["nueva","bordado","calidad","retrabajo"];
   const _homeDias = (s) => { const p = String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1) - _homeHoy)/86400000); };
-  const _homeActivas = ordenes.filter(o => _homeAct.includes(o.etapa) && o.fechaRequerida);
+  const _homeActivas = ordenes.filter(o => _homeAct.includes(o.etapa) && o.fechaRequerida && cuentaParaIndicadores(o));
   const homeVencidas = _homeActivas.filter(o => _homeDias(o.fechaRequerida) < 0).length;
   const homeVencenHoy = _homeActivas.filter(o => _homeDias(o.fechaRequerida) === 0).length;
   const _finSemOff = (7 - _homeHoy.getDay()) % 7;
@@ -4081,19 +4099,21 @@ const cancelar = async (id) => {
   const _mesesH = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
   const _futuras = _homeActivas.filter(o => _homeDias(o.fechaRequerida) >= 0).sort((a,b) => _homeDias(a.fechaRequerida) - _homeDias(b.fechaRequerida));
   const homeProxima = _futuras.length ? (() => { const p = _futuras[0].fechaRequerida.split("-").map(Number); return p[2] + " " + _mesesH[p[1]-1]; })() : null;
-  let _onTime = 0, _conFecha = 0;
-  ordenes.filter(o => o.etapa === "entregada" && o.fechaRequerida).forEach(o => {
-    const ent = (o.historial || []).filter(h => h.etapa === "entregada").pop();
-    if (ent && ent.fecha) {
-      _conFecha++;
-      const de = new Date(ent.fecha); de.setHours(0,0,0,0);
-      const p = o.fechaRequerida.split("-").map(Number);
-      if (de <= new Date(p[0], p[1]-1, p[2])) _onTime++;
-    }
+  // Cumplimiento — mismo cálculo que el tablero (mes en curso por fecha de LIBERACIÓN, sin contar no liberadas, entrega ≤ fin del día requerido)
+  const _gFE = (o, et) => { const e = (o.historial || []).find(h => h.etapa === et); return e && e.fecha ? new Date(e.fecha) : null; };
+  const _desdeMes = new Date(_homeHoy.getFullYear(), _homeHoy.getMonth(), 1).toISOString().slice(0, 10);
+  const _hastaHoy = _homeHoy.toISOString().slice(0, 10);
+  const _filtradasCump = ordenes.filter(o => {
+    if (!cuentaParaIndicadores(o)) return false;
+    const fl = fechaLiberacion(o);
+    const fe = _gFE(o, "entregada"); const feStr = fe ? fe.toISOString().slice(0, 10) : "";
+    return (fl >= _desdeMes && fl <= _hastaHoy) || (feStr >= _desdeMes && feStr <= _hastaHoy);
   });
-  const homeCumplimiento = _conFecha ? Math.round(_onTime/_conFecha*100) : null;
-  const homeActivasCount = ordenes.filter(o => _homeAct.includes(o.etapa)).length;
-  const homeSinAsignar = ordenes.filter(o => _homeAct.includes(o.etapa) && !(o.bordador||"").trim()).length;
+  const _entregadasCump = _filtradasCump.filter(o => o.fechaRequerida && _gFE(o, "entregada"));
+  const _aTiempoCump = _entregadasCump.filter(o => _gFE(o, "entregada") <= new Date(o.fechaRequerida + "T23:59:59"));
+  const homeCumplimiento = _entregadasCump.length ? Math.round(_aTiempoCump.length / _entregadasCump.length * 100) : null;
+  const homeActivasCount = ordenes.filter(o => _homeAct.includes(o.etapa) && cuentaParaIndicadores(o)).length;
+  const homeSinAsignar = ordenes.filter(o => _homeAct.includes(o.etapa) && !(o.bordador||"").trim() && cuentaParaIndicadores(o)).length;
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Barlow','Segoe UI',sans-serif"}}>

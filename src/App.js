@@ -611,6 +611,7 @@ async function buildPdfHtml(orden) {
       }</span></div>
       <div class="mrow"><span class="mlabel">No. Cotización</span><span class="mval">${orden.noCotizacion||""}</span></div>
       <div class="mrow"><span class="mlabel">Vendedor</span><span class="mval">${orden.creadoPorNombre||""}</span></div>
+      <div class="mrow"><span class="mlabel">Bordador</span><span class="mval">${orden.bordador ? orden.bordador : "Sin asignar"}</span></div>
     </div>
   </div>
 
@@ -1767,9 +1768,9 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                       </td>
                       <td style={{padding:"3px 5px",border:"1px solid "+C.border,verticalAlign:"middle"}}>
                         <select value={prenda.tipo||""} onChange={e => setTipoPrenda(idx, e.target.value)}
-                          style={{background:C.surface,border:"1px solid "+(prenda.tipo?C.border:C.accent+"88"),borderRadius:5,color:prenda.tipo?C.text:C.muted,padding:"4px 6px",fontSize:12,outline:"none",width:"100%",minWidth:100}}>
+                          style={{background:"#ffffff",border:"1px solid "+(prenda.tipo?C.border:C.accent),borderRadius:5,color:prenda.tipo?"#111":"#777",padding:"4px 6px",fontSize:12,outline:"none",width:"100%",minWidth:100}}>
                           <option value="">— Elegir —</option>
-                          {TIPOS_PRENDA.map(t => <option key={t.v} value={t.v} style={{color:"#000"}}>{t.l}</option>)}
+                          {TIPOS_PRENDA.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
                         </select>
                       </td>
                       {TALLA_GRUPOS.map(g => (

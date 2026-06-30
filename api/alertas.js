@@ -26,6 +26,17 @@ const ROLES = {
 
 const ETAPAS_ACTIVAS = ['nueva', 'bordado', 'calidad', 'retrabajo'];
 
+// ¿Cuenta para indicadores? Solo órdenes ya liberadas a producción (igual que la app).
+// - liberada === true  -> cuenta
+// - liberada === false -> NO cuenta (aunque la hayan movido de etapa)
+// - sin el campo (órdenes viejas) -> cuenta solo si ya salió de "nueva"
+function cuentaParaIndicadores(o) {
+  if (!o) return false;
+  if (o.liberada === true) return true;
+  if (o.liberada === false) return false;
+  return o.etapa !== 'nueva';
+}
+
 export default async function handler(req, res) {
   // Seguridad: si hay CRON_SECRET, exige el header que Vercel envía automáticamente.
   if (process.env.CRON_SECRET) {
@@ -43,7 +54,7 @@ export default async function handler(req, res) {
     // 1) Órdenes
     const ordenesSnap = await db.collection('ordenes').get();
     const ordenes = ordenesSnap.docs.map((d) => d.data());
-    const activas = ordenes.filter((o) => ETAPAS_ACTIVAS.includes(o.etapa));
+    const activas = ordenes.filter((o) => ETAPAS_ACTIVAS.includes(o.etapa) && cuentaParaIndicadores(o));
 
     // 2) "Hoy" en hora de México (UTC-6, sin horario de verano)
     const mx = new Date(Date.now() - 6 * 60 * 60 * 1000);

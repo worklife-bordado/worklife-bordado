@@ -2734,21 +2734,28 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
     paradas:[], docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false },
     incidencias:"", estado:"planeada",
   });
-  const set = (k,v) => setR(p => ({ ...p, [k]:v }));
-  const setP = (i,k,v) => setR(p => ({ ...p, paradas: p.paradas.map((x,idx)=> idx===i?{...x,[k]:v}:x) }));
-  const quitarP = (i) => setR(p => ({ ...p, paradas: p.paradas.filter((_,idx)=>idx!==i) }));
-  const addActividad = () => setR(p => ({ ...p, paradas:[...p.paradas, nuevaParada("R")] }));
+  const set = (k,v) => setR(p => p.estado==="cerrada" ? p : ({ ...p, [k]:v }));
+  const setP = (i,k,v) => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas: p.paradas.map((x,idx)=> idx===i?{...x,[k]:v}:x) }));
+  const quitarP = (i) => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas: p.paradas.filter((_,idx)=>idx!==i) }));
+  const addActividad = () => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas:[...p.paradas, nuevaParada("R")] }));
   const addEntregasHoy = () => setR(p => {
+    if (p.estado==="cerrada") return p;
     const yaIds = new Set(p.paradas.map(x=>x.ordenId).filter(Boolean));
     const cand = (ordenes||[]).filter(o => o.fechaRequerida === p.fecha && o.etapa !== "cancelada" && !yaIds.has(o.id));
     const nuevas = cand.map(o => ({ ...nuevaParada("E"), cliente:o.cliente||"", noPedido:String(o.numero||""), ordenId:o.id }));
     if (nuevas.length === 0) { alert("No hay órdenes con fecha de entrega "+fmtDate(p.fecha)+" para agregar (o ya están en la ruta)."); return p; }
     return { ...p, paradas:[...p.paradas, ...nuevas] };
   });
-  const setDocE = (k,v) => setR(p => ({ ...p, docsEntregados:{ ...p.docsEntregados, [k]:v } }));
+  const setDocE = (k,v) => setR(p => p.estado==="cerrada" ? p : ({ ...p, docsEntregados:{ ...p.docsEntregados, [k]:v } }));
   const guardar = async (estado) => {
     setGuardando(true);
     try { await onGuardar(estado ? { ...r, estado } : r); setR(null); } catch(e){ alert("Error al guardar: "+e.message); }
+    setGuardando(false);
+  };
+  const reabrir = async () => {
+    if (!window.confirm("¿Reabrir esta ruta para poder editarla? Volverá a estado Planeada hasta que la cierres de nuevo.")) return;
+    setGuardando(true);
+    try { await onGuardar({ ...r, estado:"planeada" }); setR(null); } catch(e){ alert("Error al reabrir: "+e.message); }
     setGuardando(false);
   };
 
@@ -2789,6 +2796,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
 
   // ── EDITOR ──
   const res = resumenRuta(r);
+  const cerrada = r.estado === "cerrada";
   return (
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
@@ -2796,6 +2804,13 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
         <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
       </div>
 
+      {cerrada && (
+        <div style={{display:"flex", alignItems:"center", gap:10, background:"#13351f", border:"1px solid "+C.success, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:"#cdeed9"}}>
+          🔒 <b>Ruta cerrada — solo lectura.</b> Para editarla, pulsa <b>Reabrir ruta</b> abajo.
+        </div>
+      )}
+
+      <div style={{opacity: cerrada?0.55:1, pointerEvents: cerrada?"none":"auto"}}>
       {/* Datos generales */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
         <div><label style={lbl}>Fecha</label><input type="date" value={r.fecha} onChange={e=>set("fecha",e.target.value)} style={iS}/></div>
@@ -2805,10 +2820,12 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
 
       {/* Paradas */}
       <div style={{fontSize:15, fontWeight:800, color:C.text, marginBottom:10}}>Paradas y actividades del día</div>
+      {!cerrada && (
       <div style={{display:"flex", gap:8, flexWrap:"wrap", marginBottom:14}}>
         <button onClick={addEntregasHoy} style={{border:"none", borderRadius:9, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"10px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>+ Agregar entregas de hoy</button>
         <button onClick={addActividad} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.text, padding:"10px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>+ Agregar actividad</button>
       </div>
+      )}
       {r.paradas.length === 0 && <div style={{color:C.muted, fontSize:13, padding:"10px 0 16px"}}>Sin paradas todavía. Usa los botones de arriba para agregarlas.</div>}
       {r.paradas.map((p,i) => {
         const ti = tipoInfo(p.tipo);
@@ -2832,10 +2849,6 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
           </div>
         );
       })}
-
-      <div style={{marginTop:8, marginBottom:24}}>
-        <button onClick={()=>onImprimirHoja(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir hoja (carta)</button>
-      </div>
 
       {/* ── Cierre de Ruta ── */}
       <div style={{borderTop:"1px solid "+C.border, paddingTop:18}}>
@@ -2913,12 +2926,19 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
         <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:8}}>Incidencias del día</div>
         <textarea value={r.incidencias} onChange={e=>set("incidencias",e.target.value)} placeholder="Describe cualquier incidencia (cliente cerrado, dirección incorrecta, etc.)" style={{...iS, minHeight:64, resize:"vertical", marginBottom:18}}/>
 
-        {/* Acciones */}
-        <div style={{display:"flex", gap:10, flexWrap:"wrap", marginBottom:30}}>
-          <button onClick={()=>onImprimirCierre(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir cierre (firmas)</button>
-          <button disabled={guardando} onClick={()=>guardar(null)} style={{border:"1px solid "+C.border, borderRadius:10, cursor:"pointer", background:C.surface, color:C.text, padding:"11px 18px", fontSize:14, fontWeight:700, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar"}</button>
-          <button disabled={guardando} onClick={()=>{ if(window.confirm("¿Ya llenaste el apartado \"Cierre de Ruta\" (resultado de cada parada, documentos entregados, etc.)?\n\nAl cerrar, la ruta quedará marcada como CERRADA y se calculará el cumplimiento.")){ guardar("cerrada"); } }} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#4caf7d", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>Guardar y cerrar ruta</button>
-        </div>
+      </div>
+      </div>
+
+      {/* Acciones */}
+      <div style={{display:"flex", gap:10, flexWrap:"wrap", marginBottom:30}}>
+        <button onClick={()=>onImprimirHoja(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir hoja</button>
+        <button onClick={()=>onImprimirCierre(r)} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir cierre (firmas)</button>
+        {cerrada
+          ? <button disabled={guardando} onClick={reabrir} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Reabriendo…":"🔓 Reabrir ruta"}</button>
+          : <>
+              <button disabled={guardando} onClick={()=>guardar(null)} style={{border:"1px solid "+C.border, borderRadius:10, cursor:"pointer", background:C.surface, color:C.text, padding:"11px 18px", fontSize:14, fontWeight:700, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar"}</button>
+              <button disabled={guardando} onClick={()=>{ if(window.confirm("¿Ya llenaste el apartado \"Cierre de Ruta\" (resultado de cada parada, documentos entregados, etc.)?\n\nAl cerrar, la ruta quedará marcada como CERRADA y se calculará el cumplimiento.")){ guardar("cerrada"); } }} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#4caf7d", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>Guardar y cerrar ruta</button>
+            </>}
       </div>
     </div>
   );

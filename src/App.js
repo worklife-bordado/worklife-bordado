@@ -213,8 +213,16 @@ function fechaLiberacion(o) {
   if (fp) return fp;
   return (o && o.fecha) ? String(o.fecha).slice(0, 10) : "";
 }
-// ¿Cuenta para indicadores? Excluye solo los borradores: en "nueva" y sin liberar.
-function cuentaParaIndicadores(o) { return !(o && !o.liberada && o.etapa === "nueva"); }
+// ¿Cuenta para indicadores? Solo si ya fue liberada a producción.
+// - liberada === true  → cuenta
+// - liberada === false → NO cuenta (aunque la hayan movido de etapa)
+// - sin el campo (órdenes viejas) → cuenta solo si ya salió de "nueva"
+function cuentaParaIndicadores(o) {
+  if (!o) return false;
+  if (o.liberada === true) return true;
+  if (o.liberada === false) return false;
+  return o.etapa !== "nueva";
+}
 
 // ── Compresión de imágenes de logo (evita topar el límite de 1MB de Firestore) ──
 function comprimirImagen(dataUrl, maxDim, cb) {
@@ -1136,13 +1144,17 @@ function escHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/
 function resumenRuta(ruta){
   const paradas = (ruta && ruta.paradas) || [];
   const entregas = paradas.filter(p => p.tipo === "E");
+  const externos = paradas.filter(p => ["B","R","D"].includes(p.tipo));
   const entregasOk = entregas.filter(p => p.estatus === "ok").length;
+  const externosOk = externos.filter(p => p.estatus === "ok").length;
   const noCompletadas = entregas.filter(p => p.estatus === "x").length;
   const incidenciasCount = paradas.filter(p => p.estatus === "inc").length;
-  const cumplimiento = entregas.length ? Math.round(entregasOk / entregas.length * 100) : 0;
+  // null = sin actividad de ese tipo (no se calcula %)
+  const cumplimientoEntregas = entregas.length ? Math.round(entregasOk / entregas.length * 100) : null;
+  const cumplimientoExternos = externos.length ? Math.round(externosOk / externos.length * 100) : null;
   const d = (ruta && ruta.docsEntregados) || {};
   const docsOk = ["facturas","albaranes","ordenes","listas","hoja"].every(k => d[k]);
-  return { cumplimiento, entregasTotal: entregas.length, entregasOk, noCompletadas, incidenciasCount, docsOk };
+  return { cumplimientoEntregas, cumplimientoExternos, entregasTotal: entregas.length, entregasOk, externosTotal: externos.length, externosOk, noCompletadas, incidenciasCount, docsOk };
 }
 const RUTA_PDF_CSS = `
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -1250,10 +1262,11 @@ function buildCierreRutaHtml(ruta){
       <div class="sec">RESUMEN DEL DÍA</div>
       <div class="resumen">
         <div class="box">Entregas completadas<b>${r.entregasOk} / ${r.entregasTotal}</b></div>
-        <div class="box">No completadas<b>${r.noCompletadas}</b></div>
+        <div class="box">Externos completados<b>${r.externosOk} / ${r.externosTotal}</b></div>
         <div class="box">Incidencias<b>${r.incidenciasCount}</b></div>
         <div class="box">Docs a Krisia<b>${r.docsOk?"Sí":"No"}</b></div>
-        <div class="box">Cumplimiento<b>${r.cumplimiento}%</b></div>
+        <div class="box">Cumpl. entregas a clientes<b>${r.cumplimientoEntregas===null?"Sin actividad":r.cumplimientoEntregas+"%"}</b></div>
+        <div class="box">Cumpl. actividades con externos<b>${r.cumplimientoExternos===null?"Sin actividad":r.cumplimientoExternos+"%"}</b></div>
       </div>
       <div class="sec">INCIDENCIAS DEL DÍA</div>
       <table><tr><td style="height:48px">${escHtml(ruta.incidencias)}</td></tr></table>
@@ -2599,7 +2612,7 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
 // ── Carga por Bordador ─────────────────────────────────────────────────────
 function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministrar }) {
   const [exp, setExp] = useState(null);
-  const activas = ordenes.filter(o => ["nueva","bordado","calidad","retrabajo"].includes(o.etapa));
+  const activas = ordenes.filter(o => ["nueva","bordado","calidad","retrabajo"].includes(o.etapa) && cuentaParaIndicadores(o));
   const piezasDe = (o) => (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const dias = (s)=>{ if(!s) return null; const p=String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1)-hoy)/86400000); };
@@ -2760,7 +2773,10 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
               </div>
               <div style={{display:"flex", alignItems:"center", gap:10}}>
                 {cerrada
-                  ? <span style={{fontSize:13, fontWeight:800, color: res.cumplimiento>=90?"#4caf7d":res.cumplimiento>=70?"#f5a623":"#c0392b"}}>{res.cumplimiento}% cumplimiento</span>
+                  ? <div style={{display:"flex", flexDirection:"column", alignItems:"flex-end", gap:2, fontSize:12, fontWeight:800}}>
+                      <span style={{color: res.cumplimientoEntregas===null?C.muted:(res.cumplimientoEntregas>=90?"#4caf7d":res.cumplimientoEntregas>=70?"#f5a623":"#c0392b")}}>Clientes: {res.cumplimientoEntregas===null?"sin actividad":res.cumplimientoEntregas+"%"}</span>
+                      <span style={{color: res.cumplimientoExternos===null?C.muted:(res.cumplimientoExternos>=90?"#4caf7d":res.cumplimientoExternos>=70?"#f5a623":"#c0392b")}}>Externos: {res.cumplimientoExternos===null?"sin actividad":res.cumplimientoExternos+"%"}</span>
+                    </div>
                   : <span style={{fontSize:12, fontWeight:700, color:"#f5a623", background:"rgba(245,166,35,.15)", padding:"4px 10px", borderRadius:20}}>Planeada</span>}
                 {cerrada && <span style={{fontSize:11, fontWeight:700, color:"#4caf7d", background:"rgba(76,175,125,.15)", padding:"4px 10px", borderRadius:20}}>Cerrada</span>}
               </div>
@@ -2825,12 +2841,23 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
       <div style={{borderTop:"1px solid "+C.border, paddingTop:18}}>
         <div style={{fontSize:17, fontWeight:800, color:C.text, marginBottom:6}}>Cierre de Ruta</div>
         {/* Resumen automático */}
-        <div style={{border:"2px solid #4caf7d", background:"rgba(76,175,125,.10)", borderRadius:12, padding:"14px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:18, flexWrap:"wrap"}}>
-          <div style={{fontSize:32, fontWeight:800, color: res.cumplimiento>=90?"#4caf7d":res.cumplimiento>=70?"#f5a623":"#c0392b"}}>{res.cumplimiento}%</div>
-          <div style={{fontSize:13, color:C.text, lineHeight:1.7}}>
-            <div>Cumplimiento del día (automático)</div>
-            <div style={{color:C.muted}}>{res.entregasOk}/{res.entregasTotal} entregas · {res.incidenciasCount} incidencia(s) · Docs: {res.docsOk?"Sí":"No"}</div>
+        <div style={{border:"2px solid #4caf7d", background:"rgba(76,175,125,.10)", borderRadius:12, padding:"14px 16px", marginBottom:18}}>
+          <div style={{fontSize:13, fontWeight:700, color:C.text, marginBottom:10}}>Cumplimiento del día (automático)</div>
+          <div style={{display:"flex", gap:14, flexWrap:"wrap"}}>
+            <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
+              <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Entregas a clientes</div>
+              {res.cumplimientoEntregas===null
+                ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
+                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoEntregas>=90?"#4caf7d":res.cumplimientoEntregas>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoEntregas}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.entregasOk}/{res.entregasTotal})</span></div>}
+            </div>
+            <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
+              <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Actividades con externos</div>
+              {res.cumplimientoExternos===null
+                ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
+                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoExternos>=90?"#4caf7d":res.cumplimientoExternos>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoExternos}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.externosOk}/{res.externosTotal})</span></div>}
+            </div>
           </div>
+          <div style={{fontSize:12, color:C.muted, marginTop:10}}>{res.incidenciasCount} incidencia(s) · Docs a Krisia: {res.docsOk?"Sí":"No"}</div>
         </div>
 
         <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>

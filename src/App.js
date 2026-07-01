@@ -3823,14 +3823,14 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
                 return (
                   <div key={cl} style={{display:"flex", alignItems:"center", gap:10, marginBottom:8, flexWrap:"wrap"}}>
                     <div style={{flex:"1 1 150px", fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</div>
-                    <input value={s.base==null?"":s.base} onChange={e=>setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),base:e.target.value===""?"":Number(e.target.value)}}))} placeholder="Sueldo base"
+                    <input value={s.base==null?"":s.base} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),base:v}})); }} placeholder="Sueldo base"
                       style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
-                    <input value={s.bonoMax==null?"":s.bonoMax} onChange={e=>setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),bonoMax:e.target.value===""?"":Number(e.target.value)}}))} placeholder="Bono máximo"
+                    <input value={s.bonoMax==null?"":s.bonoMax} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),bonoMax:v}})); }} placeholder="Bono máximo"
                       style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
                   </div>
                 );
               })}
-              <button onClick={async()=>{ try{ await onGuardarSalarios(salLocal); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
+              <button onClick={async()=>{ try{ const limpio={}; BONOS_ORDEN.forEach(cl=>{ const s=salLocal[cl]||{}; limpio[cl]={ base:Number(s.base)||0, bonoMax:Number(s.bonoMax)||0 }; }); await onGuardarSalarios(limpio); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
                 style={{marginTop:6, border:"none", borderRadius:8, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>Guardar sueldos</button>
             </div>
           )}

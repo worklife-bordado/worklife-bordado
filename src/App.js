@@ -3546,6 +3546,312 @@ function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+// MÓDULO DE BONOS MENSUALES (Krisia, Andrés, Isidra)
+// ══════════════════════════════════════════════════════════════════════════
+const BONOS_DEF = {
+  krisia: {
+    nombre: "Krisia", puesto: "Coord. de Operaciones y Almacén",
+    kpis: [
+      { id:"k1", label:"Exactitud de inventario", peso:0.40, cap:"% (piezas correctas / auditadas × 100)",
+        ev:v=> v>=98?{p:1,n:"Meta cumplida (≥98%)"}:v>=95?{p:0.7,n:"Parcial (95–97.9%)"}:{p:0,n:"No cumplido (<95%)"} },
+      { id:"k2", label:"Cumplimiento de pedidos", peso:0.25, auto:true, autoKey:"cumplPedidos", cap:"% (pedidos completos a tiempo / total × 100)",
+        ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.7,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
+      { id:"k3", label:"Control de mermas", peso:0.20, cap:"% de mermas sobre inventario",
+        ev:v=> v<=0.5?{p:1,n:"Meta cumplida (≤0.5%)"}:v<1?{p:0.5,n:"Parcial (0.51–0.99%)"}:{p:0,n:"No cumplido (≥1%)"} },
+      { id:"k4", label:"Orden y disciplina operativa", peso:0.10, cap:"semanas con checklist (0–4)",
+        ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
+      { id:"k5", label:"Gestión de equipo", peso:0.05, cap:"2 = ambos, 1 = uno, 0 = ninguno",
+        ev:v=> v==2?{p:1,n:"Ambos criterios"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Ninguno"} },
+    ],
+  },
+  andres: {
+    nombre:"Andrés", puesto:"Aux. de Logística y Distribución", naKpi:"a6", naReparto:"equal",
+    kpis: [
+      { id:"a1", label:"Puntualidad de rutas", peso:0.25, auto:true, autoKey:"puntualidad", estim:true, cap:"% (paradas a tiempo / total × 100)",
+        ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
+      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.20, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / total × 100)",
+        ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
+      { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
+        ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },
+      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, cap:"semanas con checklist (0–4)",
+        ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
+      { id:"a5", label:"Relación con clientes y externos", peso:0.05, cap:"número de quejas (0 = meta)",
+        ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con quejas"} },
+      { id:"a6", label:"Desempeño apoyo almacén", peso:0.15, na:true, cap:"0 = sin quejas, ≥1 = con queja, NA = sin apoyo",
+        ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con queja"} },
+    ],
+  },
+  isidra: {
+    nombre:"Isidra", puesto:"Aux. de Almacén y Costura", naKpi:"i4", naReparto:"prop",
+    kpis: [
+      { id:"i1", label:"Exactitud en recepción y acomodo", peso:0.30, cap:"número de errores",
+        ev:v=> v==0?{p:1,n:"Sin errores"}:v<=2?{p:0.5,n:"1–2 errores"}:{p:0,n:"3+ errores"} },
+      { id:"i2", label:"Calidad en revisión de prendas", peso:0.25, cap:"prendas no detectadas",
+        ev:v=> v==0?{p:1,n:"Sin fallas"}:v==1?{p:0.5,n:"1 no detectada"}:{p:0,n:"2+ no detectadas"} },
+      { id:"i3", label:"Orden, limpieza y checklist", peso:0.25, cap:"semanas con checklist (0–4)",
+        ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
+      { id:"i4", label:"Calidad en trabajos de costura", peso:0.20, na:true, cap:"0 = conformes, 1 = corrección, NA = sin costura",
+        ev:v=> v==0?{p:1,n:"Todos conformes"}:v==1?{p:0.5,n:"Corrección requerida"}:{p:0,n:"Defectos graves"} },
+    ],
+  },
+};
+const BONOS_ORDEN = ["krisia","andres","isidra"];
+function esNAval(v){ return String(v==null?"":v).toUpperCase().trim()==="NA"; }
+function bonoPesosEfectivos(def, capturas){
+  const pesos = {}; def.kpis.forEach(k => pesos[k.id]=k.peso);
+  const naId = def.naKpi;
+  const esNA = naId && esNAval((capturas||{})[naId]);
+  if (esNA){
+    const extra = pesos[naId]; pesos[naId] = 0;
+    const otros = def.kpis.filter(k => k.id!==naId);
+    if (def.naReparto==="equal"){ otros.forEach(k => pesos[k.id]+=extra/otros.length); }
+    else { const s=otros.reduce((a,k)=>a+k.peso,0); otros.forEach(k => pesos[k.id]+=extra*(k.peso/s)); }
+  }
+  return { pesos, esNA };
+}
+function calcColaborador(def, capturas, bonoMax){
+  capturas = capturas || {};
+  const { pesos, esNA } = bonoPesosEfectivos(def, capturas);
+  let totalBono = 0;
+  const filas = def.kpis.map(k => {
+    const raw = capturas[k.id];
+    const vacio = raw==="" || raw==null;
+    let pago=0, nivel="—";
+    if (k.na && esNAval(raw)) { pago=0; nivel="No aplica este mes"; }
+    else if (!vacio) { const r=k.ev(Number(raw)); pago=r.p; nivel=r.n; }
+    const monto = (bonoMax||0) * pesos[k.id];
+    const bono = pago * monto;
+    if (!(k.na && esNAval(raw))) totalBono += bono;
+    else totalBono += 0;
+    return { id:k.id, label:k.label, peso:pesos[k.id], cap:k.cap, resultado: vacio?"":raw, pago, nivel, monto, bono, esNAfila: k.na && esNAval(raw) };
+  });
+  return { filas, totalBono, esNA };
+}
+// Valores que la app puede pre-llenar automáticamente para un período "YYYY-MM"
+function autoValoresBonos(periodo, ordenes, rutas){
+  const desde = periodo + "-01", hasta = periodo + "-31";
+  const gFE = (o,et) => { const e=((o.historial)||[]).find(h=>h.etapa===et); return e&&e.fecha?String(e.fecha).slice(0,10):null; };
+  // Krisia — cumplimiento de pedidos = entregadas a tiempo / entregadas del mes
+  const ent = (ordenes||[]).filter(o => cuentaParaIndicadores(o) && o.fechaRequerida && gFE(o,"entregada") && gFE(o,"entregada")>=desde && gFE(o,"entregada")<=hasta);
+  const aTiempo = ent.filter(o => new Date(gFE(o,"entregada")+"T23:59:59") <= new Date(o.fechaRequerida+"T23:59:59"));
+  const cumplPedidos = ent.length ? Math.round(aTiempo.length/ent.length*100) : "";
+  // Andrés — entregas ejecutadas = entregasOk / entregas de las rutas del mes
+  const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
+  let entTot=0, entOk=0;
+  rutasMes.forEach(r => { const s=resumenRuta(r); entTot+=s.entregasTotal; entOk+=s.entregasOk; });
+  const entregasEjec = entTot ? Math.round(entOk/entTot*100) : "";
+  return { krisia:{ k2:cumplPedidos }, andres:{ a1:entregasEjec, a2:entregasEjec }, isidra:{} };
+}
+// Recibo imprimible (solo admin)
+function buildReciboBonoHtml(clave, capturas, sal, periodo){
+  const def = BONOS_DEF[clave];
+  const bonoMax = (sal && sal.bonoMax) || 0;
+  const calc = calcColaborador(def, capturas, bonoMax);
+  const rows = calc.filas.map((f,i) => `<tr>
+      <td>${i+1}. ${escHtml(f.label)}</td>
+      <td style="text-align:center">${f.esNAfila ? "NA" : (f.resultado===""?"—":escHtml(String(f.resultado)))}</td>
+      <td>${escHtml(f.nivel)}</td>
+      <td style="text-align:center">${Math.round(f.pago*100)}%</td>
+      <td style="text-align:right">$${fmtMoney(f.bono)}</td>
+    </tr>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><h1>RECIBO DE BONO MENSUAL</h1></div>
+    <div class="body">
+      <div class="sec">DATOS DEL COLABORADOR</div>
+      <table>
+        <tr><th>Colaborador</th><th>Puesto</th><th>Período</th><th>Emitido</th></tr>
+        <tr><td>${escHtml(def.nombre)}</td><td>${escHtml(def.puesto)}</td><td>${escHtml(nombreMesAnio(periodo))}</td><td>${escHtml(fmtDate(new Date().toISOString()))}</td></tr>
+      </table>
+      <div class="sec">DESGLOSE DE KPIs</div>
+      <table>
+        <tr><th>KPI</th><th style="width:66px">Resultado</th><th>Nivel alcanzado</th><th style="width:54px">% pago</th><th style="width:78px">Bono</th></tr>
+        ${rows}
+      </table>
+      <div class="sec">RESUMEN</div>
+      <table>
+        <tr><th style="text-align:left">BONO DEL MES</th><th style="text-align:right">$${fmtMoney(calc.totalBono)}</th></tr>
+      </table>
+      <div class="firmas"><div class="firma">Entrega — WorkLife Uniformes</div><div class="firma">Recibí de conformidad — ${escHtml(def.nombre)}</div></div>
+    </div>
+  </div></body></html>`;
+}
+
+function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onImprimir, onGuardarSalarios }){
+  const [p, setP] = React.useState(null);
+  const [guardando, setGuardando] = React.useState(false);
+  const [cfgOpen, setCfgOpen] = React.useState(false);
+  const [salLocal, setSalLocal] = React.useState(salarios || {});
+  React.useEffect(()=>{ setSalLocal(salarios||{}); }, [salarios]);
+  const C2 = C;
+  const mesActual = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+
+  // ── LISTA ──
+  if (!p){
+    const ordenados = [...(bonos||[])].sort((a,b)=> (b.periodo||"").localeCompare(a.periodo||""));
+    const nuevo = () => {
+      const mes = mesActual();
+      const existe = (bonos||[]).find(x => x.periodo===mes);
+      if (existe) { setP({ ...existe }); return; }
+      setP({ id:mes, periodo:mes, estado:"abierto", capturas:{ krisia:{}, andres:{}, isidra:{} } });
+    };
+    return (
+      <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18, flexWrap:"wrap", gap:10}}>
+          <div style={{fontSize:22, fontWeight:800, color:C2.text}}>💰 Bonos mensuales</div>
+          <Btn onClick={nuevo} size="sm">+ Período (mes actual)</Btn>
+        </div>
+        {ordenados.length===0 && <div style={{color:C2.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay períodos. Crea el del mes actual para empezar.</div>}
+        {ordenados.map(b => {
+          let totalNomina = 0;
+          if (esAdmin){
+            BONOS_ORDEN.forEach(cl => { const sal=(salarios||{})[cl]||{}; const c=calcColaborador(BONOS_DEF[cl], (b.capturas||{})[cl], sal.bonoMax||0); totalNomina += (sal.base||0)+c.totalBono; });
+          }
+          return (
+            <div key={b.id} onClick={()=>setP({ ...b, capturas:{ krisia:{...((b.capturas||{}).krisia||{})}, andres:{...((b.capturas||{}).andres||{})}, isidra:{...((b.capturas||{}).isidra||{})} } })}
+              style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12}}>
+              <div>
+                <div style={{fontSize:16, fontWeight:800, color:C2.text}}>{nombreMesAnio(b.periodo)}</div>
+                <div style={{fontSize:12, color:C2.muted, marginTop:2}}>{b.estado==="cerrado" ? "🔒 Cerrado" : "✏️ Abierto"}{esAdmin && totalNomina>0 ? " · Nómina: $"+fmtMoney(totalNomina) : ""}</div>
+              </div>
+              <div style={{fontSize:12, fontWeight:800, color: b.estado==="cerrado"?C2.success:C2.accent}}>{b.estado==="cerrado"?"Ver":"Continuar →"}</div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── EDITOR ──
+  const cerrado = p.estado === "cerrado";
+  const auto = autoValoresBonos(p.periodo, ordenes, rutas);
+  const setCap = (cl, kid, val) => { if (cerrado) return; setP(prev => ({ ...prev, capturas:{ ...prev.capturas, [cl]:{ ...(prev.capturas[cl]||{}), [kid]:val } } })); };
+  const guardar = async (estado) => {
+    setGuardando(true);
+    try {
+      const payload = { ...p, id:p.periodo };
+      if (estado){ payload.estado=estado; if(estado==="cerrado") payload.fechaCierre=new Date().toISOString(); }
+      await onGuardar(payload);
+      setP(null);
+    } catch(e){ alert("Error al guardar: "+e.message); }
+    setGuardando(false);
+  };
+  const reabrir = async () => {
+    if (!window.confirm("⚠️ ADVERTENCIA\n\nEstás por REABRIR el cálculo de bonos de "+nombreMesAnio(p.periodo)+".\n\nAl reabrir, el período vuelve a ser editable y los montos podrán cambiar. Hazlo solo si necesitas corregir algo antes de pagar.\n\n¿Continuar?")) return;
+    setGuardando(true);
+    try { await onGuardar({ ...p, id:p.periodo, estado:"abierto" }); setP(null); }
+    catch(e){ alert("Error al reabrir: "+e.message); }
+    setGuardando(false);
+  };
+
+  const bonoMaxDe = (cl) => (esAdmin ? ((salarios||{})[cl]||{}).bonoMax || 0 : 0);
+  const faltanSueldos = esAdmin && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
+
+  return (
+    <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
+        <div style={{fontSize:20, fontWeight:800, color:C2.text}}>💰 Bonos — {nombreMesAnio(p.periodo)}</div>
+        <button onClick={()=>setP(null)} style={{border:"1px solid "+C2.border, borderRadius:9, cursor:"pointer", background:C2.surface, color:C2.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
+      </div>
+
+      {cerrado && (
+        <div style={{display:"flex", alignItems:"center", gap:10, background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:"#cdeed9"}}>
+          🔒 <b>Período cerrado — solo lectura.</b> Para editar, pulsa <b>Reabrir</b> abajo.
+        </div>
+      )}
+
+      {esAdmin && faltanSueldos && !cerrado && (
+        <div style={{background:"#2a1f0e", border:"2px solid "+C2.accent, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:C2.accent}}>
+          ⚠️ Falta capturar sueldo base y bono máximo de algún colaborador. Ábrelo en “Configurar sueldos” abajo para que se calculen los montos.
+        </div>
+      )}
+
+      <div style={{opacity: cerrado?0.6:1, pointerEvents: cerrado?"none":"auto"}}>
+      {BONOS_ORDEN.map(cl => {
+        const def = BONOS_DEF[cl];
+        const caps = (p.capturas||{})[cl] || {};
+        const bonoMax = bonoMaxDe(cl);
+        const calc = esAdmin ? calcColaborador(def, caps, bonoMax) : null;
+        return (
+          <div key={cl} style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"14px 16px", marginBottom:16}}>
+            <div style={{fontSize:16, fontWeight:800, color:C2.text}}>{def.nombre} <span style={{fontSize:12, color:C2.muted, fontWeight:400}}>· {def.puesto}</span></div>
+            <div style={{marginTop:10}}>
+              {def.kpis.map(k => {
+                const autoVal = ((auto[cl]||{})[k.id]);
+                let val = caps[k.id];
+                const prell = (val===""||val==null) && k.auto && autoVal!=="" && autoVal!=null;
+                if (prell) val = autoVal; // pre-llenado (Seguimiento lo confirma al guardar)
+                const fila = calc ? calc.filas.find(f=>f.id===k.id) : null;
+                return (
+                  <div key={k.id} style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderTop:"1px solid "+C2.border, flexWrap:"wrap"}}>
+                    <div style={{flex:"1 1 220px", minWidth:180}}>
+                      <div style={{fontSize:13, color:C2.text, fontWeight:600}}>{k.label}{esAdmin ? <span style={{color:C2.muted, fontWeight:400}}> · {Math.round((fila?fila.peso:k.peso)*100)}%</span> : null}</div>
+                      <div style={{fontSize:11, color:C2.muted}}>{k.cap}{k.auto ? <span style={{color:C2.accent}}> · sugerido por sistema{k.estim?" (estimado)":""}: {autoVal===""||autoVal==null?"s/d":autoVal}</span> : null}</div>
+                    </div>
+                    <input value={val==null?"":val} onChange={e=>setCap(cl,k.id,e.target.value)}
+                      placeholder={k.na?"0 / 1 / NA":"—"}
+                      style={{width:90, background:prell?"#2a1f0e":C2.surface, border:"1px solid "+(prell?C2.accent:C2.border), borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none", textAlign:"center"}}/>
+                    <div style={{flex:"1 1 150px", minWidth:130}}>
+                      <div style={{fontSize:12, color: (fila?fila.pago:0)>=1?C2.success:(fila? (fila.pago>0?C2.accent:C2.muted):C2.muted), fontWeight:700}}>
+                        {(() => { const raw=(val==null?"":val); if(raw==="") return "—"; if(k.na&&esNAval(raw)) return "No aplica este mes"; const r=k.ev(Number(raw)); return r.n; })()}
+                      </div>
+                      {esAdmin && fila ? <div style={{fontSize:11, color:C2.muted}}>{Math.round(fila.pago*100)}% · ${fmtMoney(fila.bono)}</div> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {esAdmin && calc ? (
+              <div style={{marginTop:10, paddingTop:10, borderTop:"2px solid "+C2.border, display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8}}>
+                <div style={{fontSize:13, color:C2.text}}>Bono del mes: <b style={{color:C2.accent}}>${fmtMoney(calc.totalBono)}</b> <span style={{color:C2.muted}}>de ${fmtMoney(bonoMax)}</span> · Ingreso: <b>${fmtMoney((((salarios||{})[cl]||{}).base||0) + calc.totalBono)}</b></div>
+                <button onClick={()=>onImprimir(buildReciboBonoHtml(cl, caps, (salarios||{})[cl]||{}, p.periodo), "Recibo bono "+def.nombre)} style={{border:"none", borderRadius:8, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"7px 14px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Recibo</button>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+
+      {esAdmin && (
+        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
+          <div onClick={()=>setCfgOpen(o=>!o)} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text}}>{cfgOpen?"▾":"▸"} Configurar sueldos (solo administración)</div>
+          {cfgOpen && (
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:12, color:C2.muted, marginBottom:10}}>Captura el sueldo base neto y el bono máximo mensual de cada colaborador. Estos datos solo los ve administración.</div>
+              {BONOS_ORDEN.map(cl => {
+                const s = salLocal[cl] || {};
+                return (
+                  <div key={cl} style={{display:"flex", alignItems:"center", gap:10, marginBottom:8, flexWrap:"wrap"}}>
+                    <div style={{flex:"1 1 150px", fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</div>
+                    <input value={s.base==null?"":s.base} onChange={e=>setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),base:e.target.value===""?"":Number(e.target.value)}}))} placeholder="Sueldo base"
+                      style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
+                    <input value={s.bonoMax==null?"":s.bonoMax} onChange={e=>setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),bonoMax:e.target.value===""?"":Number(e.target.value)}}))} placeholder="Bono máximo"
+                      style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
+                  </div>
+                );
+              })}
+              <button onClick={async()=>{ try{ await onGuardarSalarios(salLocal); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
+                style={{marginTop:6, border:"none", borderRadius:8, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>Guardar sueldos</button>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+
+      {/* Acciones */}
+      <div style={{display:"flex", gap:10, flexWrap:"wrap", marginBottom:30}}>
+        {cerrado
+          ? <button disabled={guardando} onClick={reabrir} style={{border:"none", borderRadius:10, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Reabriendo…":"🔓 Reabrir"}</button>
+          : <>
+              <button disabled={guardando} onClick={()=>guardar(null)} style={{border:"1px solid "+C2.border, borderRadius:10, cursor:"pointer", background:C2.surface, color:C2.text, padding:"11px 18px", fontSize:14, fontWeight:700, fontFamily:"inherit", opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar"}</button>
+              <button disabled={guardando} onClick={()=>{ if(window.confirm("¿Cerrar el cálculo de bonos de "+nombreMesAnio(p.periodo)+"?\n\nAl cerrar, el período queda en solo lectura. Podrás imprimir los recibos y, si hace falta, reabrirlo.")) guardar("cerrado"); }} style={{border:"none", borderRadius:10, cursor:"pointer", background:"#4caf7d", color:"#fff", padding:"11px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:guardando?0.6:1}}>Guardar y cerrar</button>
+            </>}
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
@@ -3566,6 +3872,9 @@ export default function App() {
   const [remisionPdf, setRemisionPdf] = useState(null);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [pagoPdf, setPagoPdf] = useState(null);
+  const [bonos, setBonos] = useState([]);
+  const [bonoPdf, setBonoPdf] = useState(null);
+  const [salariosBonos, setSalariosBonos] = useState(null);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -3753,6 +4062,32 @@ if (usuario) {
   };
   const eliminarRemision = async (id) => { try { await deleteDoc(doc(db, "remisiones", String(id))); } catch (e) { alert("Error al eliminar: " + e.message); } };
   const imprimirRemision = (rem) => setRemisionPdf({ html: buildRemisionHtml(rem), titulo: "Remisión No. " + (rem.numero || ""), archivo: "Remision_" + (rem.numero || "nueva") + ".html" });
+
+  // ── Bonos mensuales ──
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    const unsub = onSnapshot(collection(db, "bonos"), snap => {
+      setBonos(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    return unsub;
+  }, [usuario, rol]);
+  useEffect(() => {
+    // Sueldos y topes de bono: SOLO administración los descarga.
+    if (!usuario?.email || rol !== "admin") { setSalariosBonos(null); return; }
+    const unsub = onSnapshot(doc(db, "config", "bonosSalarios"), snap => {
+      setSalariosBonos(snap.exists() ? snap.data() : {});
+    });
+    return unsub;
+  }, [usuario, rol]);
+  const guardarBono = async (payload) => {
+    const id = String(payload.id || payload.periodo);
+    await setDoc(doc(db, "bonos", id), { ...payload, id, actualizadoPor: usuario.email, actualizado: new Date().toISOString() }, { merge: true });
+  };
+  const guardarSalariosBonos = async (data) => {
+    await setDoc(doc(db, "config", "bonosSalarios"), { ...data, actualizadoPor: usuario.email }, { merge: true });
+  };
+  const imprimirBono = (html, titulo) => setBonoPdf({ html, titulo: titulo || "Recibo de bono", archivo: (titulo || "ReciboBono").replace(/\s+/g, "_") + ".html" });
 
   // ── Pago a bordadores ──
   useEffect(() => {
@@ -4372,6 +4707,22 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {puedeEditarSeguimiento && (
+            <ModTile onClick={() => setVista("bonos")} label="Bonos"
+              stat={<span style={{color:C.muted}}>{(() => { const ab = bonos.filter(b => b.estado !== "cerrado").length; return ab>0 ? ab+" abierto"+(ab===1?"":"s") : (bonos.length>0 ? "Al día" : "Calcular mes"); })()}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gBono" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#34d399"/><stop offset="1" stopColor="#059669"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gBono)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.4" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M30 52 l10 -11 l8 7 l12 -16"/>
+                  <path d="M54 32 h8 v8"/>
+                </g>
+                <circle cx="30" cy="52" r="3" fill="#fff"/>
+              </svg>
+            </ModTile>
+            )}
+
           </div>
 
           <Pendientes
@@ -4520,6 +4871,19 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "bonos" && puedeEditarSeguimiento && (
+        <BonosModule
+          bonos={bonos}
+          salarios={rol === "admin" ? (salariosBonos || {}) : null}
+          ordenes={ordenes}
+          rutas={rutas}
+          esAdmin={rol === "admin"}
+          onGuardar={guardarBono}
+          onImprimir={imprimirBono}
+          onGuardarSalarios={guardarSalariosBonos}
+        />
+      )}
+
      {vista === "detalle" && ordenData && (
         <Detalle
           key={ordenData.id}
@@ -4561,6 +4925,7 @@ const cancelar = async (id) => {
       )}
 
       {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
+      {bonoPdf && <PdfModal html={bonoPdf.html} titulo={bonoPdf.titulo} archivo={bonoPdf.archivo} onClose={() => setBonoPdf(null)}/>}
       {remisionPdf && <PdfModal html={remisionPdf.html} titulo={remisionPdf.titulo} archivo={remisionPdf.archivo} onClose={() => setRemisionPdf(null)}/>}
       {pagoPdf && <PdfModal html={pagoPdf.html} titulo={pagoPdf.titulo} archivo={pagoPdf.archivo} onClose={() => setPagoPdf(null)}/>}
     </div>

@@ -3679,11 +3679,11 @@ function buildReciboBonoHtml(clave, capturas, sal, periodo){
 }
 
 function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onImprimir, onGuardarSalarios }){
-  const [p, setP] = React.useState(null);
-  const [guardando, setGuardando] = React.useState(false);
-  const [cfgOpen, setCfgOpen] = React.useState(false);
-  const [salLocal, setSalLocal] = React.useState(salarios || {});
-  React.useEffect(()=>{ setSalLocal(salarios||{}); }, [salarios]);
+  const [p, setP] = useState(null);
+  const [guardando, setGuardando] = useState(false);
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [salLocal, setSalLocal] = useState(salarios || {});
+  useEffect(()=>{ setSalLocal(salarios||{}); }, [salarios]);
   const C2 = C;
   const mesActual = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
 

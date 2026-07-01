@@ -2519,6 +2519,8 @@ const KANBAN_TRANS = {
 };
 function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
   const esMovil = window.innerWidth < 760;
+  // El Tablero solo muestra órdenes liberadas a producción.
+  const visibles = ordenes.filter(cuentaParaIndicadores);
   const [colSel, setColSel] = useState("nueva");
   const [menu, setMenu] = useState(null);
   const hoy = new Date(); hoy.setHours(0,0,0,0);
@@ -2538,7 +2540,7 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
     </div>
   );
   const Columna = ({col}) => {
-    const items = ordenes.filter(o => o.etapa === col.id);
+    const items = visibles.filter(o => o.etapa === col.id);
     return (
       <div style={{flex:esMovil?"none":"1 0 220px", minWidth:esMovil?"100%":220, width:esMovil?"100%":"auto"}}>
         {!esMovil && (
@@ -2564,7 +2566,7 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
         <div>
           <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:14,paddingBottom:4}}>
             {KANBAN_COLS.map(col => {
-              const n = ordenes.filter(o => o.etapa === col.id).length;
+              const n = visibles.filter(o => o.etapa === col.id).length;
               const activo = colSel === col.id;
               return (
                 <div key={col.id} onClick={() => setColSel(col.id)} style={{flexShrink:0,padding:"7px 13px",borderRadius:20,cursor:"pointer",background:activo?col.color:C.surface,color:activo?"#fff":C.muted,fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>

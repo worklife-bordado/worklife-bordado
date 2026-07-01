@@ -3685,6 +3685,36 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
   const [salLocal, setSalLocal] = useState(salarios || {});
   useEffect(()=>{ setSalLocal(salarios||{}); }, [salarios]);
   const C2 = C;
+  // Sueldos a usar: si el período está CERRADO usa su foto congelada; si está ABIERTO usa los vivos.
+  const salariosDe = (docp) => (docp && docp.estado === "cerrado" && docp.salariosSnapshot) ? docp.salariosSnapshot : (salarios || {});
+  const faltanSueldosBase = esAdmin && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
+  const PanelSueldos = () => !esAdmin ? null : (
+    <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
+      <div onClick={()=>setCfgOpen(o=>!o)} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <span>{cfgOpen?"▾":"▸"} Sueldos y bonos (base de cálculo · solo administración)</span>
+        {faltanSueldosBase && <span style={{fontSize:11, color:C2.accent, fontWeight:800}}>⚠️ Falta capturar</span>}
+      </div>
+      {cfgOpen && (
+        <div style={{marginTop:12}}>
+          <div style={{fontSize:12, color:C2.muted, marginBottom:10}}>Captura el sueldo base neto y el bono máximo mensual de cada colaborador. Los períodos <b>abiertos</b> siempre usan estos valores; los <b>cerrados</b> conservan los que tenían al cerrarse. Solo administración ve estos datos.</div>
+          {BONOS_ORDEN.map(cl => {
+            const s = salLocal[cl] || {};
+            return (
+              <div key={cl} style={{display:"flex", alignItems:"center", gap:10, marginBottom:8, flexWrap:"wrap"}}>
+                <div style={{flex:"1 1 150px", fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</div>
+                <input value={s.base==null?"":s.base} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),base:v}})); }} placeholder="Sueldo base"
+                  style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
+                <input value={s.bonoMax==null?"":s.bonoMax} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),bonoMax:v}})); }} placeholder="Bono máximo"
+                  style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
+              </div>
+            );
+          })}
+          <button onClick={async()=>{ try{ const limpio={}; BONOS_ORDEN.forEach(cl=>{ const s=salLocal[cl]||{}; limpio[cl]={ base:Number(s.base)||0, bonoMax:Number(s.bonoMax)||0 }; }); await onGuardarSalarios(limpio); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
+            style={{marginTop:6, border:"none", borderRadius:8, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>Guardar sueldos</button>
+        </div>
+      )}
+    </div>
+  );
   const mesActual = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
 
   // ── LISTA ──
@@ -3702,11 +3732,13 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
           <div style={{fontSize:22, fontWeight:800, color:C2.text}}>💰 Bonos mensuales</div>
           <Btn onClick={nuevo} size="sm">+ Período (mes actual)</Btn>
         </div>
+        <PanelSueldos />
         {ordenados.length===0 && <div style={{color:C2.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay períodos. Crea el del mes actual para empezar.</div>}
         {ordenados.map(b => {
           let totalNomina = 0;
           if (esAdmin){
-            BONOS_ORDEN.forEach(cl => { const sal=(salarios||{})[cl]||{}; const c=calcColaborador(BONOS_DEF[cl], (b.capturas||{})[cl], sal.bonoMax||0); totalNomina += (sal.base||0)+c.totalBono; });
+            const salB = salariosDe(b);
+            BONOS_ORDEN.forEach(cl => { const sal=salB[cl]||{}; const c=calcColaborador(BONOS_DEF[cl], (b.capturas||{})[cl], sal.bonoMax||0); totalNomina += (sal.base||0)+c.totalBono; });
           }
           return (
             <div key={b.id} onClick={()=>setP({ ...b, capturas:{ krisia:{...((b.capturas||{}).krisia||{})}, andres:{...((b.capturas||{}).andres||{})}, isidra:{...((b.capturas||{}).isidra||{})} } })}
@@ -3725,13 +3757,14 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
 
   // ── EDITOR ──
   const cerrado = p.estado === "cerrado";
+  const salEf = salariosDe(p);
   const auto = autoValoresBonos(p.periodo, ordenes, rutas);
   const setCap = (cl, kid, val) => { if (cerrado) return; setP(prev => ({ ...prev, capturas:{ ...prev.capturas, [cl]:{ ...(prev.capturas[cl]||{}), [kid]:val } } })); };
   const guardar = async (estado) => {
     setGuardando(true);
     try {
       const payload = { ...p, id:p.periodo };
-      if (estado){ payload.estado=estado; if(estado==="cerrado") payload.fechaCierre=new Date().toISOString(); }
+      if (estado){ payload.estado=estado; if(estado==="cerrado"){ payload.fechaCierre=new Date().toISOString(); if(esAdmin && salarios) payload.salariosSnapshot = salarios; } }
       await onGuardar(payload);
       setP(null);
     } catch(e){ alert("Error al guardar: "+e.message); }
@@ -3745,8 +3778,8 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
     setGuardando(false);
   };
 
-  const bonoMaxDe = (cl) => (esAdmin ? ((salarios||{})[cl]||{}).bonoMax || 0 : 0);
-  const faltanSueldos = esAdmin && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
+  const bonoMaxDe = (cl) => (esAdmin ? (salEf[cl]||{}).bonoMax || 0 : 0);
+  const faltanSueldos = esAdmin && !cerrado && BONOS_ORDEN.some(cl => { const s=salEf[cl]||{}; return !s.base || !s.bonoMax; });
 
   return (
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
@@ -3763,7 +3796,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
 
       {esAdmin && faltanSueldos && !cerrado && (
         <div style={{background:"#2a1f0e", border:"2px solid "+C2.accent, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:C2.accent}}>
-          ⚠️ Falta capturar sueldo base y bono máximo de algún colaborador. Ábrelo en “Configurar sueldos” abajo para que se calculen los montos.
+          ⚠️ Falta capturar sueldo base y bono máximo de algún colaborador. Regresa a la pantalla principal de Bonos y ábrelo en “Sueldos y bonos”.
         </div>
       )}
 
@@ -3804,38 +3837,14 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
             </div>
             {esAdmin && calc ? (
               <div style={{marginTop:10, paddingTop:10, borderTop:"2px solid "+C2.border, display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8}}>
-                <div style={{fontSize:13, color:C2.text}}>Bono del mes: <b style={{color:C2.accent}}>${fmtMoney(calc.totalBono)}</b> <span style={{color:C2.muted}}>de ${fmtMoney(bonoMax)}</span> · Ingreso: <b>${fmtMoney((((salarios||{})[cl]||{}).base||0) + calc.totalBono)}</b></div>
-                <button onClick={()=>onImprimir(buildReciboBonoHtml(cl, caps, (salarios||{})[cl]||{}, p.periodo), "Recibo bono "+def.nombre)} style={{border:"none", borderRadius:8, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"7px 14px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Recibo</button>
+                <div style={{fontSize:13, color:C2.text}}>Bono del mes: <b style={{color:C2.accent}}>${fmtMoney(calc.totalBono)}</b> <span style={{color:C2.muted}}>de ${fmtMoney(bonoMax)}</span> · Ingreso: <b>${fmtMoney(((salEf[cl]||{}).base||0) + calc.totalBono)}</b></div>
+                <button onClick={()=>onImprimir(buildReciboBonoHtml(cl, caps, salEf[cl]||{}, p.periodo), "Recibo bono "+def.nombre)} style={{border:"none", borderRadius:8, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"7px 14px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Recibo</button>
               </div>
             ) : null}
           </div>
         );
       })}
 
-      {esAdmin && (
-        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
-          <div onClick={()=>setCfgOpen(o=>!o)} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text}}>{cfgOpen?"▾":"▸"} Configurar sueldos (solo administración)</div>
-          {cfgOpen && (
-            <div style={{marginTop:12}}>
-              <div style={{fontSize:12, color:C2.muted, marginBottom:10}}>Captura el sueldo base neto y el bono máximo mensual de cada colaborador. Estos datos solo los ve administración.</div>
-              {BONOS_ORDEN.map(cl => {
-                const s = salLocal[cl] || {};
-                return (
-                  <div key={cl} style={{display:"flex", alignItems:"center", gap:10, marginBottom:8, flexWrap:"wrap"}}>
-                    <div style={{flex:"1 1 150px", fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</div>
-                    <input value={s.base==null?"":s.base} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),base:v}})); }} placeholder="Sueldo base"
-                      style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
-                    <input value={s.bonoMax==null?"":s.bonoMax} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),bonoMax:v}})); }} placeholder="Bono máximo"
-                      style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
-                  </div>
-                );
-              })}
-              <button onClick={async()=>{ try{ const limpio={}; BONOS_ORDEN.forEach(cl=>{ const s=salLocal[cl]||{}; limpio[cl]={ base:Number(s.base)||0, bonoMax:Number(s.bonoMax)||0 }; }); await onGuardarSalarios(limpio); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
-                style={{marginTop:6, border:"none", borderRadius:8, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>Guardar sueldos</button>
-            </div>
-          )}
-        </div>
-      )}
       </div>
 
       {/* Acciones */}

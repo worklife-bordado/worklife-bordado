@@ -3683,7 +3683,7 @@ function buildReciboBonoHtml(clave, capturas, sal, periodo){
       <div class="sec">DATOS DEL COLABORADOR</div>
       <table>
         <tr><th>Colaborador</th><th>Puesto</th><th>Período</th><th>Emitido</th></tr>
-        <tr><td>${escHtml(def.nombre)}</td><td>${escHtml(def.puesto)}</td><td>${escHtml(nombreMesAnio(periodo))}</td><td>${escHtml(fmtDate(new Date().toISOString()))}</td></tr>
+        <tr><td>${escHtml(def.nombre)}</td><td>${escHtml(def.puesto)}</td><td>${escHtml(nombreMesAnio(periodo))}</td><td>${escHtml(fmtDate(new Date().toISOString().slice(0,10)))}</td></tr>
       </table>
       <div class="sec">DESGLOSE DE KPIs</div>
       <table>

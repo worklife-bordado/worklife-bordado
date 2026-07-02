@@ -114,6 +114,7 @@ const ETAPAS = [
   {id:"nueva",     label:"Nueva",           color:"#8b90a7"},
   {id:"bordado",   label:"En Bordado",      color:"#5c8fe0"},
   {id:"calidad",   label:"Control Calidad", color:"#f5a623"},
+  {id:"espera",    label:"En espera de faltante", color:"#2fa19b"},
   {id:"entregada", label:"Entregada",       color:"#4caf7d"},
   {id:"retrabajo", label:"Retrabajo",       color:"#8e44ad"},
   {id:"cancelada", label:"Cancelada",       color:"#c0392b"},
@@ -284,6 +285,7 @@ const ETAPAS_CLIENTE = [
 function etapaCliente(etapa) {
   if (etapa === "cancelada") return { idx: -1, estado: "cancelado" };
   if (etapa === "retrabajo") return { idx: 1, estado: "revision" };
+  if (etapa === "espera") return { idx: 2, estado: "espera" };
   const map = { nueva: 0, bordado: 1, calidad: 2, entregada: 3 };
   return { idx: map[etapa] ?? 0, estado: "normal" };
 }
@@ -960,7 +962,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
     }
     const hoy = new Date();
     hoy.setHours(0,0,0,0);
-    const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
+    const etapasActivas = ["nueva","bordado","calidad","espera","retrabajo"];
     const diasRest = (s) => { const [y,m,d] = String(s).split("-").map(Number); return Math.round((new Date(y,(m||1)-1,d||1) - hoy) / 86400000); };
     if (filtro === "vencidas") return match && etapasActivas.includes(o.etapa) && o.fechaRequerida && diasRest(o.fechaRequerida) < 0;
     if (filtro === "vencenHoy") return match && etapasActivas.includes(o.etapa) && o.fechaRequerida && diasRest(o.fechaRequerida) === 0;
@@ -1019,7 +1021,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
 
       <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(2,1fr)" : "repeat(4,1fr)",gap:10,marginBottom:20}}>
         {(() => {
-          const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
+          const etapasActivas = ["nueva","bordado","calidad","espera","retrabajo"];
           const activas = ordenes.filter(o => etapasActivas.includes(o.etapa) && o.fechaRequerida);
           const hoy = new Date();
           hoy.setHours(0,0,0,0);
@@ -1482,8 +1484,9 @@ const cambiarEtapa = id => {
     // Transiciones permitidas
     const transicionesPermitidas = {
       "nueva":     ["bordado", "cancelada"],
-      "bordado":   ["calidad", "entregada", "cancelada"],
-      "calidad":   ["entregada", "retrabajo", "cancelada"],
+      "bordado":   ["calidad", "entregada", "espera", "cancelada"],
+      "calidad":   ["entregada", "espera", "retrabajo", "cancelada"],
+      "espera":    ["bordado", "cancelada"],
       "entregada": ["retrabajo"],
       "retrabajo": ["calidad"],
       "cancelada": ["nueva", "bordado", "calidad"],
@@ -1998,7 +2001,7 @@ const calcPromedio = (etapaInicio, etapaFin) => {
     if (!inicioBordado) return null;
     const fechaInicio = new Date(inicioBordado.fecha);
     const salida = hist.find(h =>
-      (h.etapa === "calidad" || h.etapa === "entregada") &&
+      (h.etapa === "calidad" || h.etapa === "entregada" || h.etapa === "espera") &&
       new Date(h.fecha) > fechaInicio
     );
     if (!salida) return null;
@@ -2008,7 +2011,31 @@ const calcPromedio = (etapaInicio, etapaFin) => {
   if (tiempos.length === 0) return null;
   return (tiempos.reduce((a, b) => a + b, 0) / tiempos.length).toFixed(1);
 })();
-  const p3 = calcPromedio("calidad", "entregada");
+  // Tiempo (ms) que una orden estuvo detenida en "espera de faltante" — se excluye de métricas de trabajadores.
+  const tiempoEnEsperaMs = (o) => {
+    const hist = (o.historial||[]).filter(h=>h.fecha).slice().sort((a,b)=>new Date(a.fecha)-new Date(b.fecha));
+    let total = 0;
+    for (let i=0;i<hist.length;i++){
+      if (hist[i].etapa === "espera"){
+        const ini = new Date(hist[i].fecha);
+        const fin = hist[i+1] ? new Date(hist[i+1].fecha) : new Date();
+        const d = fin - ini;
+        if (d > 0) total += d;
+      }
+    }
+    return total;
+  };
+  const p3 = (() => {
+    const tiempos = ordensFiltradas.map(o => {
+      const inicio = getFechaEtapa(o, "calidad");
+      const fin = getFechaEtapa(o, "entregada");
+      if (!inicio || !fin) return null;
+      const dias = ((fin - inicio) - tiempoEnEsperaMs(o)) / (1000 * 60 * 60 * 24);
+      return dias >= 0 ? dias : null;
+    }).filter(d => d !== null);
+    if (tiempos.length === 0) return null;
+    return (tiempos.reduce((a, b) => a + b, 0) / tiempos.length).toFixed(1);
+  })();
   const entregas = calcEntregasATiempo();
 
   const Tarjeta = ({ titulo, valor, subtitulo, color }) => (
@@ -2205,7 +2232,7 @@ const calcPromedio = (etapaInicio, etapaFin) => {
       <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Operación - Órdenes Vencidas</div>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
         {(() => {
-          const etapasActivas = ["nueva","bordado","calidad","retrabajo"];
+          const etapasActivas = ["nueva","bordado","calidad","espera","retrabajo"];
           const activas = ordenes.filter(o => etapasActivas.includes(o.etapa) && o.fechaRequerida);
           if (activas.length === 0) return <div style={{color:C.muted,fontSize:13}}>No hay órdenes activas con fecha requerida.</div>;
           const hoy = new Date();
@@ -2459,6 +2486,11 @@ function SeguimientoPublico({ token }) {
                   En revisión de calidad
                 </div>
               )}
+              {ec.estado === "espera" && (
+                <div style={{marginTop:16, background:"#2fa19b22", border:"1px solid #2fa19b", color:"#7fd6cf", borderRadius:10, padding:"10px 14px", fontSize:13, textAlign:"center"}}>
+                  En espera de material para completar tu pedido
+                </div>
+              )}
             </div>
           )}
 
@@ -2614,7 +2646,7 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
 // ── Carga por Bordador ─────────────────────────────────────────────────────
 function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministrar }) {
   const [exp, setExp] = useState(null);
-  const activas = ordenes.filter(o => ["nueva","bordado","calidad","retrabajo"].includes(o.etapa) && cuentaParaIndicadores(o));
+  const activas = ordenes.filter(o => ["nueva","bordado","calidad","espera","retrabajo"].includes(o.etapa) && cuentaParaIndicadores(o));
   const piezasDe = (o) => (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const dias = (s)=>{ if(!s) return null; const p=String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1)-hoy)/86400000); };
@@ -4543,7 +4575,7 @@ const cancelar = async (id) => {
 
   // ── Datos en vivo para los módulos de la home ──
   const _homeHoy = new Date(); _homeHoy.setHours(0,0,0,0);
-  const _homeAct = ["nueva","bordado","calidad","retrabajo"];
+  const _homeAct = ["nueva","bordado","calidad","espera","retrabajo"];
   const _homeDias = (s) => { const p = String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1) - _homeHoy)/86400000); };
   const _homeActivas = ordenes.filter(o => _homeAct.includes(o.etapa) && o.fechaRequerida && cuentaParaIndicadores(o));
   const homeVencidas = _homeActivas.filter(o => _homeDias(o.fechaRequerida) < 0).length;

@@ -24,7 +24,7 @@ const ROLES = {
   'compras.uniformesgon@gmail.com': 'seguimiento',
 };
 
-const ETAPAS_ACTIVAS = ['nueva', 'bordado', 'calidad', 'retrabajo'];
+const ETAPAS_ACTIVAS = ['nueva', 'bordado', 'calidad', 'espera', 'retrabajo'];
 
 // ¿Cuenta para indicadores? Solo órdenes ya liberadas a producción (igual que la app).
 // - liberada === true  -> cuenta

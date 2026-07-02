@@ -2539,13 +2539,15 @@ const KANBAN_COLS = [
   {id:"nueva",     label:"Nueva",           color:"#8b90a7"},
   {id:"bordado",   label:"En Bordado",      color:"#5c8fe0"},
   {id:"calidad",   label:"Control Calidad", color:"#f5a623"},
+  {id:"espera",    label:"En espera de faltante", color:"#2fa19b"},
   {id:"retrabajo", label:"Retrabajo",       color:"#8e44ad"},
   {id:"entregada", label:"Entregada",       color:"#4caf7d"},
 ];
 const KANBAN_TRANS = {
   nueva:     ["bordado"],
-  bordado:   ["calidad", "entregada"],
-  calidad:   ["entregada", "retrabajo"],
+  bordado:   ["calidad", "entregada", "espera"],
+  calidad:   ["entregada", "espera", "retrabajo"],
+  espera:    ["bordado"],
   entregada: ["retrabajo"],
   retrabajo: ["calidad"],
 };

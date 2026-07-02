@@ -3574,8 +3574,8 @@ const BONOS_DEF = {
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
       { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
         ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },
-      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, cap:"semanas con checklist (0–4)",
-        ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
+      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, auto:true, autoKey:"docs", cap:"% documentación entregada (facturas/albaranes de clientes + órdenes de externos)",
+        ev:v=> v>=100?{p:1,n:"Meta cumplida (100%)"}:v>50?{p:0.5,n:"Parcial (51–99%)"}:{p:0,n:"No cumplido (≤50%)"} },
       { id:"a5", label:"Relación con clientes y externos", peso:0.05, cap:"número de quejas (0 = meta)",
         ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con quejas"} },
       { id:"a6", label:"Desempeño apoyo almacén", peso:0.15, na:true, cap:"0 = sin quejas, ≥1 = con queja, NA = sin apoyo",
@@ -3651,7 +3651,18 @@ function autoValoresBonos(periodo, ordenes, rutas){
   rutasMes.forEach(r => { const s=resumenRuta(r); entTot+=s.entregasTotal; entOk+=s.entregasOk; extTot+=s.externosTotal; extOk+=s.externosOk; });
   const entregasEjec = entTot ? Math.round(entOk/entTot*100) : "";
   const externosPct = extTot ? Math.round(extOk/extTot*100) : "";
-  return { krisia:{ k2:cumplPedidos }, andres:{ a1:externosPct, a2:entregasEjec }, isidra:{} };
+  // Andrés a4 — cumplimiento documental: por cada día (ruta) hay hasta 2 obligaciones
+  //  · si hay entrega a cliente (E): cumple si está palomeada factura O albarán
+  //  · si hay "llevar a externo" (B): cumple si está palomeada la orden de externos
+  let obTot=0, obOk=0;
+  rutasMes.forEach(r => {
+    const paradas = (r.paradas)||[];
+    const d = r.docsEntregados || {};
+    if (paradas.some(p => p.tipo === "E")) { obTot++; if (d.facturas || d.albaranes) obOk++; }
+    if (paradas.some(p => p.tipo === "B")) { obTot++; if (d.ordenes) obOk++; }
+  });
+  const docsPct = obTot ? Math.round(obOk/obTot*100) : "";
+  return { krisia:{ k2:cumplPedidos }, andres:{ a1:externosPct, a2:entregasEjec, a4:docsPct }, isidra:{} };
 }
 // Recibo imprimible (solo admin)
 function buildReciboBonoHtml(clave, capturas, sal, periodo){

@@ -3683,6 +3683,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
   const [guardando, setGuardando] = useState(false);
   const [cfgOpen, setCfgOpen] = useState(false);
   const [salLocal, setSalLocal] = useState(salarios || {});
+  const [nuevoMes, setNuevoMes] = useState(() => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); });
   useEffect(()=>{ setSalLocal(salarios||{}); }, [salarios]);
   const C2 = C;
   // Sueldos a usar: si el período está CERRADO usa su foto congelada; si está ABIERTO usa los vivos.
@@ -3720,17 +3721,21 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
   // ── LISTA ──
   if (!p){
     const ordenados = [...(bonos||[])].sort((a,b)=> (b.periodo||"").localeCompare(a.periodo||""));
-    const nuevo = () => {
-      const mes = mesActual();
+    const nuevo = (mes) => {
+      mes = mes || mesActual();
       const existe = (bonos||[]).find(x => x.periodo===mes);
-      if (existe) { setP({ ...existe }); return; }
+      if (existe) { setP({ ...existe, capturas:{ krisia:{...((existe.capturas||{}).krisia||{})}, andres:{...((existe.capturas||{}).andres||{})}, isidra:{...((existe.capturas||{}).isidra||{})} } }); return; }
       setP({ id:mes, periodo:mes, estado:"abierto", capturas:{ krisia:{}, andres:{}, isidra:{} } });
     };
     return (
       <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18, flexWrap:"wrap", gap:10}}>
           <div style={{fontSize:22, fontWeight:800, color:C2.text}}>💰 Bonos mensuales</div>
-          <Btn onClick={nuevo} size="sm">+ Período (mes actual)</Btn>
+          <div style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap"}}>
+            <input type="month" value={nuevoMes} onChange={e=>setNuevoMes(e.target.value)}
+              style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, color:C2.text, padding:"8px 10px", fontSize:13, outline:"none", fontFamily:"inherit"}}/>
+            <Btn onClick={()=>nuevo(nuevoMes)} size="sm">+ Crear período</Btn>
+          </div>
         </div>
         <PanelSueldos />
         {ordenados.length===0 && <div style={{color:C2.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay períodos. Crea el del mes actual para empezar.</div>}

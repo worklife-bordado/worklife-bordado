@@ -3568,9 +3568,9 @@ const BONOS_DEF = {
   andres: {
     nombre:"Andrés", puesto:"Aux. de Logística y Distribución", naKpi:"a6", naReparto:"equal",
     kpis: [
-      { id:"a1", label:"Puntualidad de rutas", peso:0.25, auto:true, autoKey:"puntualidad", estim:true, cap:"% paradas a tiempo (sugerido: cumplimiento de externos — recolecciones/proveedores)",
+      { id:"a1", label:"Cumplimiento de ruta", peso:0.20, auto:true, autoKey:"puntualidad", estim:true, cap:"% de actividades cumplidas (sugerido: cumplimiento de externos — recolecciones/proveedores)",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.20, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / total × 100)",
+      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.25, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / total × 100)",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
       { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
         ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },

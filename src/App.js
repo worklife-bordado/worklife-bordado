@@ -2557,6 +2557,17 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
   const visibles = ordenes.filter(cuentaParaIndicadores);
   const [colSel, setColSel] = useState("nueva");
   const [menu, setMenu] = useState(null);
+  const topRef = useRef(null);
+  const boardRef = useRef(null);
+  const [scrollW, setScrollW] = useState(0);
+  useEffect(() => {
+    const upd = () => { if (boardRef.current) setScrollW(boardRef.current.scrollWidth); };
+    upd();
+    window.addEventListener("resize", upd);
+    return () => window.removeEventListener("resize", upd);
+  }, [visibles]);
+  const syncTop = () => { if (boardRef.current && topRef.current) boardRef.current.scrollLeft = topRef.current.scrollLeft; };
+  const syncBoard = () => { if (boardRef.current && topRef.current) topRef.current.scrollLeft = boardRef.current.scrollLeft; };
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const dias = (s) => { if(!s) return null; const p=String(s).split("-").map(Number); return Math.round((new Date(p[0],(p[1]||1)-1,p[2]||1)-hoy)/86400000); };
   const dotColor = (o) => { const d=dias(o.fechaRequerida); if(d===null) return "#6b7280"; if(d<0) return "#c0392b"; if(d===0) return "#f57c00"; if(d<=3) return "#f5a623"; return "#4caf7d"; };
@@ -2576,7 +2587,7 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
   const Columna = ({col}) => {
     const items = visibles.filter(o => o.etapa === col.id);
     return (
-      <div style={{flex:esMovil?"none":"1 0 220px", minWidth:esMovil?"100%":220, width:esMovil?"100%":"auto"}}>
+      <div style={{flex:esMovil?"none":"1 0 200px", minWidth:esMovil?"100%":200, width:esMovil?"100%":"auto"}}>
         {!esMovil && (
           <div style={{display:"flex",alignItems:"center",gap:8,background:C.surface,borderRadius:10,padding:"10px 12px",marginBottom:10, border: col.id==="retrabajo"?"1px solid "+col.color:"none"}}>
             <div style={{width:9,height:9,borderRadius:"50%",background:col.color}}/>
@@ -2612,8 +2623,14 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
           <Columna col={KANBAN_COLS.find(c => c.id === colSel)}/>
         </div>
       ) : (
-        <div style={{display:"flex",gap:14,overflowX:"auto",alignItems:"flex-start"}}>
-          {KANBAN_COLS.map(col => <Columna key={col.id} col={col}/>)}
+        <div>
+          <style>{`.kanban-board::-webkit-scrollbar{display:none} .kanban-board{scrollbar-width:none;-ms-overflow-style:none} .kanban-top::-webkit-scrollbar{height:10px} .kanban-top::-webkit-scrollbar-thumb{background:${C.border};border-radius:6px}`}</style>
+          <div ref={topRef} onScroll={syncTop} className="kanban-top" style={{overflowX:"auto", overflowY:"hidden", marginBottom:10}}>
+            <div style={{width: scrollW || "100%", height:1}}/>
+          </div>
+          <div ref={boardRef} onScroll={syncBoard} className="kanban-board" style={{display:"flex",gap:14,overflowX:"auto",alignItems:"flex-start"}}>
+            {KANBAN_COLS.map(col => <Columna key={col.id} col={col}/>)}
+          </div>
         </div>
       )}
       {menu && (

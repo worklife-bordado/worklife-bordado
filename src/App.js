@@ -3568,7 +3568,7 @@ const BONOS_DEF = {
   andres: {
     nombre:"Andrés", puesto:"Aux. de Logística y Distribución", naKpi:"a6", naReparto:"equal",
     kpis: [
-      { id:"a1", label:"Puntualidad de rutas", peso:0.25, auto:true, autoKey:"puntualidad", estim:true, cap:"% (paradas a tiempo / total × 100)",
+      { id:"a1", label:"Puntualidad de rutas", peso:0.25, auto:true, autoKey:"puntualidad", estim:true, cap:"% paradas a tiempo (sugerido: cumplimiento de externos — recolecciones/proveedores)",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
       { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.20, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / total × 100)",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
@@ -3645,12 +3645,13 @@ function autoValoresBonos(periodo, ordenes, rutas){
   const entregadas = ordensFiltradas.filter(o => o.fechaRequerida && getFE(o, "entregada"));
   const aTiempo = entregadas.filter(o => getFE(o, "entregada") <= new Date(o.fechaRequerida + "T23:59:59"));
   const cumplPedidos = entregadas.length ? Number(((aTiempo.length / entregadas.length) * 100).toFixed(1)) : "";
-  // Andrés — entregas ejecutadas = entregasOk / entregas de las rutas del mes
+  // Andrés — a2 "entregas ejecutadas" = SOLO clientes; a1 "puntualidad" = cumplimiento de EXTERNOS
   const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
-  let entTot=0, entOk=0;
-  rutasMes.forEach(r => { const s=resumenRuta(r); entTot+=s.entregasTotal; entOk+=s.entregasOk; });
+  let entTot=0, entOk=0, extTot=0, extOk=0;
+  rutasMes.forEach(r => { const s=resumenRuta(r); entTot+=s.entregasTotal; entOk+=s.entregasOk; extTot+=s.externosTotal; extOk+=s.externosOk; });
   const entregasEjec = entTot ? Math.round(entOk/entTot*100) : "";
-  return { krisia:{ k2:cumplPedidos }, andres:{ a1:entregasEjec, a2:entregasEjec }, isidra:{} };
+  const externosPct = extTot ? Math.round(extOk/extTot*100) : "";
+  return { krisia:{ k2:cumplPedidos }, andres:{ a1:externosPct, a2:entregasEjec }, isidra:{} };
 }
 // Recibo imprimible (solo admin)
 function buildReciboBonoHtml(clave, capturas, sal, periodo){

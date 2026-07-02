@@ -3630,12 +3630,21 @@ function calcColaborador(def, capturas, bonoMax){
 }
 // Valores que la app puede pre-llenar automáticamente para un período "YYYY-MM"
 function autoValoresBonos(periodo, ordenes, rutas){
-  const desde = periodo + "-01", hasta = periodo + "-31";
-  const gFE = (o,et) => { const e=((o.historial)||[]).find(h=>h.etapa===et); return e&&e.fecha?String(e.fecha).slice(0,10):null; };
-  // Krisia — cumplimiento de pedidos = entregadas a tiempo / entregadas del mes
-  const ent = (ordenes||[]).filter(o => cuentaParaIndicadores(o) && o.fechaRequerida && gFE(o,"entregada") && gFE(o,"entregada")>=desde && gFE(o,"entregada")<=hasta);
-  const aTiempo = ent.filter(o => new Date(gFE(o,"entregada")+"T23:59:59") <= new Date(o.fechaRequerida+"T23:59:59"));
-  const cumplPedidos = ent.length ? Math.round(aTiempo.length/ent.length*100) : "";
+  const [Y, M] = periodo.split("-").map(Number);
+  const desde = periodo + "-01";
+  const hasta = periodo + "-" + String(new Date(Y, M, 0).getDate()).padStart(2, "0"); // último día real del mes
+  const getFE = (o, et) => { const e = ((o.historial)||[]).find(h => h.etapa === et); return e ? new Date(e.fecha) : null; };
+  // Krisia — cumplimiento de pedidos: MISMA lógica que el dashboard (Cumplimiento de Fecha Requerida)
+  const ordensFiltradas = (ordenes||[]).filter(o => {
+    if (!cuentaParaIndicadores(o)) return false;
+    const fechaLib = fechaLiberacion(o);
+    const fe = getFE(o, "entregada");
+    const feStr = fe ? fe.toISOString().slice(0, 10) : "";
+    return (fechaLib >= desde && fechaLib <= hasta) || (feStr >= desde && feStr <= hasta);
+  });
+  const entregadas = ordensFiltradas.filter(o => o.fechaRequerida && getFE(o, "entregada"));
+  const aTiempo = entregadas.filter(o => getFE(o, "entregada") <= new Date(o.fechaRequerida + "T23:59:59"));
+  const cumplPedidos = entregadas.length ? Number(((aTiempo.length / entregadas.length) * 100).toFixed(1)) : "";
   // Andrés — entregas ejecutadas = entregasOk / entregas de las rutas del mes
   const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
   let entTot=0, entOk=0;

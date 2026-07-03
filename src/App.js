@@ -1155,7 +1155,14 @@ function resumenRuta(ruta){
   const cumplimientoEntregas = entregas.length ? Math.round(entregasOk / entregas.length * 100) : null;
   const cumplimientoExternos = externos.length ? Math.round(externosOk / externos.length * 100) : null;
   const d = (ruta && ruta.docsEntregados) || {};
-  const docsOk = ["facturas","albaranes","ordenes","listas","hoja"].every(k => d[k]);
+  // Solo se exigen los documentos que aplican ese día:
+  //  · facturas/albaranes/listas → si hubo entrega a cliente (E)
+  //  · ordenes (externos) → si hubo actividad con externos (B/R/D)
+  //  · hoja de cierre → siempre
+  const reqDocs = ["hoja"];
+  if (entregas.length) reqDocs.push("facturas","albaranes","listas");
+  if (externos.length) reqDocs.push("ordenes");
+  const docsOk = reqDocs.every(k => d[k]);
   return { cumplimientoEntregas, cumplimientoExternos, entregasTotal: entregas.length, entregasOk, externosTotal: externos.length, externosOk, noCompletadas, incidenciasCount, docsOk };
 }
 const RUTA_PDF_CSS = `

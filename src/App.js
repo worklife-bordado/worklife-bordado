@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Component } from "react";
 
 // ── Firebase ──────────────────────────────────────────────────────────────────
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
@@ -2568,6 +2568,15 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
   const boardRef = useRef(null);
   const [scrollW, setScrollW] = useState(0);
   useEffect(() => {
+    const id = "kanban-scroll-css";
+    if (!document.getElementById(id)) {
+      const s = document.createElement("style");
+      s.id = id;
+      s.textContent = ".kanban-board::-webkit-scrollbar{display:none} .kanban-board{scrollbar-width:none;-ms-overflow-style:none} .kanban-top::-webkit-scrollbar{height:10px} .kanban-top::-webkit-scrollbar-thumb{background:#2e3450;border-radius:6px}";
+      document.head.appendChild(s);
+    }
+  }, []);
+  useEffect(() => {
     const upd = () => { if (boardRef.current) setScrollW(boardRef.current.scrollWidth); };
     upd();
     window.addEventListener("resize", upd);
@@ -2631,7 +2640,6 @@ function Kanban({ ordenes, onBack, onSelectOrden, onMover, puedeMover }) {
         </div>
       ) : (
         <div>
-          <style>{`.kanban-board::-webkit-scrollbar{display:none} .kanban-board{scrollbar-width:none;-ms-overflow-style:none} .kanban-top::-webkit-scrollbar{height:10px} .kanban-top::-webkit-scrollbar-thumb{background:${C.border};border-radius:6px}`}</style>
           <div ref={topRef} onScroll={syncTop} className="kanban-top" style={{overflowX:"auto", overflowY:"hidden", marginBottom:10}}>
             <div style={{width: scrollW || "100%", height:1}}/>
           </div>
@@ -3945,7 +3953,27 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
 }
 
 
-export default function App() {
+class ErrorBoundary extends Component {
+  constructor(props){ super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error){ return { error }; }
+  componentDidCatch(error, info){ try { console.error("App crash:", error, info); } catch(e){} }
+  render(){
+    if (this.state.error){
+      const msg = (this.state.error && (this.state.error.stack || this.state.error.message)) || String(this.state.error);
+      return (
+        <div style={{padding:20, fontFamily:"monospace", color:"#e8eaf0", background:"#0f1117", minHeight:"100vh", boxSizing:"border-box"}}>
+          <div style={{fontSize:18, fontWeight:800, color:"#f5a623", marginBottom:12}}>⚠️ Ocurrió un error</div>
+          <div style={{fontSize:13, color:"#8b90a7", marginBottom:10}}>Toma una captura de esta pantalla y compártela para corregirlo:</div>
+          <pre style={{whiteSpace:"pre-wrap", wordBreak:"break-word", color:"#ff8a8a", fontSize:12, background:"#1a1d27", padding:12, borderRadius:8, border:"1px solid #2e3450"}}>{msg}</pre>
+          <button onClick={()=>this.setState({error:null})} style={{marginTop:16, border:"none", borderRadius:8, cursor:"pointer", background:"#f5a623", color:"#1a1d27", padding:"10px 18px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>Reintentar</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+export default function App(){ return (<ErrorBoundary><AppInner /></ErrorBoundary>); }
+function AppInner() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
   if (_seg) return <SeguimientoPublico token={_seg} />;
@@ -3968,6 +3996,25 @@ export default function App() {
   const [bonos, setBonos] = useState([]);
   const [bonoPdf, setBonoPdf] = useState(null);
   const [salariosBonos, setSalariosBonos] = useState(null);
+  // Evita que el traductor del navegador (Google Translate) modifique el DOM y
+  // provoque el crash "removeChild ... not a child" al re-renderizar. La app ya está en español.
+  useEffect(() => {
+    try {
+      document.documentElement.setAttribute("translate", "no");
+      document.documentElement.classList.add("notranslate");
+      if (!document.querySelector('meta[name="google"]')) {
+        const m = document.createElement("meta");
+        m.name = "google"; m.content = "notranslate";
+        document.head.appendChild(m);
+      }
+      if (!document.getElementById("wl-global-css")) {
+        const s = document.createElement("style");
+        s.id = "wl-global-css";
+        s.textContent = ".modtile-ico svg{width:100%;height:100%;display:block}";
+        document.head.appendChild(s);
+      }
+    } catch (e) {}
+  }, []);
   const [notifs, setNotifs] = useState([ ]);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
@@ -4670,7 +4717,6 @@ const cancelar = async (id) => {
             )}
           </div>
 
-          <style>{`.modtile-ico svg{width:100%;height:100%;display:block}`}</style>
           {puedeCrear && homePorLiberar > 0 && (
             <div onClick={() => setVista("lista")}
               style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,background:"#2a1f0e",border:"2px solid "+C.accent,borderRadius:14,padding:"13px 18px",marginTop:10,cursor:"pointer"}}>

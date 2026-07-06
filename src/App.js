@@ -3773,8 +3773,13 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
   const [nuevoMes, setNuevoMes] = useState(() => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); });
   useEffect(()=>{ setSalLocal(salarios||{}); }, [salarios]);
   const C2 = C;
-  // Sueldos a usar: si el período está CERRADO usa su foto congelada; si está ABIERTO usa los vivos.
-  const salariosDe = (docp) => (docp && docp.estado === "cerrado" && docp.salariosSnapshot) ? docp.salariosSnapshot : (salarios || {});
+  // Tope de bono a usar: si el período está CERRADO usa su foto congelada (bonoMaxSnapshot); si está ABIERTO usa el vivo.
+  // El sueldo base NUNCA se congela en el documento de bonos (Seguimiento lo lee), así no se filtran sueldos.
+  const bonoMaxDeP = (docp, cl) => {
+    if (docp && docp.estado === "cerrado" && docp.bonoMaxSnapshot) return docp.bonoMaxSnapshot[cl] || 0;
+    return (((salarios||{})[cl]||{}).bonoMax) || 0;
+  };
+  const baseDe = (cl) => (((salarios||{})[cl]||{}).base) || 0;
   const faltanSueldosBase = esAdmin && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
   const PanelSueldos = () => !esAdmin ? null : (
     <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
@@ -3829,8 +3834,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
         {ordenados.map(b => {
           let totalNomina = 0;
           if (esAdmin){
-            const salB = salariosDe(b);
-            BONOS_ORDEN.forEach(cl => { const sal=salB[cl]||{}; const c=calcColaborador(BONOS_DEF[cl], (b.capturas||{})[cl], sal.bonoMax||0); totalNomina += (sal.base||0)+c.totalBono; });
+            BONOS_ORDEN.forEach(cl => { const c=calcColaborador(BONOS_DEF[cl], (b.capturas||{})[cl], bonoMaxDeP(b, cl)); totalNomina += baseDe(cl)+c.totalBono; });
           }
           return (
             <div key={b.id} onClick={()=>setP({ ...b, capturas:{ krisia:{...((b.capturas||{}).krisia||{})}, andres:{...((b.capturas||{}).andres||{})}, isidra:{...((b.capturas||{}).isidra||{})} } })}
@@ -3849,14 +3853,20 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
 
   // ── EDITOR ──
   const cerrado = p.estado === "cerrado";
-  const salEf = salariosDe(p);
   const auto = autoValoresBonos(p.periodo, ordenes, rutas);
   const setCap = (cl, kid, val) => { if (cerrado) return; setP(prev => ({ ...prev, capturas:{ ...prev.capturas, [cl]:{ ...(prev.capturas[cl]||{}), [kid]:val } } })); };
   const guardar = async (estado) => {
     setGuardando(true);
     try {
       const payload = { ...p, id:p.periodo };
-      if (estado){ payload.estado=estado; if(estado==="cerrado"){ payload.fechaCierre=new Date().toISOString(); if(esAdmin && salarios) payload.salariosSnapshot = salarios; } }
+      if (estado){
+        payload.estado=estado;
+        if(estado==="cerrado"){
+          payload.fechaCierre=new Date().toISOString();
+          // Congela SOLO el tope de bono (no el sueldo) para que el recibo sea reproducible sin filtrar sueldos.
+          if(esAdmin && salarios) payload.bonoMaxSnapshot = { krisia:((salarios.krisia||{}).bonoMax)||0, andres:((salarios.andres||{}).bonoMax)||0, isidra:((salarios.isidra||{}).bonoMax)||0 };
+        }
+      }
       await onGuardar(payload);
       setP(null);
     } catch(e){ alert("Error al guardar: "+e.message); }
@@ -3870,8 +3880,8 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
     setGuardando(false);
   };
 
-  const bonoMaxDe = (cl) => (esAdmin ? (salEf[cl]||{}).bonoMax || 0 : 0);
-  const faltanSueldos = esAdmin && !cerrado && BONOS_ORDEN.some(cl => { const s=salEf[cl]||{}; return !s.base || !s.bonoMax; });
+  const bonoMaxDe = (cl) => bonoMaxDeP(p, cl);
+  const faltanSueldos = esAdmin && !cerrado && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
 
   return (
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
@@ -3928,15 +3938,33 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
               })}
             </div>
             {esAdmin && calc ? (
-              <div style={{marginTop:10, paddingTop:10, borderTop:"2px solid "+C2.border, display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8}}>
-                <div style={{fontSize:13, color:C2.text}}>Bono del mes: <b style={{color:C2.accent}}>${fmtMoney(calc.totalBono)}</b> <span style={{color:C2.muted}}>de ${fmtMoney(bonoMax)}</span> · Ingreso: <b>${fmtMoney(((salEf[cl]||{}).base||0) + calc.totalBono)}</b></div>
-                <button onClick={()=>onImprimir(buildReciboBonoHtml(cl, caps, salEf[cl]||{}, p.periodo), "Recibo bono "+def.nombre)} style={{border:"none", borderRadius:8, cursor:"pointer", background:"#5c8fe0", color:"#fff", padding:"7px 14px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Recibo</button>
+              <div style={{marginTop:10, paddingTop:10, borderTop:"2px solid "+C2.border, fontSize:13, color:C2.text}}>
+                Bono del mes: <b style={{color:C2.accent}}>${fmtMoney(calc.totalBono)}</b> <span style={{color:C2.muted}}>de ${fmtMoney(bonoMax)}</span> · Ingreso: <b>${fmtMoney(baseDe(cl) + calc.totalBono)}</b>
               </div>
             ) : null}
           </div>
         );
       })}
 
+      </div>
+
+      {/* Recibos — fuera de la zona de solo lectura: se pueden imprimir aunque el período esté cerrado */}
+      <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"14px 16px", marginBottom:16}}>
+        <div style={{fontSize:14, fontWeight:800, color:C2.text, marginBottom:4}}>Recibos de bono</div>
+        <div style={{fontSize:12, color:C2.muted, marginBottom:10}}>Imprime el recibo de cada colaborador para entregárselo. El recibo muestra solo el bono, no el sueldo.</div>
+        {(!esAdmin && !cerrado) ? (
+          <div style={{fontSize:13, color:C2.accent}}>Los recibos se podrán imprimir una vez que administración cierre el período.</div>
+        ) : BONOS_ORDEN.map(cl => {
+          const bm = bonoMaxDe(cl);
+          const listo = bm > 0;
+          return (
+            <div key={cl} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:"1px solid "+C2.border}}>
+              <span style={{fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</span>
+              <button disabled={!listo} onClick={()=>onImprimir(buildReciboBonoHtml(cl, (p.capturas||{})[cl]||{}, {bonoMax:bm}, p.periodo), "Recibo bono "+BONOS_DEF[cl].nombre)}
+                style={{border:"none", borderRadius:8, cursor:listo?"pointer":"not-allowed", background:listo?"#5c8fe0":C2.surface, color:listo?"#fff":C2.muted, padding:"8px 16px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir</button>
+            </div>
+          );
+        })}
       </div>
 
       {/* Acciones */}
@@ -5146,6 +5174,23 @@ const cancelar = async (id) => {
                 <circle cx="44" cy="44" r="26" fill="none" stroke="#ffffff" strokeWidth="4"/>
                 <g stroke="#fff" strokeWidth="4" strokeLinecap="round">
                   <path d="M44 30 v15 l10 6"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
+            {rol === "seguimiento" && (
+            <ModTile onClick={() => window.open(window.location.origin + "/?checador=1", "_blank")} label="Abrir checador"
+              stat={<span style={{color:C.muted}}>Para checar en tienda</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gChkS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#60a5fa"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gChkS)"/>
+                <circle cx="40" cy="46" r="22" fill="none" stroke="#ffffff" strokeWidth="4"/>
+                <g stroke="#fff" strokeWidth="4" strokeLinecap="round">
+                  <path d="M40 34 v12 l8 5"/>
+                </g>
+                <g stroke="#fff" strokeWidth="3.4" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M58 24 h8 v8"/><path d="M66 24 l-11 11"/>
                 </g>
               </svg>
             </ModTile>

@@ -3972,11 +3972,273 @@ class ErrorBoundary extends Component {
     return this.props.children;
   }
 }
+// ══════════════════════════════════════════════════════════════════════════
+// MÓDULO CHECADOR (control de asistencia por PIN, enlace público)
+// ══════════════════════════════════════════════════════════════════════════
+const CHK_TIPOS = [
+  { id:"entrada",       lbl:"Entrada",          color:"#4caf7d", emoji:"🟢" },
+  { id:"comida_inicio", lbl:"Inicio de comida", color:"#f5a623", emoji:"🍽️" },
+  { id:"comida_fin",    lbl:"Fin de comida",    color:"#5c8fe0", emoji:"↩️" },
+  { id:"salida",        lbl:"Salida",           color:"#c0392b", emoji:"🔴" },
+];
+const CHK_TIPO_LBL = (id) => (CHK_TIPOS.find(t => t.id === id) || {}).lbl || id;
+const CHK_ACEPTA_TEXTO = "Acepto que mi jornada laboral en WORK-LIFE Uniformes se registre mediante el sistema de control de asistencia de la empresa. Entiendo que cada entrada y salida quedará registrada con la fecha y hora que asigne el propio sistema, y que esta información se usará únicamente para el control de mi asistencia, puntualidad y jornada. Reconozco que mis registros son personales e intransferibles, y autorizo su almacenamiento y consulta por parte de la empresa para fines administrativos y laborales.";
+
+function chkHora(d){ if(!d) return "—"; const h=d.getHours(), m=d.getMinutes(); return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0"); }
+function chkFechaISO(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function chkMsToHM(ms){ if(ms<=0) return "0h 0m"; const min=Math.round(ms/60000); return Math.floor(min/60)+"h "+(min%60)+"m"; }
+// Calcula el resumen del día de un empleado a partir de sus registros (Date reales)
+function chkResumenDia(regs){
+  const orden = [...regs].sort((a,b)=> a.ts - b.ts);
+  const primero = (t) => { const r = orden.find(x=>x.tipo===t); return r?r.ts:null; };
+  const entrada = primero("entrada");
+  const sals = orden.filter(x=>x.tipo==="salida");
+  const salida = sals.length ? sals[sals.length-1].ts : null;
+  const ci = primero("comida_inicio"), cf = primero("comida_fin");
+  let brutoMs = (entrada && salida) ? (salida - entrada) : 0;
+  let comidaMs = (ci && cf) ? (cf - ci) : 0;
+  const netoMs = Math.max(0, brutoMs - comidaMs);
+  return { entrada, salida, ci, cf, comidaMs, netoMs };
+}
+
+// ── Página pública de checado (sin login, protegida por PIN) ──
+function ChecadorPublico(){
+  const [roster, setRoster] = useState(undefined); // undefined=cargando
+  const [sel, setSel] = useState(null);
+  const [acepto, setAcepto] = useState(undefined); // undefined=desconocido, true/false
+  const [pin, setPin] = useState("");
+  const [pinOk, setPinOk] = useState(false);
+  const [msg, setMsg] = useState(null); // {texto, color}
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "checadorConfig", "roster"),
+      snap => setRoster(snap.exists() ? (snap.data().empleados || []) : []),
+      () => setRoster([]));
+    return () => unsub();
+  }, []);
+
+  // Al elegir empleado: revisa si ya aceptó (una sola vez)
+  useEffect(() => {
+    if (!sel) { setAcepto(undefined); setPin(""); setPinOk(false); return; }
+    const u1 = onSnapshot(doc(db, "checadorAcept", sel.id),
+      snap => setAcepto(snap.exists()), () => setAcepto(false));
+    return () => u1();
+  }, [sel]);
+
+  const C2 = C;
+  const wrap = { minHeight:"100vh", background:C2.bg, color:C2.text, fontFamily:"'Barlow','Segoe UI',sans-serif", padding:"28px 16px", boxSizing:"border-box" };
+  const card = { maxWidth:460, width:"100%", margin:"0 auto" };
+
+  if (roster === undefined) return <div style={{...wrap, textAlign:"center"}}>Cargando…</div>;
+
+  const activos = (roster || []).filter(e => e.activo !== false);
+
+  const aceptar = async () => {
+    try {
+      await setDoc(doc(db, "checadorAcept", sel.id), { empleadoId: sel.id, nombre: sel.nombre, texto: CHK_ACEPTA_TEXTO, ts: serverTimestamp() });
+    } catch(e){ alert("No se pudo registrar la aceptación: " + e.message); }
+  };
+  const checar = async (tipo) => {
+    setEnviando(true);
+    try {
+      await addDoc(collection(db, "checadas"), { empleadoId: sel.id, nombre: sel.nombre, tipo, ts: serverTimestamp() });
+      const t = CHK_TIPOS.find(x=>x.id===tipo);
+      setMsg({ texto: (t?t.lbl:tipo) + " registrada a las " + chkHora(new Date()), color: t?t.color:C2.success });
+      setTimeout(() => { setMsg(null); setSel(null); }, 2200);
+    } catch(e){ setMsg({ texto: "Error: " + e.message, color:"#c0392b" }); }
+    setEnviando(false);
+  };
+
+  // Pantalla de confirmación
+  if (msg) return (
+    <div style={{...wrap, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center"}}>
+      <div style={card}>
+        <div style={{fontSize:52, marginBottom:12}}>✓</div>
+        <div style={{fontSize:20, fontWeight:800, color:msg.color}}>{msg.texto}</div>
+        <div style={{color:C2.muted, marginTop:10, fontSize:14}}>Gracias, {sel && sel.nombre.split(" ")[0]}.</div>
+      </div>
+    </div>
+  );
+
+  // 1) Selección de empleado
+  if (!sel) return (
+    <div style={wrap}><div style={card}>
+      <div style={{textAlign:"center", marginBottom:24}}>
+        <img src={LOGO_WL} alt="WORK-LIFE" style={{height:76, objectFit:"contain"}}/>
+        <div style={{fontSize:22, fontWeight:800, marginTop:12}}>Checador</div>
+        <div style={{color:C2.muted, fontSize:13}}>Selecciona tu nombre para registrar tu jornada</div>
+      </div>
+      {activos.length === 0 && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Aún no hay empleados dados de alta. Pídele a administración que los configure.</div>}
+      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
+        {activos.map(e => (
+          <button key={e.id} onClick={()=>setSel(e)} style={{border:"1px solid "+C2.border, borderRadius:14, background:C2.card, color:C2.text, padding:"18px 12px", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{e.nombre}</button>
+        ))}
+      </div>
+    </div></div>
+  );
+
+  // 2) Aceptación (una sola vez)
+  if (acepto === false) return (
+    <div style={wrap}><div style={card}>
+      <button onClick={()=>setSel(null)} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Volver</button>
+      <div style={{fontSize:18, fontWeight:800, marginBottom:6}}>Hola, {sel.nombre}</div>
+      <div style={{fontSize:13, color:C2.muted, marginBottom:12}}>Antes de checar por primera vez, lee y acepta:</div>
+      <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"16px", fontSize:13.5, lineHeight:1.6, color:C2.text}}>
+        <div style={{fontWeight:800, marginBottom:8}}>Aceptación de registro de jornada laboral</div>
+        {CHK_ACEPTA_TEXTO}
+      </div>
+      <button onClick={aceptar} style={{marginTop:16, width:"100%", border:"none", borderRadius:12, background:C2.success, color:"#fff", padding:"14px", fontSize:15, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Acepto</button>
+    </div></div>
+  );
+  if (acepto === undefined) return <div style={{...wrap, textAlign:"center"}}>Cargando…</div>;
+
+  // 3) PIN
+  if (!pinOk) {
+    const teclear = (n) => { if (pin.length < 4){ const np = pin + n; setPin(np); if (np.length === 4){ if (np === String(sel.pin)) { setPinOk(true); } else { setTimeout(()=>{ alert("PIN incorrecto"); setPin(""); }, 100); } } } };
+    return (
+      <div style={wrap}><div style={card}>
+        <button onClick={()=>setSel(null)} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Volver</button>
+        <div style={{textAlign:"center", fontSize:18, fontWeight:800}}>{sel.nombre}</div>
+        <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginBottom:18}}>Teclea tu PIN de 4 dígitos</div>
+        <div style={{display:"flex", justifyContent:"center", gap:12, marginBottom:22}}>
+          {[0,1,2,3].map(i => <div key={i} style={{width:16, height:16, borderRadius:"50%", background: i<pin.length?C2.accent:C2.border}}/>)}
+        </div>
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, maxWidth:280, margin:"0 auto"}}>
+          {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={()=>teclear(String(n))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"18px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{n}</button>)}
+          <div/>
+          <button onClick={()=>teclear("0")} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"18px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>0</button>
+          <button onClick={()=>setPin(pin.slice(0,-1))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"18px", fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>⌫</button>
+        </div>
+      </div></div>
+    );
+  }
+
+  // 4) Registrar checada
+  return (
+    <div style={wrap}><div style={card}>
+      <button onClick={()=>setSel(null)} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Salir</button>
+      <div style={{textAlign:"center", fontSize:20, fontWeight:800}}>Hola, {sel.nombre.split(" ")[0]}</div>
+      <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginBottom:18}}>{chkHora(new Date())} · {new Date().toLocaleDateString("es-MX",{weekday:"long", day:"numeric", month:"long"})}</div>
+      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
+        {CHK_TIPOS.map(t => (
+          <button key={t.id} disabled={enviando} onClick={()=>checar(t.id)} style={{border:"none", borderRadius:14, background:t.color, color:"#fff", padding:"22px 12px", fontSize:15, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:enviando?0.6:1}}>
+            <div style={{fontSize:24, marginBottom:4}}>{t.emoji}</div>{t.lbl}
+          </button>
+        ))}
+      </div>
+    </div></div>
+  );
+}
+
+// ── Módulo de administración del checador (dentro de la app, solo gerencia) ──
+function ChecadorAdmin({ roster, checadas, onGuardarRoster, publicUrl }){
+  const [tab, setTab] = useState("reporte");
+  const [empleados, setEmpleados] = useState(roster || []);
+  useEffect(()=>{ setEmpleados(roster || []); }, [roster]);
+  const C2 = C;
+  const hoy = new Date();
+  const iniSemana = new Date(hoy); iniSemana.setDate(hoy.getDate() - 6);
+  const [desde, setDesde] = useState(chkFechaISO(iniSemana));
+  const [hasta, setHasta] = useState(chkFechaISO(hoy));
+
+  const nuevoId = () => "e" + Date.now().toString(36);
+  const addEmp = () => setEmpleados(p => [...p, { id:nuevoId(), nombre:"", pin:"", activo:true }]);
+  const setEmp = (i, campo, val) => setEmpleados(p => p.map((e,idx)=> idx===i ? { ...e, [campo]:val } : e));
+  const delEmp = (i) => { if(window.confirm("¿Quitar a este empleado del checador? Sus registros anteriores no se borran.")) setEmpleados(p => p.filter((_,idx)=>idx!==i)); };
+  const guardar = async () => {
+    const limpio = empleados.filter(e => (e.nombre||"").trim()).map(e => ({ id:e.id||nuevoId(), nombre:e.nombre.trim(), pin:String(e.pin||"").trim(), activo:e.activo!==false }));
+    try { await onGuardarRoster(limpio); alert("Empleados guardados."); } catch(e){ alert("Error: "+e.message); }
+  };
+
+  // Reporte: registros dentro del rango, agrupados por empleado + día
+  const registros = (checadas || [])
+    .filter(c => c.ts && c.ts.toDate)
+    .map(c => ({ empleadoId:c.empleadoId, nombre:c.nombre, tipo:c.tipo, ts:c.ts.toDate() }))
+    .filter(c => { const f = chkFechaISO(c.ts); return f >= desde && f <= hasta; });
+  const porEmpDia = {};
+  registros.forEach(r => {
+    const dia = chkFechaISO(r.ts);
+    const k = r.empleadoId + "|" + dia;
+    if (!porEmpDia[k]) porEmpDia[k] = { empleadoId:r.empleadoId, nombre:r.nombre, dia, regs:[] };
+    porEmpDia[k].regs.push(r);
+  });
+  const filas = Object.values(porEmpDia).sort((a,b)=> a.dia===b.dia ? a.nombre.localeCompare(b.nombre) : b.dia.localeCompare(a.dia));
+
+  return (
+    <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
+      <div style={{fontSize:22, fontWeight:800, color:C2.text, marginBottom:16}}>🕐 Checador</div>
+      <div style={{display:"flex", gap:8, marginBottom:18, flexWrap:"wrap"}}>
+        {[["reporte","Reporte de horas"],["empleados","Empleados y PINs"],["enlace","Enlace"]].map(([id,lbl]) => (
+          <button key={id} onClick={()=>setTab(id)} style={{border:"1px solid "+(tab===id?C2.accent:C2.border), borderRadius:9, background:tab===id?C2.accent:C2.surface, color:tab===id?"#1a1d27":C2.text, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{lbl}</button>
+        ))}
+      </div>
+
+      {tab === "reporte" && (
+        <div>
+          <div style={{display:"flex", gap:10, alignItems:"center", marginBottom:14, flexWrap:"wrap"}}>
+            <span style={{fontSize:13, color:C2.muted}}>Del</span>
+            <input type="date" value={desde} onChange={e=>setDesde(e.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, color:C2.text, padding:"7px 9px", fontSize:13}}/>
+            <span style={{fontSize:13, color:C2.muted}}>al</span>
+            <input type="date" value={hasta} onChange={e=>setHasta(e.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, color:C2.text, padding:"7px 9px", fontSize:13}}/>
+          </div>
+          {filas.length === 0 && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Sin registros en este rango.</div>}
+          {filas.map((f,i) => {
+            const r = chkResumenDia(f.regs);
+            return (
+              <div key={i} style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"12px 14px", marginBottom:10}}>
+                <div style={{display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:6}}>
+                  <div style={{fontWeight:800, color:C2.text}}>{f.nombre}</div>
+                  <div style={{fontSize:12, color:C2.muted}}>{f.dia.split("-").reverse().join("/")}</div>
+                </div>
+                <div style={{display:"flex", gap:14, flexWrap:"wrap", marginTop:8, fontSize:12.5, color:C2.muted}}>
+                  <span>Entrada: <b style={{color:C2.text}}>{chkHora(r.entrada)}</b></span>
+                  <span>Comida: <b style={{color:C2.text}}>{chkHora(r.ci)}–{chkHora(r.cf)}</b></span>
+                  <span>Salida: <b style={{color:C2.text}}>{chkHora(r.salida)}</b></span>
+                  <span>Trabajado: <b style={{color:C2.accent}}>{chkMsToHM(r.netoMs)}</b></span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "empleados" && (
+        <div>
+          <div style={{fontSize:12, color:C2.muted, marginBottom:12}}>Da de alta a cada empleado con un PIN de 4 dígitos. Solo administración ve esta pantalla.</div>
+          {empleados.map((e,i) => (
+            <div key={e.id||i} style={{display:"flex", gap:8, alignItems:"center", marginBottom:8, flexWrap:"wrap"}}>
+              <input value={e.nombre} onChange={ev=>setEmp(i,"nombre",ev.target.value)} placeholder="Nombre" style={{flex:"1 1 160px", background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"8px 10px", fontSize:13}}/>
+              <input value={e.pin} inputMode="numeric" onChange={ev=>setEmp(i,"pin",ev.target.value.replace(/[^0-9]/g,"").slice(0,4))} placeholder="PIN" style={{width:80, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"8px 10px", fontSize:13, textAlign:"center"}}/>
+              <label style={{fontSize:12, color:C2.muted, display:"flex", alignItems:"center", gap:4}}><input type="checkbox" checked={e.activo!==false} onChange={ev=>setEmp(i,"activo",ev.target.checked)}/>Activo</label>
+              <button onClick={()=>delEmp(i)} style={{border:"none", background:"none", color:"#c0392b", cursor:"pointer", fontSize:16}}>✕</button>
+            </div>
+          ))}
+          <button onClick={addEmp} style={{marginTop:6, marginRight:8, border:"1px solid "+C2.border, borderRadius:8, background:C2.surface, color:C2.text, padding:"9px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>+ Agregar empleado</button>
+          <button onClick={guardar} style={{marginTop:6, border:"none", borderRadius:8, background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Guardar</button>
+        </div>
+      )}
+
+      {tab === "enlace" && (
+        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"16px"}}>
+          <div style={{fontSize:14, fontWeight:700, color:C2.text, marginBottom:8}}>Enlace del checador</div>
+          <div style={{fontSize:13, color:C2.muted, marginBottom:12}}>Comparte este enlace o guárdalo como acceso directo en la tablet de la tienda y en los celulares de home office. Cualquiera lo abre y checa con su PIN.</div>
+          <div style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, padding:"10px 12px", fontSize:12.5, color:C2.accent, wordBreak:"break-all"}}>{publicUrl}</div>
+          <button onClick={()=>{ try{ navigator.clipboard.writeText(publicUrl); alert("Enlace copiado."); }catch(e){ alert("Copia manual: "+publicUrl); } }} style={{marginTop:12, border:"none", borderRadius:8, background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Copiar enlace</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function App(){ return (<ErrorBoundary><AppInner /></ErrorBoundary>); }
 function AppInner() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
   if (_seg) return <SeguimientoPublico token={_seg} />;
+  const _chk = new URLSearchParams(window.location.search).get("checador");
+  if (_chk) return <ChecadorPublico />;
 
   const [usuario,  setUsuario]  = useState(null);   // Firebase user object
   const [rol,      setRol]      = useState(null);   // "admin" | "ventas" | "seguimiento"
@@ -3996,6 +4258,8 @@ function AppInner() {
   const [bonos, setBonos] = useState([]);
   const [bonoPdf, setBonoPdf] = useState(null);
   const [salariosBonos, setSalariosBonos] = useState(null);
+  const [checadorRoster, setChecadorRoster] = useState([]);
+  const [checadas, setChecadas] = useState([]);
   // Evita que el traductor del navegador (Google Translate) modifique el DOM y
   // provoque el crash "removeChild ... not a child" al re-renderizar. La app ya está en español.
   useEffect(() => {
@@ -4228,6 +4492,17 @@ if (usuario) {
     await setDoc(doc(db, "config", "bonosSalarios"), { ...data, actualizadoPor: usuario.email }, { merge: true });
   };
   const imprimirBono = (html, titulo) => setBonoPdf({ html, titulo: titulo || "Recibo de bono", archivo: (titulo || "ReciboBono").replace(/\s+/g, "_") + ".html" });
+
+  // ── Checador (solo administración gestiona/reporta) ──
+  useEffect(() => {
+    if (!usuario?.email || rol !== "admin") return;
+    const u1 = onSnapshot(doc(db, "checadorConfig", "roster"), snap => setChecadorRoster(snap.exists() ? (snap.data().empleados || []) : []));
+    const u2 = onSnapshot(collection(db, "checadas"), snap => setChecadas(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    return () => { u1(); u2(); };
+  }, [usuario, rol]);
+  const guardarChecadorRoster = async (empleados) => {
+    await setDoc(doc(db, "checadorConfig", "roster"), { empleados, actualizadoPor: usuario.email }, { merge: true });
+  };
 
   // ── Pago a bordadores ──
   useEffect(() => {
@@ -4862,6 +5137,20 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {rol === "admin" && (
+            <ModTile onClick={() => setVista("checador")} label="Checador"
+              stat={<span style={{color:C.muted}}>{checadorRoster.length>0 ? checadorRoster.length+" empleado"+(checadorRoster.length===1?"":"s") : "Configurar"}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gChk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#60a5fa"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gChk)"/>
+                <circle cx="44" cy="44" r="26" fill="none" stroke="#ffffff" strokeWidth="4"/>
+                <g stroke="#fff" strokeWidth="4" strokeLinecap="round">
+                  <path d="M44 30 v15 l10 6"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
           </div>
 
           <Pendientes
@@ -5020,6 +5309,15 @@ const cancelar = async (id) => {
           onGuardar={guardarBono}
           onImprimir={imprimirBono}
           onGuardarSalarios={guardarSalariosBonos}
+        />
+      )}
+
+      {vista === "checador" && rol === "admin" && (
+        <ChecadorAdmin
+          roster={checadorRoster}
+          checadas={checadas}
+          onGuardarRoster={guardarChecadorRoster}
+          publicUrl={window.location.origin + "/?checador=1"}
         />
       )}
 

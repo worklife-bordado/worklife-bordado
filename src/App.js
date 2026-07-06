@@ -1172,7 +1172,7 @@ const RUTA_PDF_CSS = `
   .page { width:215.9mm; min-height:279.4mm; }
   @media print { .page { width:215.9mm; height:279.4mm; page-break-after:avoid; page-break-inside:avoid; } }
   .hd { background:#182B55; color:#fff; display:flex; align-items:center; justify-content:space-between; padding:10px 16px; }
-  .hd img { height:42px; }
+  .hd img { height:84px; }
   .hd h1 { font-size:18px; letter-spacing:1px; font-weight:800; }
   .hd .folio { font-size:10px; text-align:right; line-height:1.6; }
   .body { padding:8mm 12mm; }
@@ -3029,15 +3029,27 @@ function resumenRemision(rem){
 }
 function buildRemisionHtml(rem){
   const prendas = (rem.prendas)||[];
+  const esRet = (rem.tipo === "retrabajo");
   const total = Math.max(8, prendas.length);
   let filas="";
   for(let i=0;i<total;i++){
     const p=prendas[i];
     filas += `<tr><td style="text-align:center">${i+1}</td><td style="text-align:center">${p?escHtml(p.cantidad):""}</td><td>${p?escHtml(p.concepto):""}</td><td style="text-align:center">${p?escHtml(p.talla):""}</td><td>${p?escHtml(p.color):""}</td></tr>`;
   }
+  const titulo = esRet ? "REMISIÓN DE ENTREGA" : "REMISIÓN DE MUESTRAS";
+  const secPrendas = esRet ? "RELACIÓN DE PRENDAS RETRABAJADAS" : "RELACIÓN DE PRENDAS / MUESTRAS";
+  const bloquePedido = esRet ? `
+      <div class="sec">DATOS DEL PEDIDO</div>
+      <table>
+        <tr><th style="width:120px">No. de pedido</th><td>${escHtml(rem.noPedido||"")}</td><th style="width:110px">Ref. cliente</th><td>${escHtml(rem.refCliente||"")}</td></tr>
+        <tr><th>No. de factura</th><td colspan="3">${escHtml(rem.noFactura||"")}</td></tr>
+      </table>` : "";
+  const leyenda = esRet
+    ? `Las prendas descritas corresponden a producto <b>retrabajado</b> que se entrega al cliente de forma <b>definitiva</b>. Al estar previamente facturadas, no están sujetas a devolución a tienda. Favor de firmar y sellar de recibido.`
+    : `Las prendas/muestras descritas se entregan al cliente en calidad de <b>PRÉSTAMO</b>. El cliente se compromete a devolverlas en las mismas condiciones en que las recibió. Favor de firmar y sellar de recibido.`;
   return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
   <div class="page">
-    <div class="hd"><img src="${LOGO_WL}"/><div><h1>REMISIÓN DE MUESTRAS</h1></div><div class="folio">No. ${escHtml(rem.numero)}<br/>Fecha: ${escHtml(fmtDate(rem.fecha))}</div></div>
+    <div class="hd"><img src="${LOGO_WL}"/><div><h1>${titulo}</h1></div><div class="folio">No. ${escHtml(rem.numero)}<br/>Fecha: ${escHtml(fmtDate(rem.fecha))}</div></div>
     <div class="body">
       <div class="sec">DATOS DEL CLIENTE</div>
       <table>
@@ -3045,13 +3057,14 @@ function buildRemisionHtml(rem){
         <tr><th>Contacto</th><td>${escHtml(rem.contactoNombre)}</td><th style="width:90px">Teléfono</th><td>${escHtml(rem.contactoTelefono)}</td></tr>
         <tr><th>Celular</th><td>${escHtml(rem.contactoCelular)}</td><th>Correo</th><td>${escHtml(rem.contactoCorreo)}</td></tr>
       </table>
-      <div class="sec">RELACIÓN DE PRENDAS / MUESTRAS</div>
+      ${bloquePedido}
+      <div class="sec">${secPrendas}</div>
       <table>
         <tr><th style="width:24px">#</th><th style="width:55px">Cant.</th><th>Concepto</th><th style="width:60px">Talla</th><th style="width:120px">Color</th></tr>
         ${filas}
       </table>
       ${rem.comentarios ? `<div class="sec">OBSERVACIONES</div><div style="font-size:11px;border:1px solid #999;padding:8px;min-height:38px">${escHtml(rem.comentarios)}</div>` : ""}
-      <div class="leg" style="margin-top:8px">Las prendas/muestras descritas se entregan al cliente en calidad de <b>PRÉSTAMO</b>. El cliente se compromete a devolverlas en las mismas condiciones en que las recibió. Favor de firmar y sellar de recibido.</div>
+      <div class="leg" style="margin-top:8px">${leyenda}</div>
       <div class="firmas">
         <div class="firma">Entregó — WORK-LIFE</div>
         <div class="firma">Recibió — Nombre, firma y sello del cliente</div>
@@ -3061,14 +3074,16 @@ function buildRemisionHtml(rem){
 }
 function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) {
   const [r, setR] = useState(null);
+  const [tab, setTab] = useState("muestra");
   const [guardando, setGuardando] = useState(false);
   const iS = { background:C.bg, border:"1px solid "+C.border, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13, outline:"none", fontFamily:"inherit", width:"100%" };
   const lbl = { fontSize:11, color:C.muted, marginBottom:4, display:"block" };
 
   const abrir = (rem) => setR({ prendas:[], comentarios:"", ...rem, prendas:(rem.prendas||[]).map(p=>({ ...nuevaPrendaRem(), ...p })) });
-  const nueva = () => setR({
-    id:null, numero:"", fecha:new Date().toISOString().slice(0,10),
+  const nueva = (tipo) => setR({
+    id:null, numero:"", fecha:new Date().toISOString().slice(0,10), tipo: tipo||"muestra",
     cliente:"", contactoNombre:"", contactoTelefono:"", contactoCelular:"", contactoCorreo:"",
+    noPedido:"", refCliente:"", noFactura:"",
     prendas:[nuevaPrendaRem()], comentarios:"", estado:"prestamo",
   });
   const set = (k,v)=> setR(p=>({...p,[k]:v}));
@@ -3089,35 +3104,49 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
 
   // ── LISTA ──
   if(!r){
-    const ordenadas = [...(remisiones||[])].sort((a,b)=> (b.fecha||"").localeCompare(a.fecha||"") || (parseInt(b.numero)||0)-(parseInt(a.numero)||0));
+    const esRetTab = tab === "retrabajo";
+    const ordenadas = [...(remisiones||[])]
+      .filter(x => (x.tipo||"muestra") === tab)
+      .sort((a,b)=> (b.fecha||"").localeCompare(a.fecha||"") || (parseInt(b.numero)||0)-(parseInt(a.numero)||0));
     const enPrestamo = ordenadas.filter(x=> resumenRemision(x).estado!=="devuelta");
     const piezasFuera = enPrestamo.reduce((s,x)=> s + resumenRemision(x).pendPiezas, 0);
     return (
       <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:10}}>
-          <div style={{fontSize:22, fontWeight:800, color:C.text}}>📦 Remisiones de muestras</div>
-          <button onClick={nueva} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>+ Nueva remisión</button>
+          <div style={{fontSize:22, fontWeight:800, color:C.text}}>📦 Remisiones</div>
+          <button onClick={()=>nueva(tab)} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>+ Nueva {esRetTab?"de retrabajo":"de muestra"}</button>
         </div>
-        <div style={{display:"flex", gap:10, marginBottom:16, flexWrap:"wrap"}}>
-          <div style={{flex:1, minWidth:140, background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px"}}>
-            <div style={{fontSize:12, color:C.muted}}>En préstamo</div>
-            <div style={{fontSize:22, fontWeight:800, color:"#f5a623"}}>{enPrestamo.length}</div>
-          </div>
-          <div style={{flex:1, minWidth:140, background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px"}}>
-            <div style={{fontSize:12, color:C.muted}}>Piezas fuera de bodega</div>
-            <div style={{fontSize:22, fontWeight:800, color:C.text}}>{piezasFuera}</div>
-          </div>
+        <div style={{display:"flex", gap:8, marginBottom:16, flexWrap:"wrap"}}>
+          {[["muestra","Muestras (préstamo)"],["retrabajo","Retrabajos (no regresan)"]].map(([id,lblT]) => (
+            <button key={id} onClick={()=>setTab(id)} style={{border:"1px solid "+(tab===id?C.accent:C.border), borderRadius:9, background:tab===id?C.accent:C.surface, color:tab===id?"#1a1d27":C.text, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{lblT}</button>
+          ))}
         </div>
-        {ordenadas.length===0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay remisiones. Crea la primera con "Nueva remisión".</div>}
+        {!esRetTab && (
+          <div style={{display:"flex", gap:10, marginBottom:16, flexWrap:"wrap"}}>
+            <div style={{flex:1, minWidth:140, background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px"}}>
+              <div style={{fontSize:12, color:C.muted}}>En préstamo</div>
+              <div style={{fontSize:22, fontWeight:800, color:"#f5a623"}}>{enPrestamo.length}</div>
+            </div>
+            <div style={{flex:1, minWidth:140, background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px"}}>
+              <div style={{fontSize:12, color:C.muted}}>Piezas fuera de bodega</div>
+              <div style={{fontSize:22, fontWeight:800, color:C.text}}>{piezasFuera}</div>
+            </div>
+          </div>
+        )}
+        {ordenadas.length===0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay remisiones {esRetTab?"de retrabajo":"de muestra"}. Crea la primera con el botón de arriba.</div>}
         {ordenadas.map(rem=>{
           const res = resumenRemision(rem);
-          const col = res.estado==="devuelta" ? "#4caf7d" : res.estado==="parcial" ? "#f5a623" : "#c0392b";
-          const txt = res.estado==="devuelta" ? "Devuelta" : res.estado==="parcial" ? "Parcial" : "En préstamo";
+          let col, txt;
+          if (esRetTab) { col = "#4caf7d"; txt = "Entregada"; }
+          else {
+            col = res.estado==="devuelta" ? "#4caf7d" : res.estado==="parcial" ? "#f5a623" : "#c0392b";
+            txt = res.estado==="devuelta" ? "Devuelta" : res.estado==="parcial" ? "Parcial" : "En préstamo";
+          }
           return (
             <div key={rem.id} onClick={()=>abrir(rem)} style={{background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap"}}>
               <div>
                 <div style={{fontSize:15, fontWeight:700, color:C.text}}>No. {rem.numero||"—"} · {rem.cliente||"—"}</div>
-                <div style={{fontSize:12, color:C.muted, marginTop:3}}>{fmtDate(rem.fecha)} · {res.totalPiezas} pza · {res.devPiezas} devueltas</div>
+                <div style={{fontSize:12, color:C.muted, marginTop:3}}>{fmtDate(rem.fecha)} · {res.totalPiezas} pza{esRetTab && rem.noFactura ? (" · Factura "+rem.noFactura) : (!esRetTab ? (" · "+res.devPiezas+" devueltas") : "")}</div>
               </div>
               <span style={{fontSize:12, fontWeight:800, color:col, background:col+"22", padding:"4px 12px", borderRadius:20, whiteSpace:"nowrap"}}>{txt}</span>
             </div>
@@ -3129,10 +3158,11 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
 
   // ── EDITOR ──
   const res = resumenRemision(r);
+  const esRet = (r.tipo === "retrabajo");
   return (
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
-        <div style={{fontSize:20, fontWeight:800, color:C.text}}>📦 Remisión {r.numero?("No. "+r.numero):"(nueva)"}</div>
+        <div style={{fontSize:20, fontWeight:800, color:C.text}}>📦 Remisión {esRet?"de retrabajo ":""}{r.numero?("No. "+r.numero):"(nueva)"}</div>
         <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
       </div>
 
@@ -3141,6 +3171,14 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
         <div><label style={lbl}>Fecha</label><input type="date" value={r.fecha} onChange={e=>set("fecha",e.target.value)} style={iS}/></div>
         <div style={{gridColumn:"span 2"}}><label style={lbl}>Empresa cliente</label><input value={r.cliente} onChange={e=>set("cliente",e.target.value)} style={iS} placeholder="Nombre de la empresa"/></div>
       </div>
+
+      {esRet && (
+        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:16}}>
+          <div><label style={lbl}>No. de pedido</label><input value={r.noPedido||""} onChange={e=>set("noPedido",e.target.value)} style={iS} placeholder="Pedido"/></div>
+          <div><label style={lbl}>Ref. cliente</label><input value={r.refCliente||""} onChange={e=>set("refCliente",e.target.value)} style={iS} placeholder="Referencia del cliente"/></div>
+          <div><label style={lbl}>No. de factura</label><input value={r.noFactura||""} onChange={e=>set("noFactura",e.target.value)} style={iS} placeholder="Factura"/></div>
+        </div>
+      )}
 
       {/* Contacto */}
       <div style={{fontSize:13, fontWeight:800, color:C.text, margin:"6px 0 8px"}}>Contacto</div>
@@ -3153,11 +3191,11 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
 
       {/* Prendas */}
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
-        <div style={{fontSize:13, fontWeight:800, color:C.text}}>Prendas / muestras</div>
+        <div style={{fontSize:13, fontWeight:800, color:C.text}}>{esRet ? "Prendas retrabajadas" : "Prendas / muestras"}</div>
         <button onClick={addPr} style={{border:"1px solid "+C.border, borderRadius:8, cursor:"pointer", background:C.surface, color:C.text, padding:"6px 12px", fontSize:12, fontWeight:700, fontFamily:"inherit"}}>+ Agregar prenda</button>
       </div>
       {r.prendas.map((p,i)=>(
-        <div key={i} style={{background:p.devuelta?"rgba(76,175,125,.08)":C.card, border:"1px solid "+(p.devuelta?"#4caf7d55":C.border), borderRadius:10, padding:"10px 12px", marginBottom:8}}>
+        <div key={i} style={{background:(!esRet&&p.devuelta)?"rgba(76,175,125,.08)":C.card, border:"1px solid "+((!esRet&&p.devuelta)?"#4caf7d55":C.border), borderRadius:10, padding:"10px 12px", marginBottom:8}}>
           <div style={{display:"grid", gridTemplateColumns:"64px 1fr 64px 1fr 28px", gap:8, alignItems:"end"}}>
             <div><label style={lbl}>Cant.</label><input value={p.cantidad} onChange={e=>setPr(i,"cantidad",e.target.value)} style={iS} inputMode="numeric"/></div>
             <div><label style={lbl}>Concepto</label><input value={p.concepto} onChange={e=>setPr(i,"concepto",e.target.value)} style={iS} placeholder="Ej. Camisola industrial"/></div>
@@ -3165,12 +3203,14 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
             <div><label style={lbl}>Color</label><input value={p.color} onChange={e=>setPr(i,"color",e.target.value)} style={iS}/></div>
             <button onClick={()=>quitarPr(i)} title="Quitar" style={{border:"none", background:"transparent", color:C.muted, fontSize:20, cursor:"pointer", paddingBottom:6}}>×</button>
           </div>
+          {!esRet && (
           <div style={{marginTop:8}}>
             <label style={{display:"inline-flex", alignItems:"center", gap:7, fontSize:12, color:p.devuelta?"#4caf7d":C.muted, cursor:"pointer", fontWeight:700}}>
               <input type="checkbox" checked={!!p.devuelta} onChange={()=>toggleDev(i)} style={{width:16,height:16,accentColor:"#4caf7d"}}/>
               {p.devuelta ? ("Devuelta a bodega"+(p.fechaDevuelta?(" · "+fmtDate(p.fechaDevuelta)):"")) : "Marcar como devuelta"}
             </label>
           </div>
+          )}
         </div>
       ))}
 
@@ -3181,11 +3221,18 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
       </div>
 
       {/* Resumen */}
-      <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"12px 14px", margin:"16px 0", display:"flex", gap:22, flexWrap:"wrap"}}>
-        <div><div style={{fontSize:11, color:C.muted}}>Total piezas</div><div style={{fontSize:18, fontWeight:800, color:C.text}}>{res.totalPiezas}</div></div>
-        <div><div style={{fontSize:11, color:C.muted}}>Devueltas</div><div style={{fontSize:18, fontWeight:800, color:"#4caf7d"}}>{res.devPiezas}</div></div>
-        <div><div style={{fontSize:11, color:C.muted}}>Pendientes</div><div style={{fontSize:18, fontWeight:800, color: res.pendPiezas>0?"#f5a623":"#4caf7d"}}>{res.pendPiezas}</div></div>
-      </div>
+      {esRet ? (
+        <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"12px 14px", margin:"16px 0", display:"flex", gap:22, flexWrap:"wrap"}}>
+          <div><div style={{fontSize:11, color:C.muted}}>Total piezas entregadas</div><div style={{fontSize:18, fontWeight:800, color:C.text}}>{res.totalPiezas}</div></div>
+          <div style={{fontSize:12, color:C.muted, alignSelf:"center"}}>Producto retrabajado — entrega definitiva, no regresa a tienda.</div>
+        </div>
+      ) : (
+        <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"12px 14px", margin:"16px 0", display:"flex", gap:22, flexWrap:"wrap"}}>
+          <div><div style={{fontSize:11, color:C.muted}}>Total piezas</div><div style={{fontSize:18, fontWeight:800, color:C.text}}>{res.totalPiezas}</div></div>
+          <div><div style={{fontSize:11, color:C.muted}}>Devueltas</div><div style={{fontSize:18, fontWeight:800, color:"#4caf7d"}}>{res.devPiezas}</div></div>
+          <div><div style={{fontSize:11, color:C.muted}}>Pendientes</div><div style={{fontSize:18, fontWeight:800, color: res.pendPiezas>0?"#f5a623":"#4caf7d"}}>{res.pendPiezas}</div></div>
+        </div>
+      )}
 
       {/* Acciones */}
       <div style={{display:"flex", gap:10, flexWrap:"wrap", marginTop:10, alignItems:"center"}}>

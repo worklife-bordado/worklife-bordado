@@ -4299,7 +4299,10 @@ function ChecadorAdmin({ roster, checadas, onGuardarRoster, publicUrl }){
           <div style={{fontSize:14, fontWeight:700, color:C2.text, marginBottom:8}}>Enlace del checador</div>
           <div style={{fontSize:13, color:C2.muted, marginBottom:12}}>Comparte este enlace o guárdalo como acceso directo en la tablet de la tienda y en los celulares de home office. Cualquiera lo abre y checa con su PIN.</div>
           <div style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, padding:"10px 12px", fontSize:12.5, color:C2.accent, wordBreak:"break-all"}}>{publicUrl}</div>
-          <button onClick={()=>{ try{ navigator.clipboard.writeText(publicUrl); alert("Enlace copiado."); }catch(e){ alert("Copia manual: "+publicUrl); } }} style={{marginTop:12, border:"none", borderRadius:8, background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Copiar enlace</button>
+          <div style={{display:"flex", gap:10, flexWrap:"wrap", marginTop:12}}>
+            <button onClick={()=>window.open(publicUrl, "_blank")} style={{border:"none", borderRadius:8, background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Abrir checador</button>
+            <button onClick={()=>{ try{ navigator.clipboard.writeText(publicUrl); alert("Enlace copiado."); }catch(e){ alert("Copia manual: "+publicUrl); } }} style={{border:"1px solid "+C2.border, borderRadius:8, background:C2.surface, color:C2.text, padding:"9px 16px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Copiar enlace</button>
+          </div>
         </div>
       )}
     </div>
@@ -5226,9 +5229,9 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
-            {rol === "seguimiento" && (
+            {puedeEditarSeguimiento && (
             <ModTile onClick={() => window.open(window.location.origin + "/?checador=1", "_blank")} label="Abrir checador"
-              stat={<span style={{color:C.muted}}>Para checar en tienda</span>}>
+              stat={<span style={{color:C.muted}}>Para checar</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gChkS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#60a5fa"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
                 <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gChkS)"/>

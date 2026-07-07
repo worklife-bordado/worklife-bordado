@@ -4344,6 +4344,7 @@ function AppInner() {
   const [loginErr, setLoginErr] = useState("");
   const [ordenes,  setOrdenes]  = useState([]);
   const contadorSync = useRef(false);
+  const [errApp, setErrApp] = useState("");
   const [logosCatalogo, setLogosCatalogo] = useState([]);
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
@@ -4817,7 +4818,10 @@ if (usuario) {
       setVista("detalle");
     } catch (e) {
       console.error("crear orden error:", e);
-      alert("No se pudo crear la orden:\n\n" + (e && e.message ? e.message : String(e)) + "\n\nToma captura de este mensaje para revisarlo.");
+      const msg = (e && e.message ? e.message : String(e));
+      setErrApp(/quota|exhausted|resource/i.test(msg)
+        ? "No se pudo crear la orden porque Firebase alcanzó su límite de uso diario (\"Quota exceeded\"). Se restablece alrededor de la 1:00 AM, o al activar el plan Blaze."
+        : ("No se pudo crear la orden: " + msg));
     }
   };
 
@@ -5484,6 +5488,13 @@ const cancelar = async (id) => {
 
       {rutaPdf && <PdfModal html={rutaPdf.html} titulo={rutaPdf.titulo} archivo={rutaPdf.archivo} onClose={() => setRutaPdf(null)}/>}
       {bonoPdf && <PdfModal html={bonoPdf.html} titulo={bonoPdf.titulo} archivo={bonoPdf.archivo} onClose={() => setBonoPdf(null)}/>}
+      {errApp && (
+        <div style={{position:"fixed", top:0, left:0, right:0, zIndex:9999, background:"#c0392b", color:"#fff", padding:"14px 18px", boxShadow:"0 3px 12px rgba(0,0,0,.4)", display:"flex", alignItems:"flex-start", gap:12}}>
+          <div style={{fontSize:20, lineHeight:1}}>⚠️</div>
+          <div style={{flex:1, fontSize:14, fontWeight:600, lineHeight:1.5}}>{errApp}</div>
+          <button onClick={()=>setErrApp("")} style={{border:"none", background:"rgba(255,255,255,.25)", color:"#fff", borderRadius:8, padding:"6px 12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Cerrar</button>
+        </div>
+      )}
       {remisionPdf && <PdfModal html={remisionPdf.html} titulo={remisionPdf.titulo} archivo={remisionPdf.archivo} onClose={() => setRemisionPdf(null)}/>}
       {pagoPdf && <PdfModal html={pagoPdf.html} titulo={pagoPdf.titulo} archivo={pagoPdf.archivo} onClose={() => setPagoPdf(null)}/>}
     </div>

@@ -928,10 +928,7 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
     </div>
   );
 }
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento, onBack }) {
-  const [search, setSearch] = useState("");
-  const [campo, setCampo] = useState("todos");
-  const [filtro, setFiltro] = useState("todas");
+function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filtro, setFiltro, soloMias, setSoloMias, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento, onBack }) {
   const [recordatorioSemaforo, setRecordatorioSemaforo] = useState(false);
 
   useEffect(() => {
@@ -943,6 +940,7 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, creando, onDuplicar,
   }, [rol]);
 
   const filtradas = ordenes.filter(o => {
+    if (soloMias && rol === "admin" && o.creadoPor !== usuario.email) return false;
     const q = search.toLowerCase().trim();
     let match = true;
     if (q) {
@@ -1005,6 +1003,13 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, creando, onDuplicar,
 </Btn>
 </div>
       </div>
+
+      {rol === "admin" && (
+        <div onClick={()=>setSoloMias(m=>!m)} style={{display:"inline-flex", alignItems:"center", gap:8, cursor:"pointer", background: soloMias?C.accent+"22":C.surface, border:"1px solid "+(soloMias?C.accent:C.border), borderRadius:20, padding:"7px 14px", marginBottom:14, fontSize:13, fontWeight:700, color: soloMias?C.accent:C.muted}}>
+          <span>{soloMias ? "👤 Solo mis órdenes" : "👥 Viendo todas las órdenes"}</span>
+          <span style={{fontSize:11, fontWeight:600, opacity:.75}}>{soloMias ? "· toca para ver todas" : "· toca para ver solo las mías"}</span>
+        </div>
+      )}
 
       {(() => {
         const porLiberar = ordenes.filter(o => o.etapa === "nueva" && !o.liberada);
@@ -4346,6 +4351,11 @@ function AppInner() {
   const contadorSync = useRef(false);
   const [errApp, setErrApp] = useState("");
   const [creando, setCreando] = useState(false);
+  // Estado del filtro de la lista de órdenes — vive en la app para que NO se pierda al entrar/salir de una orden.
+  const [listaSearch, setListaSearch] = useState("");
+  const [listaCampo, setListaCampo] = useState("todos");
+  const [listaFiltro, setListaFiltro] = useState("todas");
+  const [listaSoloMias, setListaSoloMias] = useState(true);
   const [logosCatalogo, setLogosCatalogo] = useState([]);
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
@@ -5299,6 +5309,10 @@ const cancelar = async (id) => {
     ordenes={ordenes}
     usuario={usuario}
     rol={rol}
+    search={listaSearch} setSearch={setListaSearch}
+    campo={listaCampo} setCampo={setListaCampo}
+    filtro={listaFiltro} setFiltro={setListaFiltro}
+    soloMias={listaSoloMias} setSoloMias={setListaSoloMias}
     onSelect={id => { setActiva(id); setVista("detalle"); }}
     onCreate={puedeCrear ? crear : null}
     creando={creando}

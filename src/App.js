@@ -4207,7 +4207,7 @@ function ChecadorPublico(){
 }
 
 // ── Módulo de administración del checador (dentro de la app, solo gerencia) ──
-function ChecadorAdmin({ roster, checadas, onGuardarRoster, publicUrl }){
+function ChecadorAdmin({ roster, onGuardarRoster, publicUrl }){
   const [tab, setTab] = useState("reporte");
   const [empleados, setEmpleados] = useState(roster || []);
   useEffect(()=>{ setEmpleados(roster || []); }, [roster]);
@@ -4216,6 +4216,26 @@ function ChecadorAdmin({ roster, checadas, onGuardarRoster, publicUrl }){
   const iniSemana = new Date(hoy); iniSemana.setDate(hoy.getDate() - 6);
   const [desde, setDesde] = useState(chkFechaISO(iniSemana));
   const [hasta, setHasta] = useState(chkFechaISO(hoy));
+  const [checadas, setChecadas] = useState([]);
+  const [cargando, setCargando] = useState(false);
+
+  // Carga SOLO las checadas del rango elegido (bajo demanda), en lugar de escuchar toda la colección.
+  useEffect(() => {
+    if (tab !== "reporte") return;
+    let cancelado = false;
+    (async () => {
+      setCargando(true);
+      try {
+        const ini = new Date(desde + "T00:00:00");
+        const fin = new Date(hasta + "T23:59:59");
+        const q = query(collection(db, "checadas"), where("ts", ">=", ini), where("ts", "<=", fin));
+        const snap = await getDocs(q);
+        if (!cancelado) setChecadas(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      } catch (e) { if (!cancelado) { console.error("cargar checadas:", e); setChecadas([]); } }
+      if (!cancelado) setCargando(false);
+    })();
+    return () => { cancelado = true; };
+  }, [desde, hasta, tab]);
 
   const nuevoId = () => "e" + Date.now().toString(36);
   const addEmp = () => setEmpleados(p => [...p, { id:nuevoId(), nombre:"", pin:"", activo:true }]);
@@ -4226,11 +4246,10 @@ function ChecadorAdmin({ roster, checadas, onGuardarRoster, publicUrl }){
     try { await onGuardarRoster(limpio); alert("Empleados guardados."); } catch(e){ alert("Error: "+e.message); }
   };
 
-  // Reporte: registros dentro del rango, agrupados por empleado + día
+  // Reporte: registros del rango, agrupados por empleado + día
   const registros = (checadas || [])
     .filter(c => c.ts && c.ts.toDate)
-    .map(c => ({ empleadoId:c.empleadoId, nombre:c.nombre, tipo:c.tipo, ts:c.ts.toDate() }))
-    .filter(c => { const f = chkFechaISO(c.ts); return f >= desde && f <= hasta; });
+    .map(c => ({ empleadoId:c.empleadoId, nombre:c.nombre, tipo:c.tipo, ts:c.ts.toDate() }));
   const porEmpDia = {};
   registros.forEach(r => {
     const dia = chkFechaISO(r.ts);
@@ -4257,7 +4276,8 @@ function ChecadorAdmin({ roster, checadas, onGuardarRoster, publicUrl }){
             <span style={{fontSize:13, color:C2.muted}}>al</span>
             <input type="date" value={hasta} onChange={e=>setHasta(e.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, color:C2.text, padding:"7px 9px", fontSize:13}}/>
           </div>
-          {filas.length === 0 && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Sin registros en este rango.</div>}
+          {cargando && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Cargando registros…</div>}
+          {!cargando && filas.length === 0 && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Sin registros en este rango.</div>}
           {filas.map((f,i) => {
             const r = chkResumenDia(f.regs);
             return (
@@ -4323,6 +4343,7 @@ function AppInner() {
   const [authListo,setAuthListo]= useState(false);  // waiting for Firebase auth check
   const [loginErr, setLoginErr] = useState("");
   const [ordenes,  setOrdenes]  = useState([]);
+  const contadorSync = useRef(false);
   const [logosCatalogo, setLogosCatalogo] = useState([]);
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
@@ -4337,7 +4358,6 @@ function AppInner() {
   const [bonoPdf, setBonoPdf] = useState(null);
   const [salariosBonos, setSalariosBonos] = useState(null);
   const [checadorRoster, setChecadorRoster] = useState([]);
-  const [checadas, setChecadas] = useState([]);
   // Evita que el traductor del navegador (Google Translate) modifique el DOM y
   // provoque el crash "removeChild ... not a child" al re-renderizar. La app ya está en español.
   useEffect(() => {
@@ -4416,8 +4436,9 @@ if (usuario) {
         ? all.filter(o => !(o.etapa === "nueva" && !o.liberada))
         : all;
       setOrdenes(data);
-      // Mantener el contador global al día (solo quienes ven todas las órdenes)
-      if (esPriv && all.length) {
+      // Mantener el contador global al día — SOLO una vez por sesión (no en cada cambio).
+      if (esPriv && all.length && !contadorSync.current) {
+        contadorSync.current = true;
         const maxNum = Math.max(4999, ...all.map(o => parseInt(o.numero) || 0));
         const ref = doc(db, "config", "contador");
         runTransaction(db, async (tx) => {
@@ -4572,11 +4593,12 @@ if (usuario) {
   const imprimirBono = (html, titulo) => setBonoPdf({ html, titulo: titulo || "Recibo de bono", archivo: (titulo || "ReciboBono").replace(/\s+/g, "_") + ".html" });
 
   // ── Checador (solo administración gestiona/reporta) ──
+  // El roster es 1 documento (barato). Las checadas NO se escuchan en tiempo real
+  // (crecen sin parar); el reporte las carga por rango de fechas, bajo demanda.
   useEffect(() => {
     if (!usuario?.email || rol !== "admin") return;
     const u1 = onSnapshot(doc(db, "checadorConfig", "roster"), snap => setChecadorRoster(snap.exists() ? (snap.data().empleados || []) : []));
-    const u2 = onSnapshot(collection(db, "checadas"), snap => setChecadas(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    return () => { u1(); u2(); };
+    return () => u1();
   }, [usuario, rol]);
   const guardarChecadorRoster = async (empleados) => {
     await setDoc(doc(db, "checadorConfig", "roster"), { empleados, actualizadoPor: usuario.email }, { merge: true });
@@ -5415,7 +5437,6 @@ const cancelar = async (id) => {
       {vista === "checador" && rol === "admin" && (
         <ChecadorAdmin
           roster={checadorRoster}
-          checadas={checadas}
           onGuardarRoster={guardarChecadorRoster}
           publicUrl={window.location.origin + "/?checador=1"}
         />

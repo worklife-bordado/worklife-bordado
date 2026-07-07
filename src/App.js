@@ -773,7 +773,7 @@ function Textarea({ label, value, onChange, rows=3 }) {
     </div>
   );
 }
-function Btn({ children, onClick, variant="primary", size="md", style:ext={} }) {
+function Btn({ children, onClick, variant="primary", size="md", style:ext={}, disabled=false }) {
   const VS = {
     primary:{background:C.accent,color:"#0f1117"},
     ghost:{background:"transparent",color:C.muted,border:"1px solid "+C.border},
@@ -782,10 +782,10 @@ function Btn({ children, onClick, variant="primary", size="md", style:ext={} }) 
   };
   const PS = {sm:"5px 11px",md:"9px 18px",lg:"11px 24px"};
   return (
-    <button onClick={onClick}
-      onMouseEnter={e => e.currentTarget.style.opacity=".75"}
-      onMouseLeave={e => e.currentTarget.style.opacity="1"}
-      style={{borderRadius:7,border:"none",padding:PS[size],fontSize:size==="sm"?11:13,fontWeight:700,cursor:"pointer",letterSpacing:.5,...VS[variant],...ext}}>
+    <button onClick={onClick} disabled={disabled}
+      onMouseEnter={e => { if(!disabled) e.currentTarget.style.opacity=".75"; }}
+      onMouseLeave={e => e.currentTarget.style.opacity=disabled?".6":"1"}
+      style={{borderRadius:7,border:"none",padding:PS[size],fontSize:size==="sm"?11:13,fontWeight:700,cursor:disabled?"wait":"pointer",letterSpacing:.5,...VS[variant],...ext,opacity:disabled?.6:1}}>
       {children}
     </button>
   );
@@ -928,7 +928,7 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
     </div>
   );
 }
-function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento, onBack }) {
+function Lista({ ordenes, usuario, rol, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento, onBack }) {
   const [search, setSearch] = useState("");
   const [campo, setCampo] = useState("todos");
   const [filtro, setFiltro] = useState("todas");
@@ -991,9 +991,9 @@ function Lista({ ordenes, usuario, rol, onSelect, onCreate, onDuplicar, onCancel
           <div style={{color:C.muted,fontSize:13}}>{ordenes.length} órdenes en total</div>
         </div>
         <div style={{display:"flex",gap:8}}>
- {onCreate && <Btn onClick={onCreate} size="lg">
-  <span style={{display: window.innerWidth < 480 ? "none" : "inline"}}>+ Nueva Orden</span>
-  <span style={{display: window.innerWidth < 480 ? "inline" : "none"}}>🆕</span>
+ {onCreate && <Btn onClick={onCreate} size="lg" disabled={creando}>
+  <span style={{display: window.innerWidth < 480 ? "none" : "inline"}}>{creando ? "⏳ Creando orden…" : "+ Nueva Orden"}</span>
+  <span style={{display: window.innerWidth < 480 ? "inline" : "none"}}>{creando ? "⏳" : "🆕"}</span>
 </Btn>}
 <Btn onClick={onCalendario} variant="ghost" size="lg">
   <span style={{display: window.innerWidth < 480 ? "none" : "inline"}}>📅 Calendario</span>
@@ -4345,6 +4345,7 @@ function AppInner() {
   const [ordenes,  setOrdenes]  = useState([]);
   const contadorSync = useRef(false);
   const [errApp, setErrApp] = useState("");
+  const [creando, setCreando] = useState(false);
   const [logosCatalogo, setLogosCatalogo] = useState([]);
   const [bordadores, setBordadores] = useState([]);
   const [adminBord, setAdminBord] = useState(false);
@@ -4808,6 +4809,8 @@ if (usuario) {
     return String(nuevo);
   };
   const crear = async () => {
+    if (creando) return;
+    setCreando(true);
     try {
       const n = emptyOrden(ordenes);
       n.numero = await obtenerSiguienteNumero();
@@ -4822,6 +4825,8 @@ if (usuario) {
       setErrApp(/quota|exhausted|resource/i.test(msg)
         ? "No se pudo crear la orden porque Firebase alcanzó su límite de uso diario (\"Quota exceeded\"). Se restablece alrededor de la 1:00 AM, o al activar el plan Blaze."
         : ("No se pudo crear la orden: " + msg));
+    } finally {
+      setCreando(false);
     }
   };
 
@@ -5094,9 +5099,9 @@ const cancelar = async (id) => {
               <Semaforo semaforo={semaforo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }} puedeEditar={puedeEditarSeguimiento} />
             </div>
             {puedeCrear && (
-              <button onClick={crear} style={{width: window.innerWidth < 760 ? "100%" : 260, flexShrink:0, border:"none",borderRadius:14,cursor:"pointer",background:"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",marginBottom:20,fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit"}}>
-                <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:"50%",background:"rgba(255,255,255,0.25)",fontSize:22,lineHeight:1}}>+</span>
-                Nueva Orden
+              <button onClick={crear} disabled={creando} style={{width: window.innerWidth < 760 ? "100%" : 260, flexShrink:0, border:"none",borderRadius:14,cursor:creando?"wait":"pointer",background: creando?"#7a5a1e":"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",marginBottom:20,fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit",opacity:creando?0.85:1}}>
+                <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:"50%",background:"rgba(255,255,255,0.25)",fontSize:22,lineHeight:1}}>{creando?"⏳":"+"}</span>
+                {creando ? "Creando orden…" : "Nueva Orden"}
               </button>
             )}
           </div>
@@ -5296,6 +5301,7 @@ const cancelar = async (id) => {
     rol={rol}
     onSelect={id => { setActiva(id); setVista("detalle"); }}
     onCreate={puedeCrear ? crear : null}
+    creando={creando}
     onDuplicar={duplicar}
     onCancelarReactivar={cancelarReactivar}
     puedeCancelar={puedeCancelar}

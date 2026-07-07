@@ -4785,13 +4785,18 @@ if (usuario) {
     return String(nuevo);
   };
   const crear = async () => {
-    const n = emptyOrden(ordenes);
-    n.numero = await obtenerSiguienteNumero();
-    n.creadoPor = usuario.email;
-    n.creadoPorNombre = usuario.displayName || usuario.email;
-    await guardarOrden(n);
-    setActiva(n.id);
-    setVista("detalle");
+    try {
+      const n = emptyOrden(ordenes);
+      n.numero = await obtenerSiguienteNumero();
+      n.creadoPor = usuario.email;
+      n.creadoPorNombre = usuario.displayName || usuario.email;
+      await guardarOrden(n);
+      setActiva(n.id);
+      setVista("detalle");
+    } catch (e) {
+      console.error("crear orden error:", e);
+      alert("No se pudo crear la orden:\n\n" + (e && e.message ? e.message : String(e)) + "\n\nToma captura de este mensaje para revisarlo.");
+    }
   };
 
   const guardar = async (form) => {

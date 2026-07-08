@@ -421,8 +421,8 @@ async function buildPdfHtml(orden) {
 
     // Solo las vistas que tienen al menos un logo subido
   const VIEWS_PDF = [
-    {id:"playera_frente",label:"Playera Frente",ratio:0.8806,logoPct:26},
-    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoPct:26},
+    {id:"playera_frente",label:"Playera Frente",ratio:0.8806,logoPct:23.4},
+    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoPct:32.5},
     {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoPct:22},
     {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoPct:22},
     {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoPct:18},

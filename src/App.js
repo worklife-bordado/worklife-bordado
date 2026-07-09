@@ -4809,6 +4809,17 @@ if (usuario) {
       historial: [...(orden.historial||[]), { etapa: nuevaEtapa, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(nuevaEtapa).label}" desde el tablero` }],
     };
     await guardarOrden(actualizada);
+    // Registrar el cambio de etapa en el historial (igual que al guardar desde el detalle)
+    try {
+      await addDoc(collection(db, "historial"), {
+        ordenId: String(orden.id),
+        numeroOrden: orden.numero,
+        usuario: usuario.displayName || usuario.email,
+        email: usuario.email,
+        fecha: serverTimestamp(),
+        cambios: [{ campo: "etapa", etiqueta: "Etapa", antes: orden.etapa, despues: nuevaEtapa }],
+      });
+    } catch (e) {}
     if (orden.creadoPor && orden.creadoPor !== usuario.email) {
       const titulo = `Orden #${orden.numero} actualizada`;
       const cuerpo = `La etapa cambió a: ${etapaInfo(nuevaEtapa).label}`;

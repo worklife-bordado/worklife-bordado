@@ -2246,6 +2246,48 @@ const calcPromedio = (etapaInicio, etapaFin) => {
         })()}
       </div>
 
+      {/* Mermas */}
+      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Mermas (piezas no recuperables)</div>
+      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>
+        {(() => {
+          const conMermas = ordensFiltradas.filter(o => mermasOrden(o) > 0);
+          let totPiezas = 0, totMermas = 0;
+          ordensFiltradas.forEach(o => { totPiezas += piezasOrden(o); totMermas += mermasOrden(o); });
+          if (totMermas === 0) return <div style={{color:C.muted,fontSize:13}}>Sin mermas registradas en el período.</div>;
+          const pct = totPiezas ? ((totMermas/totPiezas)*100) : 0;
+          const col = pct<=0.5?"#4caf7d":pct<1?"#f5a623":"#c0392b";
+          return (
+            <div>
+              <div style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap",marginBottom:18}}>
+                <div>
+                  <div style={{fontSize:48,fontWeight:800,color:col}}>{pct.toFixed(2)}%</div>
+                  <div style={{fontSize:13,color:C.muted}}>de merma sobre las piezas del período</div>
+                </div>
+                <div style={{flex:1,minWidth:200,display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,flexWrap:"wrap",gap:8}}>
+                  <span>🗑️ <b style={{color:"#c0392b"}}>{totMermas}</b> pz de merma</span>
+                  <span>📦 <b style={{color:C.text}}>{totPiezas}</b> pz producidas</span>
+                  <span><b style={{color:C.text}}>{conMermas.length}</b> órdenes con merma</span>
+                </div>
+              </div>
+              {[...conMermas].sort((a,b)=>mermasOrden(b)-mermasOrden(a)).map(o => (
+                <div key={o.id} style={{background:C.surface,borderRadius:8,padding:"10px 12px",marginBottom:6,borderLeft:"3px solid #c0392b"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+                    <span style={{fontWeight:700,color:C.text,fontSize:13}}>#{o.numero} — {o.cliente||"—"}</span>
+                    <span style={{fontSize:13,fontWeight:800,color:"#c0392b"}}>{mermasOrden(o)} pz</span>
+                  </div>
+                  {(o.mermas||[]).map((m,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:C.muted,marginTop:3,gap:10}}>
+                      <span>• {m.cantidad} pz — {m.motivo||"sin motivo"}</span>
+                      <span style={{whiteSpace:"nowrap"}}>{fmtDate((m.fecha||"").slice(0,10))}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
       {/* Retrabajo por cliente */}
       <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:12,textTransform:"uppercase",letterSpacing:1}}>Calidad - Retrabajo Reportado por Cliente</div>
       <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"24px",marginBottom:28}}>

@@ -1490,6 +1490,15 @@ useEffect(() => {
   });
   const addPrenda = () => setForm(p => ({ ...p, prendas: [...p.prendas, emptyPrenda()] }));
   const delPrenda = idx => setForm(p => ({ ...p, prendas: p.prendas.filter((_, i) => i !== idx) }));
+  const [mermaCant, setMermaCant] = useState("");
+  const [mermaMotivo, setMermaMotivo] = useState("");
+  const addMerma = () => {
+    const c = parseInt(mermaCant) || 0;
+    if (c <= 0) return;
+    setForm(p => ({ ...p, mermas: [...(p.mermas||[]), { cantidad: c, motivo: (mermaMotivo||"").trim(), fecha: new Date().toISOString() }] }));
+    setMermaCant(""); setMermaMotivo("");
+  };
+  const delMerma = (i) => setForm(p => ({ ...p, mermas: (p.mermas||[]).filter((_, idx) => idx !== i) }));
 
 const cambiarEtapa = id => {
     if (!puedeEditarSeguimiento) { alert("Solo el rol de seguimiento o administración puede cambiar la etapa."); return; }
@@ -1858,6 +1867,33 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                 </Btn>
               ))}
             </div>
+
+            {form.etapa === "retrabajo" && (
+              <div style={{marginTop:20, background:"#2a0f12", border:"1px solid #8e44ad55", borderRadius:12, padding:"14px 16px"}}>
+                <div style={{fontSize:13, fontWeight:800, color:"#e8eaf0", marginBottom:4}}>🗑️ Mermas — piezas no recuperables</div>
+                <div style={{fontSize:11.5, color:C.muted, marginBottom:12}}>Registra las piezas que no se pudieron corregir en el retrabajo. Alimentan el indicador de mermas de Krisia.</div>
+                {(form.mermas||[]).map((m,i)=>(
+                  <div key={i} style={{display:"flex", alignItems:"center", gap:10, padding:"7px 0", borderTop:"1px solid "+C.border}}>
+                    <div style={{fontWeight:800, color:"#c0392b", minWidth:44}}>{m.cantidad} pz</div>
+                    <div style={{flex:1, fontSize:13, color:C.text}}>{m.motivo||<span style={{color:C.muted}}>Sin motivo</span>}</div>
+                    <div style={{fontSize:11, color:C.muted}}>{fmtDate((m.fecha||"").slice(0,10))}</div>
+                    {puedeEditarSeguimiento && <button onClick={()=>delMerma(i)} style={{border:"none", background:"transparent", color:C.muted, fontSize:18, cursor:"pointer"}}>×</button>}
+                  </div>
+                ))}
+                {(form.mermas||[]).length>0 && (
+                  <div style={{display:"flex", justifyContent:"space-between", paddingTop:8, marginTop:4, borderTop:"2px solid "+C.border, fontSize:13, fontWeight:800, color:"#c0392b"}}>
+                    <span>Total merma</span><span>{(form.mermas||[]).reduce((s,m)=>s+(parseInt(m.cantidad)||0),0)} pz</span>
+                  </div>
+                )}
+                {puedeEditarSeguimiento && (
+                  <div style={{display:"flex", gap:8, marginTop:12, flexWrap:"wrap", alignItems:"center"}}>
+                    <input value={mermaCant} inputMode="numeric" onChange={e=>setMermaCant(e.target.value.replace(/[^0-9]/g,""))} placeholder="Cant." style={{width:70, background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"8px 10px", fontSize:13, textAlign:"center"}}/>
+                    <input value={mermaMotivo} onChange={e=>setMermaMotivo(e.target.value)} placeholder="Motivo (opcional)" style={{flex:"1 1 160px", background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"8px 10px", fontSize:13}}/>
+                    <button onClick={addMerma} style={{border:"none", borderRadius:8, background:C.accent, color:"#1a1d27", padding:"8px 16px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Agregar merma</button>
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{fontSize:12,color:C.muted,marginTop:20,marginBottom:10,textTransform:"uppercase",letterSpacing:1}}>Fecha reprogramada (por atraso)</div>
             <input
               type="date"
@@ -3675,7 +3711,7 @@ const BONOS_DEF = {
         ev:v=> v>=98?{p:1,n:"Meta cumplida (≥98%)"}:v>=95?{p:0.7,n:"Parcial (95–97.9%)"}:{p:0,n:"No cumplido (<95%)"} },
       { id:"k2", label:"Cumplimiento de pedidos", peso:0.25, auto:true, autoKey:"cumplPedidos", cap:"% (pedidos completos a tiempo / total × 100)",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.7,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"k3", label:"Control de mermas", peso:0.20, cap:"% de mermas sobre inventario",
+      { id:"k3", label:"Control de mermas", peso:0.20, auto:true, autoKey:"mermas", cap:"% de mermas sobre piezas del mes (registradas en Retrabajo)",
         ev:v=> v<=0.5?{p:1,n:"Meta cumplida (≤0.5%)"}:v<1?{p:0.5,n:"Parcial (0.51–0.99%)"}:{p:0,n:"No cumplido (≥1%)"} },
       { id:"k4", label:"Orden y disciplina operativa", peso:0.10, cap:"semanas con checklist (0–4)",
         ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
@@ -3747,6 +3783,13 @@ function calcColaborador(def, capturas, bonoMax){
   return { filas, totalBono, esNA };
 }
 // Valores que la app puede pre-llenar automáticamente para un período "YYYY-MM"
+function piezasOrden(o){
+  const prendas = (o && o.prendas) || [];
+  return TALLA_GRUPOS.reduce((s,g) => s + prendas.reduce((ss,p) => ss + (parseInt(p.tallas && p.tallas[g.ropa])||0), 0), 0);
+}
+function mermasOrden(o){
+  return ((o && o.mermas) || []).reduce((s,m) => s + (parseInt(m.cantidad)||0), 0);
+}
 function autoValoresBonos(periodo, ordenes, rutas){
   const [Y, M] = periodo.split("-").map(Number);
   const desde = periodo + "-01";
@@ -3780,7 +3823,11 @@ function autoValoresBonos(periodo, ordenes, rutas){
     if (paradas.some(p => p.tipo === "B")) { obTot++; if (d.ordenes) obOk++; }
   });
   const docsPct = obTot ? Math.round(obOk/obTot*100) : "";
-  return { krisia:{ k2:cumplPedidos }, andres:{ a1:externosPct, a2:entregasEjec, a4:docsPct }, isidra:{} };
+  // Krisia k3 — mermas: piezas de merma del mes ÷ piezas producidas del mes × 100
+  let piezasMes = 0, mermasMes = 0;
+  ordensFiltradas.forEach(o => { piezasMes += piezasOrden(o); mermasMes += mermasOrden(o); });
+  const mermasPct = piezasMes ? Number(((mermasMes / piezasMes) * 100).toFixed(2)) : "";
+  return { krisia:{ k2:cumplPedidos, k3:mermasPct }, andres:{ a1:externosPct, a2:entregasEjec, a4:docsPct }, isidra:{} };
 }
 // Recibo imprimible (solo admin)
 function buildReciboBonoHtml(clave, capturas, sal, periodo){

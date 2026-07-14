@@ -3709,11 +3709,17 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 }
 
 
-function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
+function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables, miEmail }) {
   const [texto, setTexto] = useState("");
   const [para, setPara] = useState(asignables[0].email);
+  const [verDe, setVerDe] = useState("mios"); // "mios" | "todos" | email
   const [completando, setCompletando] = useState([]);
   const [confirm, setConfirm] = useState("");
+  const etiquetaDe = (email) => { const a = asignables.find(x => x.email === email); return a ? (a.label === "Yo" ? "Yo" : a.label.split(" · ")[0]) : (email||"").split("@")[0]; };
+  const visibles = !esAdmin ? tareas
+    : verDe === "mios" ? tareas.filter(t => t.para === miEmail)
+    : verDe === "todos" ? tareas
+    : tareas.filter(t => t.para === verDe);
   const agregar = async () => {
     const t = texto.trim(); if (!t) return;
     await onAgregar(t, esAdmin ? para : null);
@@ -3727,7 +3733,16 @@ function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
   const marcar = (id) => { setCompletando(c => [...c, id]); setTimeout(() => onCompletar(id), 650); };
   return (
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"20px 18px",marginTop:24}}>
-      <div style={{fontSize:17,fontWeight:800,color:C.text,marginBottom:14}}>📋 Pendientes</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+        <div style={{fontSize:17,fontWeight:800,color:C.text}}>📋 Pendientes</div>
+        {esAdmin && (
+          <select value={verDe} onChange={e=>setVerDe(e.target.value)} title="Ver pendientes de" style={{background:C.bg,border:"1px solid "+(verDe==="mios"?C.border:C.accent),borderRadius:9,color:verDe==="mios"?C.text:C.accent,padding:"8px 10px",fontSize:12.5,fontWeight:700,outline:"none"}}>
+            <option value="mios">👤 Mis pendientes</option>
+            {asignables.filter(a => a.email !== miEmail).map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
+            <option value="todos">👥 Todos</option>
+          </select>
+        )}
+      </div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
         <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") agregar(); }} placeholder="Escribe una tarea..." style={{flex:"1 1 180px",minWidth:0,background:C.bg,border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"11px 14px",fontSize:14,outline:"none"}}/>
         {esAdmin && (
@@ -3738,13 +3753,15 @@ function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables }) {
         <button onClick={agregar} style={{border:"none",borderRadius:9,cursor:"pointer",background:C.accent,color:"#1a1d27",padding:"11px 18px",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>Agregar</button>
       </div>
       {confirm && <div style={{color:"#4caf7d",fontSize:13,fontWeight:700,marginBottom:10}}>{confirm}</div>}
-      {tareas.length === 0 && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>No tienes pendientes 🎉</div>}
-      {tareas.map(t => {
+      {visibles.length === 0 && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>{(!esAdmin || verDe==="mios") ? "No tienes pendientes 🎉" : "Sin pendientes aquí 🎉"}</div>}
+      {visibles.map(t => {
         const done = completando.includes(t.id);
+        const ajena = esAdmin && verDe !== "mios" && t.para !== miEmail;
         return (
           <div key={t.id} onClick={()=>!done && marcar(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 4px",borderBottom:"1px solid "+C.border,cursor:"pointer",opacity:done?0.4:1,transition:"opacity 0.35s"}}>
             <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
             <div style={{flex:1,color:C.text,fontSize:14,textDecoration:done?"line-through":"none"}}>{t.texto}</div>
+            {ajena && <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{etiquetaDe(t.para)}</span>}
           </div>
         );
       })}
@@ -4678,14 +4695,17 @@ if (usuario) {
   // ── Tareas pendientes (personales) ────────────────────────────────────────
   useEffect(() => {
     if (!usuario?.email) return;
-    const q = query(collection(db, "tareas"), where("para", "==", usuario.email));
+    // Admin recibe TODAS las tareas (para poder revisar pendientes del equipo); los demás solo las suyas.
+    const q = rol === "admin"
+      ? collection(db, "tareas")
+      : query(collection(db, "tareas"), where("para", "==", usuario.email));
     const unsub = onSnapshot(q, snap => {
       const arr = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       arr.sort((a, b) => (a.fecha?.seconds || 0) - (b.fecha?.seconds || 0));
       setTareas(arr);
     });
     return unsub;
-  }, [usuario]);
+  }, [usuario, rol]);
   const agregarTarea = async (texto, paraEmail) => {
     const target = (rol === "admin" && paraEmail) ? paraEmail : usuario.email;
     await addDoc(collection(db, "tareas"), {
@@ -5503,6 +5523,7 @@ const cancelar = async (id) => {
             onAgregar={agregarTarea}
             onCompletar={completarTarea}
             esAdmin={rol === "admin"}
+            miEmail={usuario.email}
             asignables={(() => {
               const listaU = (usuariosDoc && usuariosDoc.lista && usuariosDoc.lista.length) ? usuariosDoc.lista : USUARIOS_SEED;
               return [{ email: usuario.email, label: "Yo" }, ...listaU.filter(u => u.email && u.email !== usuario.email).map(u => ({ email: u.email, label: (u.nombre || u.email.split("@")[0]) + " · " + (ROL_LABEL[u.rol] || u.rol) }))];

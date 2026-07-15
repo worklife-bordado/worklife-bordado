@@ -2928,7 +2928,11 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
       <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18, flexWrap:"wrap", gap:10}}>
           <div style={{fontSize:22, fontWeight:800, color:C.text}}>🚚 Rutas</div>
-          <button onClick={nueva} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>+ Nueva ruta del día</button>
+          <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+            <button onClick={()=>{ const u = window.location.origin + "/?rutamovil=1"; try{ navigator.clipboard.writeText(u); alert("Enlace copiado. Pégalo en el celular del chofer (o guárdalo en su pantalla de inicio):\n\n" + u); }catch(e){ alert("Enlace para el chofer:\n\n" + u); } }}
+              style={{border:"1px solid "+C.border, borderRadius:10, cursor:"pointer", background:C.surface, color:C.text, padding:"11px 14px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>📱 Enlace chofer</button>
+            <button onClick={nueva} style={{border:"none", borderRadius:10, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"11px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit"}}>+ Nueva ruta del día</button>
+          </div>
         </div>
         {ordenadas.length === 0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay rutas. Crea la primera con "Nueva ruta del día".</div>}
         {ordenadas.map(ruta => {
@@ -4272,6 +4276,7 @@ function ChecadorPublico(){
           <button key={e.id} onClick={()=>setSel(e)} style={{border:"1px solid "+C2.border, borderRadius:14, background:C2.card, color:C2.text, padding:"18px 12px", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{e.nombre}</button>
         ))}
       </div>
+      <div onClick={()=>{ try{ localStorage.removeItem("wl_modo"); }catch(e){} window.location.href = "/"; }} style={{textAlign:"center", color:C2.muted, fontSize:11, marginTop:26, cursor:"pointer", textDecoration:"underline", opacity:.7}}>Salir del modo checador</div>
     </div></div>
   );
 
@@ -4502,13 +4507,172 @@ function GestionUsuarios({ usuariosDoc, onGuardar, miEmail }){
     </div>
   );
 }
+// ── Hoja de ruta móvil del chofer (enlace público + PIN, escribe vía /api/ruta-movil) ──
+function RutaMovil(){
+  const [pin, setPin] = useState("");
+  const [pinOk, setPinOk] = useState(false);
+  const [cargando, setCargando] = useState(false);
+  const [ruta, setRuta] = useState(undefined); // undefined = sin cargar, null = no hay ruta hoy
+  const [hoy, setHoy] = useState("");
+  const [err, setErr] = useState("");
+  const C2 = C;
+  const llamar = async (accion, extra) => {
+    const resp = await fetch("/api/ruta-movil", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin, accion, ...(extra || {}) }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || ("Error " + resp.status));
+    return data;
+  };
+  const cargarHoy = async (pinIntento) => {
+    setCargando(true); setErr("");
+    try {
+      const resp = await fetch("/api/ruta-movil", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pinIntento, accion: "hoy" }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.status === 401) { alert("PIN incorrecto"); setPin(""); setCargando(false); return; }
+      if (!resp.ok) throw new Error(data.error || ("Error " + resp.status));
+      setPinOk(true); setRuta(data.ruta); setHoy(data.hoy || "");
+    } catch (e) { setErr("No se pudo cargar la ruta: " + e.message); }
+    setCargando(false);
+  };
+  const marcar = async (idx, estatus) => {
+    let obs;
+    if (estatus === "inc") { obs = window.prompt("Describe brevemente la incidencia:", ""); if (obs === null) return; }
+    if (estatus === "x")   { obs = window.prompt("¿Por qué no se pudo? (opcional)", ""); if (obs === null) return; }
+    try {
+      const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus, obs });
+      setRuta(p => ({ ...p, paradas: p.paradas.map((x, i) => i === idx ? { ...x, ...r.parada } : x) }));
+    } catch (e) { alert(e.message); }
+  };
+  const toggleDoc = async (campo) => {
+    const valor = !(ruta.docsEntregados || {})[campo];
+    try {
+      await llamar("doc", { rutaId: ruta.id, campo, valor });
+      setRuta(p => ({ ...p, docsEntregados: { ...(p.docsEntregados || {}), [campo]: valor } }));
+    } catch (e) { alert(e.message); }
+  };
+  const wrap = { minHeight:"100vh", background:C2.bg, color:C2.text, fontFamily:"'Barlow','Segoe UI',sans-serif", padding:"24px 14px", boxSizing:"border-box" };
+  const card = { maxWidth:520, width:"100%", margin:"0 auto" };
+
+  // 1) PIN
+  if (!pinOk) {
+    const teclear = (n) => { if (cargando) return; if (pin.length < 4){ const np = pin + n; setPin(np); if (np.length === 4) cargarHoy(np); } };
+    return (
+      <div style={wrap}><div style={card}>
+        <div style={{textAlign:"center", marginBottom:20}}>
+          <img src={LOGO_WL} alt="WORK-LIFE" style={{height:70, objectFit:"contain"}}/>
+          <div style={{fontSize:20, fontWeight:800, marginTop:10}}>🚚 Hoja de ruta</div>
+          <div style={{color:C2.muted, fontSize:13}}>Teclea tu PIN para ver la ruta de hoy</div>
+        </div>
+        {err && <div style={{color:"#ff8a8a", fontSize:13, textAlign:"center", marginBottom:12}}>{err}</div>}
+        <div style={{display:"flex", justifyContent:"center", gap:12, marginBottom:20}}>
+          {[0,1,2,3].map(i => <div key={i} style={{width:15, height:15, borderRadius:"50%", background: i<pin.length?C2.accent:C2.border}}/>)}
+        </div>
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, maxWidth:280, margin:"0 auto", opacity:cargando?0.5:1}}>
+          {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={()=>teclear(String(n))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"17px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{n}</button>)}
+          <div/>
+          <button onClick={()=>teclear("0")} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"17px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>0</button>
+          <button onClick={()=>setPin(pin.slice(0,-1))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"17px", fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>⌫</button>
+        </div>
+        {cargando && <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginTop:16}}>Cargando ruta…</div>}
+        <div onClick={()=>{ try{ localStorage.removeItem("wl_modo"); }catch(e){} window.location.href = "/"; }} style={{textAlign:"center", color:C2.muted, fontSize:11, marginTop:26, cursor:"pointer", textDecoration:"underline", opacity:.7}}>Salir del modo chofer</div>
+      </div></div>
+    );
+  }
+
+  // 2) Sin ruta hoy
+  if (ruta === null) return (
+    <div style={{...wrap, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center"}}>
+      <div style={card}>
+        <div style={{fontSize:46, marginBottom:10}}>🗓️</div>
+        <div style={{fontSize:18, fontWeight:800}}>No hay ruta programada para hoy</div>
+        <div style={{color:C2.muted, fontSize:13, marginTop:8}}>{hoy ? fmtDate(hoy) : ""} · Si crees que debería haber una, avísale a Krisia.</div>
+        <button onClick={()=>cargarHoy(pin)} style={{marginTop:18, border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"11px 20px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>🔄 Volver a revisar</button>
+      </div>
+    </div>
+  );
+
+  // 3) Ruta del día
+  const cerrada = ruta.estado === "cerrada";
+  const total = (ruta.paradas||[]).length;
+  const hechas = (ruta.paradas||[]).filter(p => p.estatus).length;
+  const DOC_LBL = { facturas:"Facturas firmadas", albaranes:"Albaranes firmados", ordenes:"Órdenes de externos", listas:"Listas firmadas", hoja:"Hoja de ruta" };
+  return (
+    <div style={wrap}><div style={card}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, gap:10}}>
+        <div style={{fontSize:19, fontWeight:800}}>🚚 Ruta de hoy</div>
+        <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{border:"1px solid "+C2.border, borderRadius:9, background:C2.surface, color:C2.muted, padding:"8px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando?"…":"🔄 Actualizar"}</button>
+      </div>
+      <div style={{color:C2.muted, fontSize:13, marginBottom:14}}>{fmtDate(ruta.fecha)} · {hechas}/{total} paradas registradas</div>
+      {cerrada && (
+        <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>🔒 Esta ruta ya fue cerrada por Krisia — solo lectura.</div>
+      )}
+
+      {(ruta.paradas||[]).map((p, i) => {
+        const t = tipoInfo(p.tipo);
+        const est = p.estatus;
+        const btn = (id, lbl2, col) => (
+          <button key={id} disabled={cerrada} onClick={()=>marcar(i, id)}
+            style={{flex:1, border: est===id ? "none" : "1px solid "+C2.border, borderRadius:10, background: est===id ? col : C2.surface, color: est===id ? "#fff" : C2.muted, padding:"12px 6px", fontSize:12.5, fontWeight:800, cursor:cerrada?"default":"pointer", fontFamily:"inherit", opacity: cerrada?0.6:1}}>{lbl2}</button>
+        );
+        return (
+          <div key={i} style={{background:C2.card, border:"1px solid "+(est==="ok"?"#4caf7d66":est?"#f5a62366":C2.border), borderRadius:14, padding:"13px 14px", marginBottom:12}}>
+            <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+              <span style={{fontSize:11, fontWeight:800, color:"#fff", background:t.col, padding:"3px 10px", borderRadius:12}}>{t.lbl}</span>
+              {p.horario && <span style={{fontSize:12, color:C2.muted}}>🕐 {p.horario}</span>}
+              {p.horaReal && <span style={{fontSize:12, color:C2.success, fontWeight:700}}>✓ {p.horaReal}</span>}
+            </div>
+            <div style={{fontSize:15.5, fontWeight:800, marginTop:8}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
+            {p.contacto && <div style={{fontSize:12.5, color:C2.muted, marginTop:2}}>👤 {p.contacto}</div>}
+            {p.direccion && (
+              <div style={{display:"flex", alignItems:"center", gap:8, marginTop:6}}>
+                <div style={{flex:1, fontSize:12.5, color:C2.muted}}>📍 {p.direccion}</div>
+                <button onClick={()=>window.open("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion), "_blank")}
+                  style={{border:"none", borderRadius:8, background:"#5c8fe0", color:"#fff", padding:"8px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>🗺️ Navegar</button>
+              </div>
+            )}
+            {p.obs && <div style={{fontSize:12, color:C2.accent, marginTop:6}}>📝 {p.obs}</div>}
+            <div style={{display:"flex", gap:8, marginTop:10}}>
+              {btn("ok", "✓ Listo", "#4caf7d")}
+              {btn("inc", "⚠️ Incidencia", "#f5a623")}
+              {btn("x", "✗ No se pudo", "#c0392b")}
+            </div>
+          </div>
+        );
+      })}
+
+      <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginTop:6, marginBottom:30}}>
+        <div style={{fontSize:13.5, fontWeight:800, marginBottom:4}}>📄 Documentos para Krisia</div>
+        <div style={{fontSize:11.5, color:C2.muted, marginBottom:8}}>Palomea lo que llevas al regresar.</div>
+        {Object.keys(DOC_LBL).map(k => (
+          <label key={k} style={{display:"flex", alignItems:"center", gap:10, padding:"9px 0", borderTop:"1px solid "+C2.border, fontSize:14, color:(ruta.docsEntregados||{})[k]?C2.success:C2.text, fontWeight:(ruta.docsEntregados||{})[k]?800:400, cursor:cerrada?"default":"pointer"}}>
+            <input type="checkbox" disabled={cerrada} checked={!!(ruta.docsEntregados||{})[k]} onChange={()=>toggleDoc(k)} style={{width:20, height:20, accentColor:"#4caf7d"}}/>
+            {DOC_LBL[k]}
+          </label>
+        ))}
+      </div>
+    </div></div>
+  );
+}
+
 export default function App(){ return (<ErrorBoundary><AppInner /></ErrorBoundary>); }
 function AppInner() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
   if (_seg) return <SeguimientoPublico token={_seg} />;
   const _chk = new URLSearchParams(window.location.search).get("checador");
-  if (_chk) return <ChecadorPublico />;
+  if (_chk) { try { localStorage.setItem("wl_modo", "checador"); } catch(e){} return <ChecadorPublico />; }
+  const _rm = new URLSearchParams(window.location.search).get("rutamovil");
+  if (_rm) { try { localStorage.setItem("wl_modo", "rutamovil"); } catch(e){} return <RutaMovil />; }
+  // Modo dedicado recordado: la PWA instalada abre en "/" e ignora el ?parametro,
+  // así que si este dispositivo ya se usó como checador o hoja de ruta, abre directo ahí.
+  let _modo = null; try { _modo = localStorage.getItem("wl_modo"); } catch(e){}
+  if (_modo === "checador") return <ChecadorPublico />;
+  if (_modo === "rutamovil") return <RutaMovil />;
 
   const [usuario,  setUsuario]  = useState(null);   // Firebase user object
   const [rol,      setRol]      = useState(null);   // "admin" | "ventas" | "seguimiento"

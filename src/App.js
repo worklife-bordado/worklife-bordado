@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Component } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction } from "firebase/firestore";
+import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
@@ -4270,87 +4270,96 @@ function chkResumenDia(regs){
 
 // ── Página pública de checado (sin login, protegida por PIN) ──
 function ChecadorPublico(){
-  const [roster, setRoster] = useState(undefined); // undefined=cargando
-  const [sel, setSel] = useState(null);
-  const [acepto, setAcepto] = useState(undefined); // undefined=desconocido, true/false
+  // Solo PIN: el kiosco YA NO lee el roster. Ese documento tiene los PINs de todos
+  // y esta pantalla es pública. El servidor identifica al empleado y devuelve su nombre.
   const [pin, setPin] = useState("");
-  const [pinOk, setPinOk] = useState(false);
-  const [msg, setMsg] = useState(null); // {texto, color}
+  const [estado, setEstado] = useState(null);   // respuesta del servidor: emp, acepto, registros, permitidos
+  const [cargando, setCargando] = useState(false);
+  const [msg, setMsg] = useState(null);         // {texto, color, nombre}
   const [enviando, setEnviando] = useState(false);
-
-  useEffect(() => {
-    const unsub = onSnapshot(doc(db, "checadorConfig", "roster"),
-      snap => setRoster(snap.exists() ? (snap.data().empleados || []) : []),
-      () => setRoster([]));
-    return () => unsub();
-  }, []);
-
-  // Al elegir empleado: revisa si ya aceptó (una sola vez)
-  useEffect(() => {
-    if (!sel) { setAcepto(undefined); setPin(""); setPinOk(false); return; }
-    const u1 = onSnapshot(doc(db, "checadorAcept", sel.id),
-      snap => setAcepto(snap.exists()), () => setAcepto(false));
-    return () => u1();
-  }, [sel]);
 
   const C2 = C;
   const wrap = { minHeight:"100vh", background:C2.bg, color:C2.text, fontFamily:"'Barlow','Segoe UI',sans-serif", padding:"28px 16px", boxSizing:"border-box" };
   const card = { maxWidth:460, width:"100%", margin:"0 auto" };
 
-  if (roster === undefined) return <div style={{...wrap, textAlign:"center"}}>Cargando…</div>;
+  // El kiosco es un equipo compartido: al terminar se borra el PIN y se vuelve al inicio.
+  const salir = () => { setPin(""); setEstado(null); setMsg(null); };
 
-  const activos = (roster || []).filter(e => e.activo !== false);
-
-  const aceptar = async () => {
-    try {
-      await setDoc(doc(db, "checadorAcept", sel.id), { empleadoId: sel.id, nombre: sel.nombre, texto: CHK_ACEPTA_TEXTO, ts: serverTimestamp() });
-    } catch(e){ alert("No se pudo registrar la aceptación: " + e.message); }
+  const api = async (cuerpo) => {
+    const r = await fetch("/api/checada", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ pin, ...cuerpo }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error || ("Error " + r.status));
+    return d;
   };
+  const consultar = async (np) => {
+    setCargando(true);
+    try { setEstado(await api({ pin: np, accion: "estado" })); }
+    catch(e){ alert(e.message); setPin(""); }
+    setCargando(false);
+  };
+  const aceptar = async () => {
+    try { const d = await api({ accion: "aceptar", texto: CHK_ACEPTA_TEXTO }); setEstado(d.estado); }
+    catch(e){ alert("No se pudo registrar la aceptación: " + e.message); }
+  };
+  // Mismo endpoint que el celular: la secuencia del día se valida en el servidor,
+  // en un solo lugar, y ahí se sella la hora y el origen.
   const checar = async (tipo) => {
     setEnviando(true);
+    const nombre = ((estado && estado.emp && estado.emp.nombre) || "").split(" ")[0];
     try {
-      await addDoc(collection(db, "checadas"), { empleadoId: sel.id, nombre: sel.nombre, tipo, ts: serverTimestamp() });
+      const d = await api({ accion: "checar", tipo, origen: "kiosco" });
       const t = CHK_TIPOS.find(x=>x.id===tipo);
-      setMsg({ texto: (t?t.lbl:tipo) + " registrada a las " + chkHora(new Date()), color: t?t.color:C2.success });
-      setTimeout(() => { setMsg(null); setSel(null); }, 2200);
-    } catch(e){ setMsg({ texto: "Error: " + e.message, color:"#c0392b" }); }
+      setMsg({ texto: d.mensaje || ((t?t.lbl:tipo) + " registrada"), color: t?t.color:C2.success, nombre });
+      setTimeout(salir, 2200);
+    } catch(e){
+      setMsg({ texto: e.message === "Failed to fetch" ? "Sin conexión: la checada NO se registró" : e.message, color:"#c0392b", nombre, error:true });
+      setTimeout(()=>setMsg(null), 3000); // el error no cierra la sesión: puede reintentar
+    }
     setEnviando(false);
   };
 
-  // Pantalla de confirmación
+  // Confirmación (o error)
   if (msg) return (
     <div style={{...wrap, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center"}}>
       <div style={card}>
-        <div style={{fontSize:52, marginBottom:12}}>✓</div>
+        <div style={{fontSize:52, marginBottom:12}}>{msg.error ? "⚠️" : "✓"}</div>
         <div style={{fontSize:20, fontWeight:800, color:msg.color}}>{msg.texto}</div>
-        <div style={{color:C2.muted, marginTop:10, fontSize:14}}>Gracias, {sel && sel.nombre.split(" ")[0]}.</div>
+        {!msg.error && <div style={{color:C2.muted, marginTop:10, fontSize:14}}>Gracias, {msg.nombre}.</div>}
       </div>
     </div>
   );
 
-  // 1) Selección de empleado
-  if (!sel) return (
-    <div style={wrap}><div style={card}>
-      <div style={{textAlign:"center", marginBottom:24}}>
-        <img src={LOGO_WL} alt="WORK-LIFE" style={{height:76, objectFit:"contain"}}/>
-        <div style={{fontSize:22, fontWeight:800, marginTop:12}}>Checador</div>
-        <div style={{color:C2.muted, fontSize:13}}>Selecciona tu nombre para registrar tu jornada</div>
-      </div>
-      {activos.length === 0 && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Aún no hay empleados dados de alta. Pídele a administración que los configure.</div>}
-      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
-        {activos.map(e => (
-          <button key={e.id} onClick={()=>setSel(e)} style={{border:"1px solid "+C2.border, borderRadius:14, background:C2.card, color:C2.text, padding:"18px 12px", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{e.nombre}</button>
-        ))}
-      </div>
-      <div onClick={()=>{ try{ localStorage.removeItem("wl_modo"); }catch(e){} window.location.href = "/"; }} style={{textAlign:"center", color:C2.muted, fontSize:11, marginTop:26, cursor:"pointer", textDecoration:"underline", opacity:.7}}>Salir del modo checador</div>
-    </div></div>
-  );
+  // 1) PIN — identifica a la persona contra el servidor
+  if (!estado) {
+    const teclear = (n) => { if (cargando) return; if (pin.length < 4){ const np = pin + n; setPin(np); if (np.length === 4) consultar(np); } };
+    return (
+      <div style={wrap}><div style={card}>
+        <div style={{textAlign:"center", marginBottom:24}}>
+          <img src={LOGO_WL} alt="WORK-LIFE" style={{height:76, objectFit:"contain"}}/>
+          <div style={{fontSize:22, fontWeight:800, marginTop:12}}>Checador</div>
+          <div style={{color:C2.muted, fontSize:13}}>Teclea tu PIN para registrar tu jornada</div>
+        </div>
+        <div style={{display:"flex", justifyContent:"center", gap:12, marginBottom:22}}>
+          {[0,1,2,3].map(i => <div key={i} style={{width:16, height:16, borderRadius:"50%", background: i<pin.length?C2.accent:C2.border}}/>)}
+        </div>
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, maxWidth:280, margin:"0 auto", opacity:cargando?0.5:1}}>
+          {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={()=>teclear(String(n))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"18px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{n}</button>)}
+          <div/>
+          <button onClick={()=>teclear("0")} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"18px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>0</button>
+          <button onClick={()=>setPin(pin.slice(0,-1))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"18px", fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>⌫</button>
+        </div>
+        {cargando && <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginTop:16}}>Un momento…</div>}
+        <div onClick={()=>{ try{ localStorage.removeItem("wl_modo"); }catch(e){} window.location.href = "/"; }} style={{textAlign:"center", color:C2.muted, fontSize:11, marginTop:26, cursor:"pointer", textDecoration:"underline", opacity:.7}}>Salir del modo checador</div>
+      </div></div>
+    );
+  }
 
-  // 2) Aceptación (una sola vez)
-  if (acepto === false) return (
+  // 2) Aceptación (una sola vez, antes de la primera checada)
+  if (!estado.acepto) return (
     <div style={wrap}><div style={card}>
-      <button onClick={()=>setSel(null)} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Volver</button>
-      <div style={{fontSize:18, fontWeight:800, marginBottom:6}}>Hola, {sel.nombre}</div>
+      <button onClick={salir} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Volver</button>
+      <div style={{fontSize:18, fontWeight:800, marginBottom:6}}>Hola, {estado.emp.nombre}</div>
       <div style={{fontSize:13, color:C2.muted, marginBottom:12}}>Antes de checar por primera vez, lee y acepta:</div>
       <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"16px", fontSize:13.5, lineHeight:1.6, color:C2.text}}>
         <div style={{fontWeight:800, marginBottom:8}}>Aceptación de registro de jornada laboral</div>
@@ -4359,48 +4368,43 @@ function ChecadorPublico(){
       <button onClick={aceptar} style={{marginTop:16, width:"100%", border:"none", borderRadius:12, background:C2.success, color:"#fff", padding:"14px", fontSize:15, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Acepto</button>
     </div></div>
   );
-  if (acepto === undefined) return <div style={{...wrap, textAlign:"center"}}>Cargando…</div>;
 
-  // 3) PIN
-  if (!pinOk) {
-    const teclear = (n) => { if (pin.length < 4){ const np = pin + n; setPin(np); if (np.length === 4){ if (np === String(sel.pin)) { setPinOk(true); } else { setTimeout(()=>{ alert("PIN incorrecto"); setPin(""); }, 100); } } } };
-    return (
-      <div style={wrap}><div style={card}>
-        <button onClick={()=>setSel(null)} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Volver</button>
-        <div style={{textAlign:"center", fontSize:18, fontWeight:800}}>{sel.nombre}</div>
-        <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginBottom:18}}>Teclea tu PIN de 4 dígitos</div>
-        <div style={{display:"flex", justifyContent:"center", gap:12, marginBottom:22}}>
-          {[0,1,2,3].map(i => <div key={i} style={{width:16, height:16, borderRadius:"50%", background: i<pin.length?C2.accent:C2.border}}/>)}
-        </div>
-        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, maxWidth:280, margin:"0 auto"}}>
-          {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={()=>teclear(String(n))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"18px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{n}</button>)}
-          <div/>
-          <button onClick={()=>teclear("0")} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.card, color:C2.text, padding:"18px", fontSize:20, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>0</button>
-          <button onClick={()=>setPin(pin.slice(0,-1))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"18px", fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>⌫</button>
-        </div>
-      </div></div>
-    );
-  }
-
-  // 4) Registrar checada
+  // 3) Registrar checada
   return (
     <div style={wrap}><div style={card}>
-      <button onClick={()=>setSel(null)} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Salir</button>
-      <div style={{textAlign:"center", fontSize:20, fontWeight:800}}>Hola, {sel.nombre.split(" ")[0]}</div>
+      <button onClick={salir} style={{border:"none", background:"none", color:C2.muted, cursor:"pointer", fontSize:14, marginBottom:10}}>← Salir</button>
+      <div style={{textAlign:"center", fontSize:20, fontWeight:800}}>Hola, {estado.emp.nombre.split(" ")[0]}</div>
       <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginBottom:18}}>{chkHora(new Date())} · {new Date().toLocaleDateString("es-MX",{weekday:"long", day:"numeric", month:"long"})}</div>
-      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12}}>
-        {CHK_TIPOS.map(t => (
-          <button key={t.id} disabled={enviando} onClick={()=>checar(t.id)} style={{border:"none", borderRadius:14, background:t.color, color:"#fff", padding:"22px 12px", fontSize:15, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:enviando?0.6:1}}>
-            <div style={{fontSize:24, marginBottom:4}}>{t.emoji}</div>{t.lbl}
-          </button>
-        ))}
-      </div>
+      {(estado.registros||[]).length > 0 && (
+        <div style={{display:"flex", flexWrap:"wrap", gap:7, justifyContent:"center", marginBottom:14}}>
+          {estado.registros.map((r,i) => (
+            <span key={i} style={{fontSize:12, fontWeight:700, color:C2.text, background:C2.surface, border:"1px solid "+C2.border, borderRadius:20, padding:"6px 11px"}}>
+              {(CHK_TIPOS.find(x=>x.id===r.tipo)||{}).emoji} {r.lbl} {r.hora}{r.origen === "movil" ? " · celular" : ""}
+            </span>
+          ))}
+        </div>
+      )}
+      {estado.cerrada && (
+        <div style={{textAlign:"center", background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"18px", fontSize:14, color:C2.muted}}>Tu jornada de hoy ya está cerrada.</div>
+      )}
+      {!estado.cerrada && (
+        <div style={{display:"grid", gridTemplateColumns: (estado.permitidos||[]).length > 1 ? "1fr 1fr" : "1fr", gap:12}}>
+          {(estado.permitidos||[]).map(id => {
+            const t = CHK_TIPOS.find(x=>x.id===id) || {id, lbl:id, color:C2.accent, emoji:"🕐"};
+            return (
+              <button key={t.id} disabled={enviando} onClick={()=>checar(t.id)} style={{border:"none", borderRadius:14, background:t.color, color:"#fff", padding:"22px 12px", fontSize:15, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:enviando?0.6:1}}>
+                <div style={{fontSize:24, marginBottom:4}}>{t.emoji}</div>{t.lbl}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div></div>
   );
 }
 
 // ── Módulo de administración del checador (dentro de la app, solo gerencia) ──
-function ChecadorAdmin({ roster, onGuardarRoster, publicUrl }){
+function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
   const [tab, setTab] = useState("reporte");
   const [empleados, setEmpleados] = useState(roster || []);
   useEffect(()=>{ setEmpleados(roster || []); }, [roster]);
@@ -4411,6 +4415,10 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl }){
   const [hasta, setHasta] = useState(chkFechaISO(hoy));
   const [checadas, setChecadas] = useState([]);
   const [cargando, setCargando] = useState(false);
+  const [editKey, setEditKey] = useState(null);   // fila (empleado|día) abierta para corregir
+  const [ver, setVer] = useState(0);              // fuerza recarga tras una corrección
+  const [nuevoTipo, setNuevoTipo] = useState("entrada");
+  const [nuevaHora, setNuevaHora] = useState("");
 
   // Carga SOLO las checadas del rango elegido (bajo demanda), en lugar de escuchar toda la colección.
   useEffect(() => {
@@ -4428,7 +4436,7 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl }){
       if (!cancelado) setCargando(false);
     })();
     return () => { cancelado = true; };
-  }, [desde, hasta, tab]);
+  }, [desde, hasta, tab, ver]);
 
   const nuevoId = () => "e" + Date.now().toString(36);
   const addEmp = () => setEmpleados(p => [...p, { id:nuevoId(), nombre:"", pin:"", activo:true }]);
@@ -4439,10 +4447,54 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl }){
     try { await onGuardarRoster(limpio); alert("Empleados guardados."); } catch(e){ alert("Error: "+e.message); }
   };
 
+  // ── Corrección manual de checadas (nómina): todo queda firmado y con rastro ──
+  const quienCorrige = () => (usuario && usuario.email) || "desconocido";
+  const fechaConHora = (diaISO, hhmm) => {
+    const [h, m] = String(hhmm||"").split(":");
+    const d = new Date(diaISO + "T00:00:00");
+    d.setHours(Number(h)||0, Number(m)||0, 0, 0);
+    return d;
+  };
+  const corregirHora = async (reg, diaISO, hhmm) => {
+    if (!/^\d{2}:\d{2}$/.test(hhmm||"")) { alert("Hora inválida."); return; }
+    const nueva = fechaConHora(diaISO, hhmm);
+    if (!window.confirm("¿Cambiar "+CHK_TIPO_LBL(reg.tipo)+" de "+chkHora(reg.ts)+" a "+hhmm+"?\n\nQuedará registrado que lo corrigió "+quienCorrige()+".")) return;
+    try {
+      await updateDoc(doc(db, "checadas", reg.id), {
+        ts: Timestamp.fromDate(nueva),
+        corregido: true,
+        tsOriginal: reg.corregido ? undefined : Timestamp.fromDate(reg.ts), // conserva el original la 1a vez
+        corregidoPor: quienCorrige(),
+        corregidoEl: serverTimestamp(),
+      });
+      setVer(v=>v+1);
+    } catch(e){ alert("No se pudo corregir: "+e.message); }
+  };
+  const borrarChecada = async (reg) => {
+    if (!window.confirm("⚠️ ¿Borrar el registro de "+CHK_TIPO_LBL(reg.tipo)+" de las "+chkHora(reg.ts)+"?\n\nEsto afecta las horas trabajadas del día. No se puede deshacer.")) return;
+    try { await deleteDoc(doc(db, "checadas", reg.id)); setVer(v=>v+1); }
+    catch(e){ alert("No se pudo borrar: "+e.message); }
+  };
+  const agregarChecada = async (fila) => {
+    if (!/^\d{2}:\d{2}$/.test(nuevaHora||"")) { alert("Captura la hora (HH:MM)."); return; }
+    if (fila.regs.some(r => r.tipo === nuevoTipo)) { alert("Ese día ya tiene un registro de "+CHK_TIPO_LBL(nuevoTipo)+". Corrige el que existe."); return; }
+    const cuando = fechaConHora(fila.dia, nuevaHora);
+    if (!window.confirm("¿Agregar "+CHK_TIPO_LBL(nuevoTipo)+" a las "+nuevaHora+" para "+fila.nombre+"?\n\nQuedará marcado como registro manual de "+quienCorrige()+".")) return;
+    try {
+      await addDoc(collection(db, "checadas"), {
+        empleadoId: fila.empleadoId, nombre: fila.nombre, tipo: nuevoTipo,
+        ts: Timestamp.fromDate(cuando),
+        origen: "manual", corregido: true,
+        corregidoPor: quienCorrige(), corregidoEl: serverTimestamp(),
+      });
+      setNuevaHora(""); setVer(v=>v+1);
+    } catch(e){ alert("No se pudo agregar: "+e.message); }
+  };
+
   // Reporte: registros del rango, agrupados por empleado + día
   const registros = (checadas || [])
     .filter(c => c.ts && c.ts.toDate)
-    .map(c => ({ empleadoId:c.empleadoId, nombre:c.nombre, tipo:c.tipo, ts:c.ts.toDate() }));
+    .map(c => ({ id:c.id, empleadoId:c.empleadoId, nombre:c.nombre, tipo:c.tipo, ts:c.ts.toDate(), origen:c.origen || "kiosco", corregido:!!c.corregido, anomalia:c.anomalia || null }));
   const porEmpDia = {};
   registros.forEach(r => {
     const dia = chkFechaISO(r.ts);
@@ -4484,7 +4536,40 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl }){
                   <span>Comida: <b style={{color:C2.text}}>{chkHora(r.ci)}–{chkHora(r.cf)}</b></span>
                   <span>Salida: <b style={{color:C2.text}}>{chkHora(r.salida)}</b></span>
                   <span>Trabajado: <b style={{color:C2.accent}}>{chkMsToHM(r.netoMs)}</b></span>
+                  <button onClick={()=>{ const k=f.empleadoId+"|"+f.dia; setEditKey(editKey===k?null:k); setNuevaHora(""); }}
+                    style={{marginLeft:"auto", border:"1px solid "+C2.border, borderRadius:7, background:C2.surface, color:C2.muted, padding:"4px 10px", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>
+                    {editKey===f.empleadoId+"|"+f.dia ? "Cerrar" : "✏️ Corregir"}
+                  </button>
                 </div>
+
+                {editKey === f.empleadoId+"|"+f.dia && (
+                  <div style={{marginTop:12, borderTop:"1px solid "+C2.border, paddingTop:12}}>
+                    <div style={{fontSize:11.5, color:C2.muted, marginBottom:10, lineHeight:1.5}}>
+                      Corrige solo lo que sea un error real. Cada cambio queda firmado con tu correo y la hora, y el registro original se conserva.
+                    </div>
+                    {f.regs.slice().sort((a,b)=>a.ts-b.ts).map(reg => (
+                      <div key={reg.id} style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", padding:"7px 0", borderTop:"1px solid "+C2.border}}>
+                        <span style={{fontSize:12.5, fontWeight:700, color:C2.text, minWidth:110}}>{CHK_TIPO_LBL(reg.tipo)}</span>
+                        <span style={{fontSize:10.5, color:C2.muted, background:C2.surface, border:"1px solid "+C2.border, borderRadius:10, padding:"2px 8px"}}>
+                          {reg.origen === "movil" ? "📱 celular" : reg.origen === "manual" ? "✍️ manual" : "🖥️ kiosco"}
+                        </span>
+                        {reg.corregido && <span style={{fontSize:10.5, color:"#f5a623"}}>corregido</span>}
+                        {reg.anomalia === "comida_sin_cierre" && <span style={{fontSize:10.5, color:"#f5a623"}}>⚠️ comida sin cierre</span>}
+                        <input type="time" defaultValue={chkHora(reg.ts)} onBlur={ev=>{ if(ev.target.value && ev.target.value!==chkHora(reg.ts)) corregirHora(reg, f.dia, ev.target.value); }}
+                          style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"5px 8px", fontSize:12.5, fontFamily:"inherit"}}/>
+                        <button onClick={()=>borrarChecada(reg)} style={{border:"none", background:"none", color:"#c0392b", cursor:"pointer", fontSize:14}}>✕</button>
+                      </div>
+                    ))}
+                    <div style={{display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginTop:12, paddingTop:10, borderTop:"1px dashed "+C2.border}}>
+                      <span style={{fontSize:12, color:C2.muted}}>Falta una:</span>
+                      <select value={nuevoTipo} onChange={ev=>setNuevoTipo(ev.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"6px 8px", fontSize:12.5, fontFamily:"inherit"}}>
+                        {CHK_TIPOS.map(t => <option key={t.id} value={t.id}>{t.lbl}</option>)}
+                      </select>
+                      <input type="time" value={nuevaHora} onChange={ev=>setNuevaHora(ev.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"5px 8px", fontSize:12.5, fontFamily:"inherit"}}/>
+                      <button onClick={()=>agregarChecada(f)} style={{border:"none", borderRadius:7, background:C2.accent, color:"#1a1d27", padding:"7px 13px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>+ Agregar</button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -4583,6 +4668,104 @@ function horaLocal(){
   const d = new Date();
   return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
 }
+// ── Banda de checada del celular (misma colección y mismas reglas que el kiosco) ──
+function BandaChecada({ pin }){
+  const C2 = C;
+  const [st, setSt] = useState(null);
+  const [envi, setEnvi] = useState(false);
+  const [msg, setMsg] = useState(null);   // { t, c }
+  const [verTexto, setVerTexto] = useState(false);
+
+  const pedir = async (cuerpo) => {
+    const r = await fetch("/api/checada", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ pin, ...cuerpo }) });
+    const d = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(d.error || ("Error " + r.status));
+    return d;
+  };
+  useEffect(() => {
+    let vivo = true;
+    (async () => { try { const d = await pedir({ accion:"estado" }); if (vivo) setSt(d); } catch(e){ /* la ruta sigue usable */ } })();
+    return () => { vivo = false; };
+  }, [pin]); // eslint-disable-line
+
+  const checar = async (tipo) => {
+    setEnvi(true); setMsg(null);
+    try {
+      const d = await pedir({ accion:"checar", tipo, origen:"movil" });
+      setSt(d.estado);
+      setMsg({ t: d.mensaje, c: C2.success });
+      setTimeout(()=>setMsg(null), 5000);
+    } catch(e) {
+      // Aquí son horas y es dinero: el error tiene que ser inequívoco.
+      setMsg({ t: e.message === "Failed to fetch" ? "Sin conexión: tu checada NO se registró" : e.message, c: "#c0392b" });
+    }
+    setEnvi(false);
+  };
+  const aceptar = async () => {
+    setEnvi(true);
+    try { const d = await pedir({ accion:"aceptar", texto: CHK_ACEPTA_TEXTO }); setSt(d.estado); setVerTexto(false); }
+    catch(e){ setMsg({ t: e.message, c:"#c0392b" }); }
+    setEnvi(false);
+  };
+
+  if (!st) return null;
+
+  const caja = { background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 13px", marginBottom:14 };
+
+  // Sin aceptación no se puede checar: es el mismo candado del kiosco, no una puerta trasera.
+  if (!st.acepto) return (
+    <div style={{...caja, border:"1px solid #f5a623"}}>
+      <div style={{fontSize:13.5, fontWeight:800, color:"#ffd899"}}>🕐 Registro de jornada</div>
+      <div style={{fontSize:12, color:C2.muted, marginTop:4, marginBottom:9}}>Antes de checar necesitas aceptar el registro de tu jornada.</div>
+      {verTexto
+        ? <div style={{fontSize:12.5, lineHeight:1.55, color:C2.text, background:C2.surface, border:"1px solid "+C2.border, borderRadius:10, padding:"11px", marginBottom:9}}>{CHK_ACEPTA_TEXTO}</div>
+        : <button onClick={()=>setVerTexto(true)} style={{border:"none", background:"none", color:C2.accent, fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:0, marginBottom:9, textDecoration:"underline"}}>Leer el texto completo</button>}
+      <button disabled={envi} onClick={aceptar} style={{width:"100%", border:"none", borderRadius:10, background:"#4caf7d", color:"#fff", padding:"12px", fontSize:13.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:envi?0.6:1}}>{envi?"Registrando…":"Acepto"}</button>
+      {msg && <div style={{fontSize:12.5, fontWeight:800, color:msg.c, marginTop:8}}>{msg.t}</div>}
+    </div>
+  );
+
+  const info = (t) => CHK_TIPOS.find(x => x.id === t) || { lbl:t, color:C2.accent, emoji:"🕐" };
+  const perm = st.permitidos || [];
+
+  return (
+    <div style={caja}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:8}}>
+        <div style={{fontSize:13.5, fontWeight:800}}>🕐 Mi jornada</div>
+        {st.cerrada && <div style={{fontSize:11.5, color:C2.success, fontWeight:800}}>Jornada cerrada</div>}
+      </div>
+
+      {st.registros.length > 0 && (
+        <div style={{display:"flex", flexWrap:"wrap", gap:7, marginTop:8}}>
+          {st.registros.map((r,i) => (
+            <span key={i} style={{fontSize:11.5, fontWeight:700, color:C2.text, background:C2.surface, border:"1px solid "+C2.border, borderRadius:20, padding:"5px 10px"}}>
+              {info(r.tipo).emoji} {r.lbl} {r.hora}{r.origen === "kiosco" ? " · kiosco" : ""}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {perm.length > 0 && (
+        <div style={{display:"flex", gap:8, marginTop:10}}>
+          {perm.map((t, i) => {
+            const d = info(t);
+            return (
+              <button key={t} disabled={envi} onClick={()=>checar(t)}
+                style={{flex: i===0 ? 2 : 1, border:"none", borderRadius:11, background: i===0 ? d.color : C2.surface, color: i===0 ? "#fff" : C2.muted,
+                        boxShadow:"none", padding:"14px 8px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:envi?0.6:1,
+                        outline: i===0 ? "none" : "1px solid "+C2.border}}>
+                {d.emoji} {d.lbl}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {perm.length === 0 && st.registros.length === 0 && <div style={{fontSize:12, color:C2.muted, marginTop:8}}>Hoy no puedes checar desde aquí.</div>}
+      {msg && <div style={{fontSize:12.5, fontWeight:800, color:msg.c, marginTop:9, lineHeight:1.4}}>{msg.t}</div>}
+    </div>
+  );
+}
+
 // ── Hoja de ruta móvil del chofer (enlace público + PIN, escribe vía /api/ruta-movil) ──
 function RutaMovil(){
   const [pin, setPin] = useState("");
@@ -4779,6 +4962,7 @@ function RutaMovil(){
   if (ruta === null || vencida) return (
     <div style={{...wrap, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center"}}>
       <div style={card}>
+        <BandaChecada pin={pin}/>
         <div style={{fontSize:52, marginBottom:12}}>⏳</div>
         <div style={{fontSize:22, fontWeight:900}}>En espera de ruta</div>
         <div style={{color:C2.muted, fontSize:13.5, marginTop:10, lineHeight:1.5}}>
@@ -4804,6 +4988,7 @@ function RutaMovil(){
     const listo = seq.length === paradas.length && /^\d{1,8}$/.test(String(kmIni).trim()) && Number(kmIni) > 0;
     return (
       <div style={wrap}><div style={card}>
+        <BandaChecada pin={pin}/>
         <div style={{background:"#4a2f0a", border:"2px solid #f5a623", borderRadius:16, padding:"20px 18px", textAlign:"center", marginBottom:18}}>
           <div style={{fontSize:44, lineHeight:1}}>🛑</div>
           <div style={{fontSize:22, fontWeight:900, marginTop:8, color:"#ffd899"}}>Antes de iniciar tu ruta</div>
@@ -4875,6 +5060,7 @@ function RutaMovil(){
     const plan = [...paradas].sort((a,b)=>(a.orden||0)-(b.orden||0));
     return (
       <div style={wrap}><div style={card}>
+        <BandaChecada pin={pin}/>
         <div style={{background:"#13351f", border:"2px solid "+C2.success, borderRadius:16, padding:"24px 18px", textAlign:"center", marginBottom:18}}>
           <div style={{fontSize:50, lineHeight:1}}>✅</div>
           <div style={{fontSize:23, fontWeight:900, marginTop:8, color:"#a9e9c4"}}>¡Ya puedes iniciar la ruta!</div>
@@ -4935,6 +5121,7 @@ function RutaMovil(){
   const hechas = paradas.filter(p => p.estatus).length;
   return (
     <div style={wrap}><div style={card}>
+      <BandaChecada pin={pin}/>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, gap:10}}>
         <div style={{fontSize:19, fontWeight:800}}>🚚 Ruta de hoy</div>
         <div style={{textAlign:"right"}}>
@@ -6320,6 +6507,7 @@ const cancelar = async (id) => {
           roster={checadorRoster}
           onGuardarRoster={guardarChecadorRoster}
           publicUrl={window.location.origin + "/?checador=1"}
+          usuario={usuario}
         />
       )}
 

@@ -24,7 +24,7 @@ function horaMX() {
   return String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0');
 }
 
-const DOCS_VALIDOS = ['facturas', 'albaranes', 'ordenes', 'listas', 'hoja'];
+const DOCS_VALIDOS = ['facturas', 'albaranes', 'remisiones', 'remisionesEntrega', 'ordenes'];
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });

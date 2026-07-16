@@ -1170,14 +1170,14 @@ function resumenRuta(ruta){
   const cumplimientoEntregas = entregas.length ? Math.round(entregasOk / entregas.length * 100) : null;
   const cumplimientoExternos = externos.length ? Math.round(externosOk / externos.length * 100) : null;
   const d = (ruta && ruta.docsEntregados) || {};
-  // Solo se exigen los documentos que aplican ese día:
-  //  · facturas/albaranes/listas → si hubo entrega a cliente (E)
-  //  · ordenes (externos) → si hubo actividad con externos (B/R/D)
-  //  · hoja de cierre → siempre
-  const reqDocs = ["hoja"];
-  if (entregas.length) reqDocs.push("facturas","albaranes","listas");
-  if (externos.length) reqDocs.push("ordenes");
-  const docsOk = reqDocs.every(k => d[k]);
+  // Documentos según la operación real:
+  //  · Entrega a cliente (E): basta UNO — factura, albarán, remisión por préstamo o remisión de entrega
+  //  · Llevar a externo (B): orden de trabajo
+  //  · Recoger de externo (R) y Devolución/recoger de cliente (D): no requieren documento
+  const okEntregas = !entregas.length || !!(d.facturas || d.albaranes || d.remisiones || d.remisionesEntrega);
+  const hayLlevar = paradas.some(p => p.tipo === "B");
+  const okLlevar = !hayLlevar || !!d.ordenes;
+  const docsOk = okEntregas && okLlevar;
   return { cumplimientoEntregas, cumplimientoExternos, entregasTotal: entregas.length, entregasOk, externosTotal: externos.length, externosOk, noCompletadas, incidenciasCount, docsOk };
 }
 const RUTA_PDF_CSS = `
@@ -1256,11 +1256,11 @@ function buildCierreRutaHtml(ruta){
   const d = ruta.docsEntregados || {};
   const chk = (v) => v ? "&#9745;" : "&#9744;";
   const docsRows = [
-    ["facturas","Facturas firmadas por clientes (una por pedido entregado)"],
+    ["facturas","Facturas firmadas por clientes"],
     ["albaranes","Albaranes de salida firmados por clientes"],
-    ["ordenes","Órdenes de trabajo firmadas por externos (entregas y recogidas)"],
-    ["listas","Listas de empaque firmadas por clientes"],
-    ["hoja","Esta hoja de cierre de ruta completada"],
+    ["remisiones","Remisiones por préstamo firmadas por clientes"],
+    ["remisionesEntrega","Remisiones de entrega firmadas por clientes"],
+    ["ordenes","Órdenes de trabajo firmadas por externos (llevar a externo)"],
   ].map(([k,t]) => `<tr><td style="width:28px;text-align:center;font-size:14px">${chk(d[k])}</td><td>${t}</td></tr>`).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
   <div class="page">
@@ -2905,17 +2905,17 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
   const lbl = { fontSize:11, color:C.muted, marginBottom:4, display:"block" };
 
   const abrir = (ruta) => setR({
-    docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false },
+    docsEntregados:{ facturas:false, albaranes:false, remisiones:false, remisionesEntrega:false, ordenes:false },
     incidencias:"", paradas:[], horaSalida:"", horaRegreso:"", kmInicial:"", kmFinal:"", responsable:"Andrés", estado:"planeada",
     ...ruta,
     paradas:(ruta.paradas||[]).map(p => ({ ...nuevaParada(p.tipo), ...p })),
-    docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false, ...(ruta.docsEntregados||{}) },
+    docsEntregados:{ facturas:false, albaranes:false, remisiones:false, remisionesEntrega:false, ordenes:false, ...(ruta.docsEntregados||{}) },
   });
   const nueva = () => setR({
     id: Date.now(),
     fecha: new Date().toISOString().slice(0,10),
     responsable:"Andrés", kmInicial:"", kmFinal:"", horaSalida:"", horaRegreso:"",
-    paradas:[], docsEntregados:{ facturas:false, albaranes:false, ordenes:false, listas:false, hoja:false },
+    paradas:[], docsEntregados:{ facturas:false, albaranes:false, remisiones:false, remisionesEntrega:false, ordenes:false },
     incidencias:"", estado:"planeada",
   });
   const set = (k,v) => setR(p => p.estado==="cerrada" ? p : ({ ...p, [k]:v }));
@@ -3130,8 +3130,9 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
 
         {/* Documentos a Krisia */}
         <div style={{fontSize:14, fontWeight:800, color:C.text, margin:"16px 0 10px"}}>Documentos que entrega Andrés a Krisia</div>
+        <div style={{fontSize:11.5, color:C.muted, margin:"-4px 0 10px"}}>Entrega a cliente: basta uno — factura, albarán o remisión (préstamo o entrega). Llevar a externo: orden de trabajo. Las recolecciones no requieren documento.</div>
         <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:8, marginBottom:18}}>
-          {[["facturas","Facturas firmadas por clientes"],["albaranes","Albaranes de salida firmados"],["ordenes","Órdenes de trabajo de externos"],["listas","Listas de empaque firmadas"],["hoja","Esta hoja de cierre completada"]].map(([k,t]) => (
+          {[["facturas","Facturas firmadas por clientes"],["albaranes","Albaranes de salida firmados"],["remisiones","Remisiones por préstamo firmadas"],["remisionesEntrega","Remisiones de entrega firmadas"],["ordenes","Órdenes de trabajo de externos"]].map(([k,t]) => (
             <label key={k} style={{display:"flex", alignItems:"center", gap:10, cursor:"pointer", color:C.text, fontSize:13}}>
               <span onClick={()=>setDocE(k, !r.docsEntregados[k])} style={{width:22, height:22, borderRadius:6, flexShrink:0, border:"2px solid "+(r.docsEntregados[k]?"#4caf7d":C.muted), background:r.docsEntregados[k]?"#4caf7d":"transparent", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontSize:13, fontWeight:800}}>{r.docsEntregados[k]?"✓":""}</span>
               <span onClick={()=>setDocE(k, !r.docsEntregados[k])}>{t}</span>
@@ -3853,7 +3854,7 @@ const BONOS_DEF = {
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
       { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
         ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },
-      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, auto:true, autoKey:"docs", cap:"% documentación entregada (facturas/albaranes de clientes + órdenes de externos)",
+      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, auto:true, autoKey:"docs", cap:"% documentación entregada (factura/albarán/remisión en entregas + orden de trabajo en externos)",
         ev:v=> v>=100?{p:1,n:"Meta cumplida (100%)"}:v>50?{p:0.5,n:"Parcial (51–99%)"}:{p:0,n:"No cumplido (≤50%)"} },
       { id:"a5", label:"Relación con clientes y externos", peso:0.05, cap:"número de quejas (0 = meta)",
         ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con quejas"} },
@@ -3944,7 +3945,7 @@ function autoValoresBonos(periodo, ordenes, rutas){
   rutasMes.forEach(r => {
     const paradas = (r.paradas)||[];
     const d = r.docsEntregados || {};
-    if (paradas.some(p => p.tipo === "E")) { obTot++; if (d.facturas || d.albaranes) obOk++; }
+    if (paradas.some(p => p.tipo === "E")) { obTot++; if (d.facturas || d.albaranes || d.remisiones || d.remisionesEntrega) obOk++; }
     if (paradas.some(p => p.tipo === "B")) { obTot++; if (d.ordenes) obOk++; }
   });
   const docsPct = obTot ? Math.round(obOk/obTot*100) : "";
@@ -4651,7 +4652,7 @@ function RutaMovil(){
   const cerrada = ruta.estado === "cerrada";
   const total = (ruta.paradas||[]).length;
   const hechas = (ruta.paradas||[]).filter(p => p.estatus).length;
-  const DOC_LBL = { facturas:"Facturas firmadas", albaranes:"Albaranes firmados", ordenes:"Órdenes de externos", listas:"Listas firmadas", hoja:"Hoja de ruta" };
+  const DOC_LBL = { facturas:"Factura firmada", albaranes:"Albarán firmado", remisiones:"Remisión por préstamo", remisionesEntrega:"Remisión de entrega", ordenes:"Orden de trabajo (externos)" };
   return (
     <div style={wrap}><div style={card}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, gap:10}}>

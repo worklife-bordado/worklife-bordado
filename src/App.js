@@ -4559,6 +4559,11 @@ function GestionUsuarios({ usuariosDoc, onGuardar, miEmail }){
     </div>
   );
 }
+// Hora local del celular en formato HH:MM (para el sello de "Actualizado …")
+function horaLocal(){
+  const d = new Date();
+  return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+}
 // ── Hoja de ruta móvil del chofer (enlace público + PIN, escribe vía /api/ruta-movil) ──
 function RutaMovil(){
   const [pin, setPin] = useState("");
@@ -4567,7 +4572,16 @@ function RutaMovil(){
   const [ruta, setRuta] = useState(undefined); // undefined = sin cargar, null = no hay ruta hoy
   const [hoy, setHoy] = useState("");
   const [err, setErr] = useState("");
+  // Preparación de la ruta (kilometraje inicial + orden consecutivo de actividades)
+  const [kmIni, setKmIni] = useState("");
+  const [seq, setSeq] = useState([]);          // arreglo de idx de paradas en el orden que el chofer elige
+  const [guardando, setGuardando] = useState(false);
+  const [eligiendo, setEligiendo] = useState(null); // idx de la actividad nueva a la que se le está eligiendo lugar
+  const [ultAct, setUltAct] = useState("");   // hora del último refresco
+  const refRefrescar = useRef(null);          // siempre apunta al refresco con el estado más reciente
+  const ultRefresco = useRef(0);              // timestamp del último refresco, para no repetir de más
   const C2 = C;
+
   const llamar = async (accion, extra) => {
     const resp = await fetch("/api/ruta-movil", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -4587,17 +4601,55 @@ function RutaMovil(){
       const data = await resp.json().catch(() => ({}));
       if (resp.status === 401) { alert("PIN incorrecto"); setPin(""); setCargando(false); return; }
       if (!resp.ok) throw new Error(data.error || ("Error " + resp.status));
-      setPinOk(true); setRuta(data.ruta); setHoy(data.hoy || "");
+      setPinOk(true); setRuta(data.ruta); setHoy(data.hoy || ""); setUltAct(horaLocal()); ultRefresco.current = Date.now();
+      if (data.ruta) { setKmIni(data.ruta.kmInicial || ""); setSeq([]); }
     } catch (e) { setErr("No se pudo cargar la ruta: " + e.message); }
     setCargando(false);
   };
+  // ── Refresco automático cada hora (sin interrumpir lo que el chofer esté capturando) ──
+  refRefrescar.current = async () => {
+    // Solo refresca si no hay nada a medias: ruta ya iniciada o sin ruta todavía.
+    const seguro = ruta === null || (ruta && ruta.estado === "en_ruta");
+    if (!pinOk || !seguro || guardando || cargando) return;
+    try {
+      const resp = await fetch("/api/ruta-movil", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, accion: "hoy" }),
+      });
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => null);
+      if (!data) return;
+      setRuta(data.ruta); setHoy(data.hoy || ""); setUltAct(horaLocal()); ultRefresco.current = Date.now();
+    } catch (e) { /* sin conexión: se reintenta en el siguiente ciclo */ }
+  };
+  useEffect(() => {
+    if (!pinOk) return;
+    const id = setInterval(() => { if (refRefrescar.current) refRefrescar.current(); }, 60 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [pinOk]);
+  // Además, refresca en cuanto el chofer vuelve a la app (deja el mapa, apaga y prende la pantalla, etc.)
+  useEffect(() => {
+    if (!pinOk) return;
+    const alVolver = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (Date.now() - ultRefresco.current < 60 * 1000) return; // ya se refrescó hace menos de un minuto
+      if (refRefrescar.current) refRefrescar.current();
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    return () => {
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+    };
+  }, [pinOk]);
+
   const marcar = async (idx, estatus) => {
     let obs;
     if (estatus === "inc") { obs = window.prompt("Describe brevemente la incidencia:", ""); if (obs === null) return; }
     if (estatus === "x")   { obs = window.prompt("¿Por qué no se pudo? (opcional)", ""); if (obs === null) return; }
     try {
       const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus, obs });
-      setRuta(p => ({ ...p, paradas: p.paradas.map((x, i) => i === idx ? { ...x, ...r.parada } : x) }));
+      setRuta(p => ({ ...p, paradas: p.paradas.map(x => x.idx === idx ? { ...x, ...r.parada } : x) }));
     } catch (e) { alert(e.message); }
   };
   const toggleDoc = async (campo) => {
@@ -4607,8 +4659,28 @@ function RutaMovil(){
       setRuta(p => ({ ...p, docsEntregados: { ...(p.docsEntregados || {}), [campo]: valor } }));
     } catch (e) { alert(e.message); }
   };
+  const guardarPreparacion = async () => {
+    if (!/^\d{1,8}$/.test(String(kmIni).trim()) || Number(kmIni) <= 0) { alert("Captura el kilometraje inicial del vehículo."); return; }
+    if (seq.length !== (ruta.paradas || []).length) { alert("Falta asignar el orden a todas las actividades."); return; }
+    setGuardando(true);
+    try {
+      const r = await llamar("preparar", { rutaId: ruta.id, kmInicial: String(kmIni).trim(), orden: seq });
+      setRuta(r.ruta);
+    } catch (e) { alert(e.message); }
+    setGuardando(false);
+  };
+  const iniciarRuta = async () => {
+    setGuardando(true);
+    try {
+      const r = await llamar("iniciar", { rutaId: ruta.id });
+      setRuta(r.ruta);
+    } catch (e) { alert(e.message); }
+    setGuardando(false);
+  };
+
   const wrap = { minHeight:"100vh", background:C2.bg, color:C2.text, fontFamily:"'Barlow','Segoe UI',sans-serif", padding:"24px 14px", boxSizing:"border-box" };
   const card = { maxWidth:520, width:"100%", margin:"0 auto" };
+  const btnGrande = (bg) => ({ width:"100%", border:"none", borderRadius:14, background:bg, color:"#fff", padding:"18px", fontSize:17, fontWeight:900, cursor:"pointer", fontFamily:"inherit", marginTop:16 });
 
   // 1) PIN
   if (!pinOk) {
@@ -4648,32 +4720,224 @@ function RutaMovil(){
     </div>
   );
 
-  // 3) Ruta del día
-  const cerrada = ruta.estado === "cerrada";
-  const total = (ruta.paradas||[]).length;
-  const hechas = (ruta.paradas||[]).filter(p => p.estatus).length;
-  const DOC_LBL = { facturas:"Factura firmada", albaranes:"Albarán firmado", remisiones:"Remisión por préstamo", remisionesEntrega:"Remisión de entrega", ordenes:"Orden de trabajo (externos)" };
+  const cerrada  = ruta.estado === "cerrada";
+  const enRuta   = ruta.estado === "en_ruta";
+  const paradas  = ruta.paradas || [];
+  const DOC_LBL  = { facturas:"Factura firmada", albaranes:"Albarán firmado", remisiones:"Remisión por préstamo", remisionesEntrega:"Remisión de entrega", ordenes:"Orden de trabajo (externos)" };
+
+  // ── 3) AVISO 1: preparar la ruta (kilometraje inicial + orden consecutivo) ──
+  if (!cerrada && !enRuta && !ruta.preparada) {
+    const tocar = (idx) => {
+      setSeq(s => s.includes(idx) ? s.filter(x => x !== idx) : [...s, idx]);
+    };
+    const listo = seq.length === paradas.length && /^\d{1,8}$/.test(String(kmIni).trim()) && Number(kmIni) > 0;
+    return (
+      <div style={wrap}><div style={card}>
+        <div style={{background:"#4a2f0a", border:"2px solid #f5a623", borderRadius:16, padding:"20px 18px", textAlign:"center", marginBottom:18}}>
+          <div style={{fontSize:44, lineHeight:1}}>🛑</div>
+          <div style={{fontSize:22, fontWeight:900, marginTop:8, color:"#ffd899"}}>Antes de iniciar tu ruta</div>
+          <div style={{fontSize:14.5, color:"#ffe9c9", marginTop:8, lineHeight:1.5}}>
+            Captura el <b>kilometraje inicial</b> del vehículo y decide el <b>orden</b> en que vas a hacer las actividades de hoy.
+          </div>
+          <div style={{fontSize:12.5, color:"#e8c48f", marginTop:8}}>No podrás marcar avances hasta terminar estos dos pasos.</div>
+        </div>
+
+        <div style={{color:C2.muted, fontSize:13, marginBottom:14}}>{fmtDate(ruta.fecha)} · {paradas.length} actividades</div>
+
+        {/* Paso 1 — kilometraje */}
+        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"14px", marginBottom:14}}>
+          <div style={{fontSize:15, fontWeight:900, marginBottom:2}}>1️⃣ Kilometraje inicial</div>
+          <div style={{fontSize:12.5, color:C2.muted, marginBottom:10}}>Lee el odómetro antes de salir.</div>
+          <input value={kmIni} onChange={e=>setKmIni(e.target.value.replace(/\D/g,""))}
+            inputMode="numeric" pattern="[0-9]*" placeholder="Ej. 128450"
+            style={{width:"100%", boxSizing:"border-box", border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.text, padding:"16px", fontSize:24, fontWeight:900, textAlign:"center", letterSpacing:2, fontFamily:"inherit"}}/>
+        </div>
+
+        {/* Paso 2 — orden consecutivo */}
+        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"14px", marginBottom:14}}>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:8}}>
+            <div style={{fontSize:15, fontWeight:900}}>2️⃣ Orden de las actividades</div>
+            <button onClick={()=>setSeq([])} style={{border:"1px solid "+C2.border, borderRadius:9, background:C2.surface, color:C2.muted, padding:"6px 10px", fontSize:11.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Reiniciar</button>
+          </div>
+          <div style={{fontSize:12.5, color:C2.muted, marginTop:4, marginBottom:10}}>
+            Toca las tarjetas en el orden en que las vas a hacer. Van tomando el número 1, 2, 3…
+          </div>
+          <div style={{fontSize:13, fontWeight:800, color: seq.length===paradas.length ? C2.success : C2.accent, marginBottom:10}}>
+            {seq.length}/{paradas.length} asignadas
+          </div>
+
+          {paradas.map(p => {
+            const t = tipoInfo(p.tipo);
+            const pos = seq.indexOf(p.idx);
+            const puesta = pos >= 0;
+            return (
+              <div key={p.idx} onClick={()=>tocar(p.idx)}
+                style={{display:"flex", gap:12, alignItems:"flex-start", background: puesta ? "#12321f" : C2.surface,
+                        border:"1px solid "+(puesta ? C2.success : C2.border), borderRadius:12, padding:"11px 12px", marginBottom:9, cursor:"pointer"}}>
+                <div style={{minWidth:38, height:38, borderRadius:"50%", background: puesta ? C2.success : C2.border,
+                             color: puesta ? "#fff" : C2.muted, display:"flex", alignItems:"center", justifyContent:"center",
+                             fontSize:16, fontWeight:900, flexShrink:0}}>{puesta ? pos+1 : "–"}</div>
+                <div style={{flex:1, minWidth:0}}>
+                  <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+                    <span style={{fontSize:10.5, fontWeight:800, color:"#fff", background:t.col, padding:"2px 9px", borderRadius:12}}>{t.lbl}</span>
+                    {p.horario && <span style={{fontSize:11.5, color:C2.muted}}>🕐 {p.horario}</span>}
+                  </div>
+                  <div style={{fontSize:14.5, fontWeight:800, marginTop:5}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
+                  {p.direccion && <div style={{fontSize:12, color:C2.muted, marginTop:2}}>📍 {p.direccion}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <button onClick={guardarPreparacion} disabled={!listo || guardando}
+          style={{...btnGrande(listo ? "#4caf7d" : C2.border), opacity: listo && !guardando ? 1 : 0.55, cursor: listo && !guardando ? "pointer" : "default", marginTop:0}}>
+          {guardando ? "Guardando…" : listo ? "Guardar y continuar →" : "Completa los 2 pasos"}
+        </button>
+        <div style={{height:30}}/>
+      </div></div>
+    );
+  }
+
+  // ── 4) AVISO 2: todo listo, ya puedes iniciar la ruta ──
+  if (!cerrada && !enRuta && ruta.preparada) {
+    const plan = [...paradas].sort((a,b)=>(a.orden||0)-(b.orden||0));
+    return (
+      <div style={wrap}><div style={card}>
+        <div style={{background:"#13351f", border:"2px solid "+C2.success, borderRadius:16, padding:"24px 18px", textAlign:"center", marginBottom:18}}>
+          <div style={{fontSize:50, lineHeight:1}}>✅</div>
+          <div style={{fontSize:23, fontWeight:900, marginTop:8, color:"#a9e9c4"}}>¡Ya puedes iniciar la ruta!</div>
+          <div style={{fontSize:14.5, color:"#cdeed9", marginTop:8, lineHeight:1.5}}>
+            Kilometraje inicial <b>{ruta.kmInicial}</b> y tu orden de <b>{paradas.length} actividades</b> quedaron registrados.
+          </div>
+          <div style={{fontSize:12.5, color:"#8fc7a6", marginTop:8}}>Al iniciar se guarda tu hora de salida y podrás ir marcando lo que vayas haciendo.</div>
+        </div>
+
+        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginBottom:6}}>
+          <div style={{fontSize:13.5, fontWeight:800, marginBottom:8}}>📋 Tu planeación de hoy</div>
+          {plan.map(p => {
+            const t = tipoInfo(p.tipo);
+            return (
+              <div key={p.idx} style={{display:"flex", gap:10, alignItems:"center", padding:"9px 0", borderTop:"1px solid "+C2.border}}>
+                <div style={{minWidth:26, height:26, borderRadius:"50%", background:C2.accent, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12.5, fontWeight:900, flexShrink:0}}>{p.orden}</div>
+                <div style={{flex:1, minWidth:0}}>
+                  <div style={{fontSize:14, fontWeight:700}}>{p.cliente || "—"}</div>
+                  <div style={{fontSize:11.5, color:C2.muted}}>{t.lbl}{p.horario ? " · 🕐 "+p.horario : ""}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <button onClick={iniciarRuta} disabled={guardando} style={{...btnGrande("#4caf7d"), opacity:guardando?0.6:1}}>
+          {guardando ? "Iniciando…" : "▶️ Iniciar ruta"}
+        </button>
+        <button onClick={()=>{ setRuta(p=>({...p, preparada:false})); setSeq([]); }}
+          style={{width:"100%", border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit", marginTop:10}}>
+          ✏️ Corregir kilometraje u orden
+        </button>
+        <div style={{height:30}}/>
+      </div></div>
+    );
+  }
+
+  // ── Colocación ágil de actividades que Krisia agregó DESPUÉS de iniciar ──
+  const secuenciaActual = () => paradas.filter(p => p.orden).sort((a,b)=>a.orden-b.orden).map(p => p.idx);
+  const posSiguiente = () => { // justo después de la última que ya marcó
+    const s2 = secuenciaActual(); let last = -1;
+    s2.forEach((ix, i) => { const q = paradas.find(x => x.idx === ix); if (q && q.estatus) last = i; });
+    return last + 1;
+  };
+  const colocar = async (idx, pos) => {
+    const s2 = secuenciaActual().filter(x => x !== idx);
+    s2.splice(Math.max(0, Math.min(pos, s2.length)), 0, idx);
+    setGuardando(true);
+    try { const r = await llamar("reordenar", { rutaId: ruta.id, orden: s2 }); setRuta(r.ruta); setEligiendo(null); }
+    catch (e) { alert(e.message); }
+    setGuardando(false);
+  };
+
+  // ── 5) Ruta del día (ya iniciada, o cerrada en solo lectura) ──
+  const nuevas = cerrada ? [] : paradas.filter(p => !p.orden);
+  const lista  = paradas.filter(p => cerrada || p.orden).sort((a,b)=>(a.orden||999)-(b.orden||999));
+  const total  = paradas.length;
+  const hechas = paradas.filter(p => p.estatus).length;
   return (
     <div style={wrap}><div style={card}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, gap:10}}>
         <div style={{fontSize:19, fontWeight:800}}>🚚 Ruta de hoy</div>
-        <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{border:"1px solid "+C2.border, borderRadius:9, background:C2.surface, color:C2.muted, padding:"8px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando?"…":"🔄 Actualizar"}</button>
+        <div style={{textAlign:"right"}}>
+          <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{border:"1px solid "+C2.border, borderRadius:9, background:C2.surface, color:C2.muted, padding:"8px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando?"…":"🔄 Actualizar"}</button>
+          {ultAct && <div style={{fontSize:10.5, color:C2.muted, marginTop:4, opacity:.8}}>Actualizado {ultAct}</div>}
+        </div>
       </div>
-      <div style={{color:C2.muted, fontSize:13, marginBottom:14}}>{fmtDate(ruta.fecha)} · {hechas}/{total} paradas registradas</div>
+      <div style={{color:C2.muted, fontSize:13, marginBottom:14}}>
+        {fmtDate(ruta.fecha)} · {hechas}/{total} paradas registradas
+        {ruta.kmInicial ? <> · 🔢 Km inicial {ruta.kmInicial}</> : null}
+        {ruta.horaSalida ? <> · 🕐 Salida {ruta.horaSalida}</> : null}
+      </div>
+      {enRuta && !cerrada && (
+        <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>▶️ Ruta iniciada — ve marcando cada actividad conforme la termines.</div>
+      )}
       {cerrada && (
         <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>🔒 Esta ruta ya fue cerrada por Krisia — solo lectura.</div>
       )}
 
-      {(ruta.paradas||[]).map((p, i) => {
+      {!cerrada && nuevas.length > 0 && (
+        <div style={{background:"#4a2f0a", border:"2px solid #f5a623", borderRadius:14, padding:"14px", marginBottom:14}}>
+          <div style={{fontSize:16, fontWeight:900, color:"#ffd899"}}>➕ {nuevas.length === 1 ? "Actividad nueva" : nuevas.length + " actividades nuevas"}</div>
+          <div style={{fontSize:12.5, color:"#ffe9c9", marginTop:4, marginBottom:10}}>Krisia agregó esto a tu ruta. Dale su lugar con un toque.</div>
+          {nuevas.map(p => {
+            const t = tipoInfo(p.tipo);
+            const asignadas = paradas.filter(x => x.orden).sort((a,b)=>a.orden-b.orden);
+            return (
+              <div key={p.idx} style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"11px 12px", marginBottom:9}}>
+                <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+                  <span style={{fontSize:10.5, fontWeight:800, color:"#fff", background:t.col, padding:"2px 9px", borderRadius:12}}>{t.lbl}</span>
+                  {p.horario && <span style={{fontSize:11.5, color:C2.muted}}>🕐 {p.horario}</span>}
+                </div>
+                <div style={{fontSize:14.5, fontWeight:800, marginTop:5}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
+                {p.direccion && <div style={{fontSize:12, color:C2.muted, marginTop:2}}>📍 {p.direccion}</div>}
+                <div style={{display:"flex", gap:8, marginTop:10}}>
+                  <button disabled={guardando} onClick={()=>colocar(p.idx, posSiguiente())}
+                    style={{flex:1, border:"none", borderRadius:10, background:"#4caf7d", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⚡ La sigo ahora</button>
+                  <button disabled={guardando} onClick={()=>colocar(p.idx, 999)}
+                    style={{flex:1, border:"none", borderRadius:10, background:"#5c8fe0", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⤓ Al final</button>
+                  <button disabled={guardando} onClick={()=>setEligiendo(eligiendo === p.idx ? null : p.idx)}
+                    style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.muted, padding:"13px 12px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>📍 Otro</button>
+                </div>
+                {eligiendo === p.idx && (
+                  <div style={{marginTop:10, borderTop:"1px solid "+C2.border, paddingTop:10}}>
+                    <div style={{fontSize:11.5, color:C2.muted, marginBottom:8}}>¿Dónde la metes?</div>
+                    <div style={{display:"flex", flexWrap:"wrap", gap:7}}>
+                      <button disabled={guardando} onClick={()=>colocar(p.idx, 0)}
+                        style={{border:"1px solid "+C2.border, borderRadius:20, background:C2.surface, color:C2.text, padding:"9px 13px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Al inicio</button>
+                      {asignadas.map((q, i) => (
+                        <button key={q.idx} disabled={guardando} onClick={()=>colocar(p.idx, i+1)}
+                          style={{border:"1px solid "+C2.border, borderRadius:20, background:C2.surface, color:C2.text, padding:"9px 13px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                          Después de {q.orden}. {q.cliente || "—"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {lista.map((p) => {
         const t = tipoInfo(p.tipo);
         const est = p.estatus;
         const btn = (id, lbl2, col) => (
-          <button key={id} disabled={cerrada} onClick={()=>marcar(i, id)}
+          <button key={id} disabled={cerrada} onClick={()=>marcar(p.idx, id)}
             style={{flex:1, border: est===id ? "none" : "1px solid "+C2.border, borderRadius:10, background: est===id ? col : C2.surface, color: est===id ? "#fff" : C2.muted, padding:"12px 6px", fontSize:12.5, fontWeight:800, cursor:cerrada?"default":"pointer", fontFamily:"inherit", opacity: cerrada?0.6:1}}>{lbl2}</button>
         );
         return (
-          <div key={i} style={{background:C2.card, border:"1px solid "+(est==="ok"?"#4caf7d66":est?"#f5a62366":C2.border), borderRadius:14, padding:"13px 14px", marginBottom:12}}>
+          <div key={p.idx} style={{background:C2.card, border:"1px solid "+(est==="ok"?"#4caf7d66":est?"#f5a62366":C2.border), borderRadius:14, padding:"13px 14px", marginBottom:12}}>
             <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+              {p.orden ? <span style={{minWidth:24, height:24, borderRadius:"50%", background:C2.accent, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:900}}>{p.orden}</span> : null}
               <span style={{fontSize:11, fontWeight:800, color:"#fff", background:t.col, padding:"3px 10px", borderRadius:12}}>{t.lbl}</span>
               {p.horario && <span style={{fontSize:12, color:C2.muted}}>🕐 {p.horario}</span>}
               {p.horaReal && <span style={{fontSize:12, color:C2.success, fontWeight:700}}>✓ {p.horaReal}</span>}

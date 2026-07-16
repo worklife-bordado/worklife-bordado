@@ -53,6 +53,7 @@ function serializarRuta(ruta) {
     horaSalida: ruta.horaSalida || '',
     responsable: ruta.responsable || '',
     preparada: estaPreparada(ruta),
+    incidencias: ruta.incidencias || '',
     docsEntregados: ruta.docsEntregados || {},
     paradas: (ruta.paradas || []).map((p, i) => ({
       idx: i,
@@ -199,6 +200,11 @@ export default async function handler(req, res) {
       const { rutaId, idx, estatus, obs } = body;
       if (!rutaId || !['ok', 'x', 'inc'].includes(estatus)) return res.status(400).json({ error: 'Datos inválidos' });
 
+      // Una incidencia sale del cálculo de cumplimiento: sin motivo escrito no se registra.
+      if (estatus === 'inc' && !(typeof obs === 'string' && obs.trim())) {
+        return res.status(400).json({ error: 'Para marcar incidencia debes escribir el motivo' });
+      }
+
       const { ref, ruta, error } = await cargarRuta(rutaId);
       if (error) return res.status(error.code).json({ error: error.msg });
       if (ruta.estado !== 'en_ruta') {
@@ -214,6 +220,43 @@ export default async function handler(req, res) {
 
       await ref.update({ paradas, actualizadoMovil: firma() });
       return res.status(200).json({ ok: true, parada: paradas[i] });
+    }
+
+    // 2.c2) Observación de una parada (sin cambiar el estatus) — requiere ruta iniciada
+    if (accion === 'obs') {
+      const { rutaId, idx, obs } = body;
+      if (!rutaId || typeof obs !== 'string') return res.status(400).json({ error: 'Datos inválidos' });
+
+      const { ref, ruta, error } = await cargarRuta(rutaId);
+      if (error) return res.status(error.code).json({ error: error.msg });
+      if (ruta.estado !== 'en_ruta') return res.status(409).json({ error: 'Primero debes iniciar la ruta' });
+
+      const paradas = (ruta.paradas || []).map(p => ({ ...p }));
+      const i = Number(idx);
+      if (!(i >= 0 && i < paradas.length)) return res.status(400).json({ error: 'Parada inválida' });
+
+      const texto = obs.slice(0, 500).trim();
+      // No se puede dejar sin motivo una parada marcada como incidencia.
+      if (paradas[i].estatus === 'inc' && !texto) {
+        return res.status(400).json({ error: 'La incidencia necesita un motivo' });
+      }
+
+      paradas[i].obs = texto;
+      await ref.update({ paradas, actualizadoMovil: firma() });
+      return res.status(200).json({ ok: true, parada: paradas[i] });
+    }
+
+    // 2.c3) Incidencias del día (campo libre de la ruta, sale en el PDF de cierre)
+    if (accion === 'incidencias') {
+      const { rutaId, texto } = body;
+      if (!rutaId || typeof texto !== 'string') return res.status(400).json({ error: 'Datos inválidos' });
+
+      const { ref, ruta, error } = await cargarRuta(rutaId);
+      if (error) return res.status(error.code).json({ error: error.msg });
+      if (ruta.estado !== 'en_ruta') return res.status(409).json({ error: 'Primero debes iniciar la ruta' });
+
+      await ref.update({ incidencias: texto.slice(0, 2000), actualizadoMovil: firma() });
+      return res.status(200).json({ ok: true });
     }
 
     // 2.d) Documentos — requiere ruta iniciada

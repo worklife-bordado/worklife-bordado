@@ -4596,6 +4596,14 @@ function RutaMovil(){
   const [seq, setSeq] = useState([]);          // arreglo de idx de paradas en el orden que el chofer elige
   const [guardando, setGuardando] = useState(false);
   const [eligiendo, setEligiendo] = useState(null); // idx de la actividad nueva a la que se le está eligiendo lugar
+  const [borrador, setBorrador] = useState({});   // { idx: texto } observación en edición
+  const [abierto, setAbierto] = useState(null);   // idx con el campo de observación abierto
+  const [pendInc, setPendInc] = useState(null);   // idx esperando el motivo para guardar la incidencia
+  const [guardObs, setGuardObs] = useState(null); // idx que se está guardando
+  const [okObs, setOkObs] = useState(null);       // idx con "Guardado ✓" visible
+  const [incDia, setIncDia] = useState("");       // incidencias del día (campo libre de la ruta)
+  const [guardInc, setGuardInc] = useState(false);
+  const [okInc, setOkInc] = useState(false);
   const [ultAct, setUltAct] = useState("");   // hora del último refresco
   const refRefrescar = useRef(null);          // siempre apunta al refresco con el estado más reciente
   const ultRefresco = useRef(0);              // timestamp del último refresco, para no repetir de más
@@ -4664,14 +4672,51 @@ function RutaMovil(){
     };
   }, [pinOk]);
 
+  const abrirObs = (idx, textoActual) => {
+    setAbierto(idx);
+    setBorrador(b => ({ ...b, [idx]: b[idx] !== undefined ? b[idx] : (textoActual || "") }));
+  };
+  useEffect(() => { if (ruta && ruta.id) setIncDia(ruta.incidencias || ""); }, [ruta && ruta.id]); // eslint-disable-line
+
   const marcar = async (idx, estatus) => {
-    let obs;
-    if (estatus === "inc") { obs = window.prompt("Describe brevemente la incidencia:", ""); if (obs === null) return; }
-    if (estatus === "x")   { obs = window.prompt("¿Por qué no se pudo? (opcional)", ""); if (obs === null) return; }
+    const actual = (ruta.paradas || []).find(x => x.idx === idx) || {};
+    // La incidencia no se guarda hasta que escriba el motivo: es lo que la saca del cumplimiento.
+    if (estatus === "inc") { setPendInc(idx); abrirObs(idx, actual.obs); return; }
     try {
-      const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus, obs });
+      const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus });
       setRuta(p => ({ ...p, paradas: p.paradas.map(x => x.idx === idx ? { ...x, ...r.parada } : x) }));
+      setPendInc(pi => pi === idx ? null : pi);
+      abrirObs(idx, r.parada.obs); // el campo de observación queda listo, pero es opcional
     } catch (e) { alert(e.message); }
+  };
+  const guardarObs = async (idx) => {
+    const txt = String(borrador[idx] || "").trim();
+    if (pendInc === idx && !txt) { alert("Para marcar incidencia debes escribir el motivo."); return; }
+    setGuardObs(idx);
+    try {
+      const r = pendInc === idx
+        ? await llamar("marcar", { rutaId: ruta.id, idx, estatus: "inc", obs: txt })
+        : await llamar("obs", { rutaId: ruta.id, idx, obs: txt });
+      setRuta(p => ({ ...p, paradas: p.paradas.map(x => x.idx === idx ? { ...x, ...r.parada } : x) }));
+      setPendInc(pi => pi === idx ? null : pi);
+      setOkObs(idx); setTimeout(() => setOkObs(o => o === idx ? null : o), 2500);
+      setAbierto(a => a === idx ? null : a);
+    } catch (e) { alert(e.message); }
+    setGuardObs(null);
+  };
+  const cancelarObs = (idx) => {
+    setAbierto(null);
+    setBorrador(b => { const n = { ...b }; delete n[idx]; return n; });
+    setPendInc(pi => pi === idx ? null : pi); // si era una Inc sin motivo, no se registra
+  };
+  const guardarIncDia = async () => {
+    setGuardInc(true);
+    try {
+      await llamar("incidencias", { rutaId: ruta.id, texto: incDia });
+      setRuta(p => ({ ...p, incidencias: incDia }));
+      setOkInc(true); setTimeout(() => setOkInc(false), 2500);
+    } catch (e) { alert(e.message); }
+    setGuardInc(false);
   };
   const toggleDoc = async (campo) => {
     const valor = !(ruta.docsEntregados || {})[campo];
@@ -4977,15 +5022,60 @@ function RutaMovil(){
                   style={{border:"none", borderRadius:8, background:"#5c8fe0", color:"#fff", padding:"8px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>🗺️ Navegar</button>
               </div>
             )}
-            {p.obs && <div style={{fontSize:12, color:C2.accent, marginTop:6}}>📝 {p.obs}</div>}
+            {p.obs && abierto !== p.idx && (
+              <div onClick={()=>{ if(!cerrada) abrirObs(p.idx, p.obs); }} style={{fontSize:12, color:C2.accent, marginTop:6, cursor:cerrada?"default":"pointer"}}>📝 {p.obs}{!cerrada && <span style={{color:C2.muted}}> · editar</span>}</div>
+            )}
             <div style={{display:"flex", gap:8, marginTop:10}}>
               {btn("ok", "✓ Listo", "#4caf7d")}
               {btn("inc", "⚠️ Incidencia", "#f5a623")}
               {btn("x", "✗ No se pudo", "#c0392b")}
             </div>
+
+            {/* Observación: aparece al marcar. Opcional, salvo en incidencia. */}
+            {abierto === p.idx && !cerrada && (
+              <div style={{marginTop:10, borderTop:"1px solid "+C2.border, paddingTop:10}}>
+                <div style={{fontSize:12, fontWeight:800, color: pendInc===p.idx ? "#f5a623" : C2.muted, marginBottom:6}}>
+                  {pendInc===p.idx ? "⚠️ Escribe el motivo de la incidencia (obligatorio)" : "📝 Observación (opcional)"}
+                </div>
+                {pendInc===p.idx && <div style={{fontSize:11.5, color:C2.muted, marginBottom:6, lineHeight:1.45}}>Explica qué pasó y por qué no dependió de ti. Sin motivo, la incidencia no se registra.</div>}
+                <textarea value={borrador[p.idx] || ""} onChange={e=>setBorrador(b=>({...b, [p.idx]: e.target.value.slice(0,500)}))}
+                  rows={3} placeholder={pendInc===p.idx ? "Ej. El cliente cerró antes de la hora acordada" : "Algo que Krisia deba saber…"}
+                  style={{width:"100%", boxSizing:"border-box", border:"1px solid "+(pendInc===p.idx?"#f5a623":C2.border), borderRadius:10, background:C2.surface, color:C2.text, padding:"10px", fontSize:14, fontFamily:"inherit", resize:"vertical"}}/>
+                <div style={{display:"flex", gap:8, marginTop:8, alignItems:"center"}}>
+                  <button disabled={guardObs===p.idx} onClick={()=>guardarObs(p.idx)}
+                    style={{flex:1, border:"none", borderRadius:10, background: pendInc===p.idx ? "#f5a623" : "#4caf7d", color:"#fff", padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardObs===p.idx?0.6:1}}>
+                    {guardObs===p.idx ? "Guardando…" : pendInc===p.idx ? "Guardar incidencia" : "Guardar"}
+                  </button>
+                  <button onClick={()=>cancelarObs(p.idx)} style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.muted, padding:"12px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Cancelar</button>
+                </div>
+              </div>
+            )}
+            {okObs === p.idx && abierto !== p.idx && <div style={{fontSize:12, color:C2.success, fontWeight:800, marginTop:8}}>Guardado ✓</div>}
+            {!cerrada && !p.obs && abierto !== p.idx && p.estatus && (
+              <button onClick={()=>abrirObs(p.idx, "")} style={{marginTop:9, border:"1px dashed "+C2.border, borderRadius:9, background:"transparent", color:C2.muted, padding:"9px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", width:"100%"}}>📝 Agregar observación</button>
+            )}
           </div>
         );
       })}
+
+      {/* Incidencias del día: siempre visible al final de la lista */}
+      <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginTop:6, marginBottom:12}}>
+        <div style={{fontSize:13.5, fontWeight:800, marginBottom:4}}>⚠️ Incidencias del día</div>
+        <div style={{fontSize:11.5, color:C2.muted, marginBottom:8, lineHeight:1.45}}>Lo que pasó en general y no cabe en una sola parada: tráfico, vehículo, clima, cambios de última hora. Sale impreso en la hoja de cierre.</div>
+        <textarea value={incDia} onChange={e=>setIncDia(e.target.value.slice(0,2000))} disabled={cerrada}
+          rows={4} placeholder="Puedes dejarlo vacío si no hubo nada."
+          style={{width:"100%", boxSizing:"border-box", border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"10px", fontSize:14, fontFamily:"inherit", resize:"vertical", opacity:cerrada?0.6:1}}/>
+        {!cerrada && (
+          <div style={{display:"flex", gap:10, alignItems:"center", marginTop:8}}>
+            <button disabled={guardInc} onClick={guardarIncDia}
+              style={{border:"none", borderRadius:10, background:"#5c8fe0", color:"#fff", padding:"12px 18px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardInc?0.6:1}}>
+              {guardInc ? "Guardando…" : "Guardar"}
+            </button>
+            {okInc && <div style={{fontSize:12.5, color:C2.success, fontWeight:800}}>Guardado ✓</div>}
+            <div style={{marginLeft:"auto", fontSize:11, color:C2.muted}}>{incDia.length}/2000</div>
+          </div>
+        )}
+      </div>
 
       <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginTop:6, marginBottom:30}}>
         <div style={{fontSize:13.5, fontWeight:800, marginBottom:4}}>📄 Documentos para Krisia</div>

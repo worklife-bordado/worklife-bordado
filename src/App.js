@@ -4559,6 +4559,11 @@ function GestionUsuarios({ usuariosDoc, onGuardar, miEmail }){
     </div>
   );
 }
+// Fecha local del celular en formato YYYY-MM-DD (para detectar el cambio de día)
+function fechaLocal(){
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
 // Hora local del celular en formato HH:MM (para el sello de "Actualizado …")
 function horaLocal(){
   const d = new Date();
@@ -4608,8 +4613,10 @@ function RutaMovil(){
   };
   // ── Refresco automático cada hora (sin interrumpir lo que el chofer esté capturando) ──
   refRefrescar.current = async () => {
-    // Solo refresca si no hay nada a medias: ruta ya iniciada o sin ruta todavía.
-    const seguro = ruta === null || (ruta && ruta.estado === "en_ruta");
+    // Si cambió el día, refresca siempre (la ruta de ayer ya no le pertenece).
+    const cambioDia = !!(ruta && ruta.fecha && ruta.fecha !== fechaLocal());
+    // Si no, solo refresca cuando no hay nada a medias: sin ruta, ya iniciada o ya cerrada.
+    const seguro = cambioDia || ruta === null || (ruta && (ruta.estado === "en_ruta" || ruta.estado === "cerrada"));
     if (!pinOk || !seguro || guardando || cargando) return;
     try {
       const resp = await fetch("/api/ruta-movil", {
@@ -4708,14 +4715,19 @@ function RutaMovil(){
     );
   }
 
-  // 2) Sin ruta hoy
-  if (ruta === null) return (
+  // 2) En espera de ruta — sin ruta hoy, o la ruta cargada ya no es la del día en curso
+  const vencida = !!(ruta && ruta.fecha && ruta.fecha !== fechaLocal());
+  if (ruta === null || vencida) return (
     <div style={{...wrap, display:"flex", alignItems:"center", justifyContent:"center", textAlign:"center"}}>
       <div style={card}>
-        <div style={{fontSize:46, marginBottom:10}}>🗓️</div>
-        <div style={{fontSize:18, fontWeight:800}}>No hay ruta programada para hoy</div>
-        <div style={{color:C2.muted, fontSize:13, marginTop:8}}>{hoy ? fmtDate(hoy) : ""} · Si crees que debería haber una, avísale a Krisia.</div>
-        <button onClick={()=>cargarHoy(pin)} style={{marginTop:18, border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"11px 20px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>🔄 Volver a revisar</button>
+        <div style={{fontSize:52, marginBottom:12}}>⏳</div>
+        <div style={{fontSize:22, fontWeight:900}}>En espera de ruta</div>
+        <div style={{color:C2.muted, fontSize:13.5, marginTop:10, lineHeight:1.5}}>
+          {fmtDate(vencida ? fechaLocal() : (hoy || fechaLocal()))}<br/>
+          Aquí aparecerá tu ruta en cuanto Krisia la cargue.
+        </div>
+        <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{marginTop:20, border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"12px 22px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando ? "Revisando…" : "🔄 Volver a revisar"}</button>
+        {ultAct && <div style={{fontSize:10.5, color:C2.muted, marginTop:10, opacity:.8}}>Revisado {ultAct}</div>}
       </div>
     </div>
   );

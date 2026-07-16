@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Component } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
@@ -30,7 +30,21 @@ onMessage(messaging, (payload) => {
     });
   }
 });
-const db          = getFirestore(firebaseApp);
+// Caché local persistente (IndexedDB). Sin esto, CADA carga de la app relee todas
+// las colecciones desde el servidor (miles de lecturas por recarga). Con la caché,
+// los listeners se reanudan desde IndexedDB y solo bajan lo que cambió.
+// Los datos siguen llegando en vivo: la caché no los deja viejos.
+// Si el navegador no permite IndexedDB (modo incógnito, almacenamiento lleno),
+// se cae a memoria y la app sigue funcionando igual, solo sin el ahorro.
+let db;
+try {
+  db = initializeFirestore(firebaseApp, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (e) {
+  console.warn("Caché persistente no disponible, se usa la normal:", e && e.message);
+  db = getFirestore(firebaseApp);
+}
 const auth        = getAuth(firebaseApp);
 const provider    = new GoogleAuthProvider();
 // ── Roles ─────────────────────────────────────────────────────────────────────

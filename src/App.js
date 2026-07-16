@@ -2876,9 +2876,31 @@ function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
   return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaReal:"", docs:false, obs:"" };
 }
-function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) {
+function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente }) {
   const [r, setR] = useState(null);
   const [guardando, setGuardando] = useState(false);
+  const [dirOpen, setDirOpen] = useState(false);
+  const [dirBusca, setDirBusca] = useState("");
+  const [importando, setImportando] = useState(false);
+  const fileClientesRef = useRef(null);
+  const handleExcelClientes = async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    setImportando(true);
+    try {
+      const XLSX = await cargarXLSX();
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
+      let ini = 0;
+      if (rows.length && String(rows[0][0] || "").toLowerCase().includes("cliente")) ini = 1; // salta encabezados
+      const entradas = rows.slice(ini).map(f => ({ nombre: f[0], direccion: f[1], contacto: f[2] })).filter(e => String(e.nombre||"").trim() && String(e.direccion||"").trim());
+      if (!entradas.length) { alert("No se encontraron filas válidas. El Excel debe tener: columna A = Cliente, columna B = Dirección, columna C = Contacto (opcional)."); }
+      else { await onImportarClientes(entradas); alert("Listo: " + entradas.length + " cliente(s) cargados o actualizados."); }
+    } catch (e) { alert("Error al importar: " + e.message); }
+    setImportando(false);
+  };
   const iS = { background:C.bg, border:"1px solid "+C.border, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13, outline:"none", fontFamily:"inherit", width:"100%" };
   const lbl = { fontSize:11, color:C.muted, marginBottom:4, display:"block" };
 
@@ -2935,6 +2957,34 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
           </div>
         </div>
         {ordenadas.length === 0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay rutas. Crea la primera con "Nueva ruta del día".</div>}
+        <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 16px", marginBottom:16}}>
+          <div onClick={()=>setDirOpen(o=>!o)} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C.text, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+            <span>{dirOpen?"▾":"▸"} 📇 Directorio de clientes</span>
+            <span style={{fontSize:12, color:C.muted, fontWeight:600}}>{clientesDir.length} guardado{clientesDir.length===1?"":"s"}</span>
+          </div>
+          {dirOpen && (
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:12, color:C.muted, marginBottom:10}}>Se llena solo: cada vez que guardas una ruta con cliente y dirección, se guarda aquí. Al capturar paradas, escribe el nombre y la dirección se pone sola. También puedes cargar una base inicial desde Excel (columna A = Cliente, B = Dirección, C = Contacto opcional).</div>
+              <div style={{display:"flex", gap:8, flexWrap:"wrap", marginBottom:10}}>
+                <button disabled={importando} onClick={()=>fileClientesRef.current && fileClientesRef.current.click()} style={{border:"none", borderRadius:8, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"9px 14px", fontSize:13, fontWeight:800, fontFamily:"inherit", opacity:importando?0.6:1}}>{importando?"Importando…":"📥 Importar Excel"}</button>
+                <input ref={fileClientesRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={handleExcelClientes}/>
+                <input value={dirBusca} onChange={e=>setDirBusca(e.target.value)} placeholder="Buscar cliente…" style={{flex:"1 1 160px", background:C.surface, border:"1px solid "+C.border, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13, outline:"none"}}/>
+              </div>
+              <div style={{maxHeight:260, overflowY:"auto"}}>
+                {clientesDir.filter(c => !dirBusca.trim() || (c.nombre||"").toLowerCase().includes(dirBusca.toLowerCase()) || (c.direccion||"").toLowerCase().includes(dirBusca.toLowerCase())).map(c => (
+                  <div key={c.id} style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderTop:"1px solid "+C.border}}>
+                    <div style={{flex:1, minWidth:0}}>
+                      <div style={{fontSize:13, fontWeight:700, color:C.text}}>{c.nombre}</div>
+                      <div style={{fontSize:11.5, color:C.muted}}>📍 {c.direccion}{c.contacto ? " · 👤 "+c.contacto : ""}</div>
+                    </div>
+                    <button onClick={()=>{ if(window.confirm("¿Quitar a \""+c.nombre+"\" del directorio? (No afecta rutas ya guardadas)")) onBorrarCliente(c.id); }} style={{border:"none", background:"transparent", color:"#c0392b", fontSize:16, cursor:"pointer"}}>✕</button>
+                  </div>
+                ))}
+                {clientesDir.length===0 && <div style={{color:C.muted, fontSize:12.5, textAlign:"center", padding:"14px 0"}}>Aún no hay clientes guardados.</div>}
+              </div>
+            </div>
+          )}
+        </div>
         {ordenadas.map(ruta => {
           const res = resumenRuta(ruta);
           const cerrada = ruta.estado === "cerrada";
@@ -2967,6 +3017,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:10}}>
         <div style={{fontSize:20, fontWeight:800, color:C.text}}>🚚 {r.estado==="cerrada"?"Ruta":"Hoja de Ruta"} — {fmtDate(r.fecha)}</div>
+        <datalist id="wl-dir-clientes">{(clientesDir||[]).map(c => <option key={c.id} value={c.nombre}/>)}</datalist>
         <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
       </div>
 
@@ -3007,7 +3058,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre }) 
             </div>
             <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:8}}>
               <input value={p.horario} onChange={e=>setP(i,"horario",e.target.value)} placeholder="Horario (ej. 09:00)" style={iS}/>
-              <input value={p.cliente} onChange={e=>setP(i,"cliente",e.target.value)} placeholder="Cliente / Destino" style={iS}/>
+              <input value={p.cliente} list="wl-dir-clientes" onChange={e=>{ const v=e.target.value; setP(i,"cliente",v); const m=(clientesDir||[]).find(c=>(c.nombre||"").toLowerCase()===v.trim().toLowerCase()); if(m){ if(!p.direccion && m.direccion) setP(i,"direccion",m.direccion); if(!p.contacto && m.contacto) setP(i,"contacto",m.contacto); } }} placeholder="Cliente / Destino" style={iS}/>
               <input value={p.noPedido} onChange={e=>setP(i,"noPedido",e.target.value)} placeholder="No. Pedido / Orden" style={iS}/>
               <input value={p.direccion} onChange={e=>setP(i,"direccion",e.target.value)} placeholder="Dirección" style={iS}/>
               <input value={p.contacto} onChange={e=>setP(i,"contacto",e.target.value)} placeholder="Contacto" style={iS}/>
@@ -4694,6 +4745,7 @@ function AppInner() {
   const [adminBord, setAdminBord] = useState(false);
   const [tareas, setTareas] = useState([]);
   const [rutas, setRutas] = useState([]);
+  const [clientesDir, setClientesDir] = useState([]);
   const [rutaPdf, setRutaPdf] = useState(null);
   const [remisiones, setRemisiones] = useState([]);
   const [remisionPdf, setRemisionPdf] = useState(null);
@@ -4892,7 +4944,36 @@ if (usuario) {
     const id = String(ruta.id);
     const payload = { ...ruta, id, actualizadoPor: usuario.email, actualizado: new Date().toISOString() };
     await setDoc(doc(db, "rutas", id), payload, { merge: true });
+    // Directorio de clientes: guarda/actualiza automáticamente cliente + dirección de las paradas.
+    try { await upsertClientesDir((ruta.paradas || []).map(p => ({ nombre: p.cliente, direccion: p.direccion, contacto: p.contacto }))); } catch (e) { console.log("dir clientes:", e); }
   };
+
+  // ── Directorio de clientes (para autocompletar direcciones en rutas) ──
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    const unsub = onSnapshot(collection(db, "directorioClientes"), snap => {
+      setClientesDir(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")));
+    });
+    return unsub;
+  }, [usuario, rol]);
+  const clienteDirId = (nombre) => String(nombre || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/[\/\\#\[\]\.\$]/g, "-").slice(0, 140);
+  const upsertClientesDir = async (entradas) => {
+    const vistos = new Set();
+    for (const e of (entradas || [])) {
+      const nombre = String(e.nombre || "").trim();
+      const direccion = String(e.direccion || "").trim();
+      if (!nombre || !direccion) continue;
+      const id = clienteDirId(nombre);
+      if (!id || vistos.has(id)) continue;
+      vistos.add(id);
+      const data = { nombre, direccion, actualizado: new Date().toISOString() };
+      const contacto = String(e.contacto || "").trim();
+      if (contacto) data.contacto = contacto;
+      await setDoc(doc(db, "directorioClientes", id), data, { merge: true });
+    }
+  };
+  const borrarClienteDir = async (id) => { await deleteDoc(doc(db, "directorioClientes", String(id))); };
   const imprimirHojaRuta = (ruta) => setRutaPdf({ html: buildHojaRutaHtml(ruta), titulo: "Hoja de Ruta Diaria", archivo: "HojaRuta_"+ruta.fecha+".html" });
   const imprimirCierreRuta = (ruta) => setRutaPdf({ html: buildCierreRutaHtml(ruta), titulo: "Cierre de Ruta", archivo: "CierreRuta_"+ruta.fecha+".html" });
 
@@ -5807,6 +5888,9 @@ const cancelar = async (id) => {
         <Rutas
           rutas={rutas}
           ordenes={ordenes}
+          clientesDir={clientesDir}
+          onImportarClientes={upsertClientesDir}
+          onBorrarCliente={borrarClienteDir}
           onGuardar={guardarRuta}
           onImprimirHoja={imprimirHojaRuta}
           onImprimirCierre={imprimirCierreRuta}

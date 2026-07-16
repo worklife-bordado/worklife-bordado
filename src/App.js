@@ -1165,10 +1165,17 @@ function resumenRuta(ruta){
   const entregasOk = entregas.filter(p => p.estatus === "ok").length;
   const externosOk = externos.filter(p => p.estatus === "ok").length;
   const noCompletadas = entregas.filter(p => p.estatus === "x").length;
+  const entregasInc = entregas.filter(p => p.estatus === "inc").length;
+  const externosInc = externos.filter(p => p.estatus === "inc").length;
   const incidenciasCount = paradas.filter(p => p.estatus === "inc").length;
-  // null = sin actividad de ese tipo (no se calcula %)
-  const cumplimientoEntregas = entregas.length ? Math.round(entregasOk / entregas.length * 100) : null;
-  const cumplimientoExternos = externos.length ? Math.round(externosOk / externos.length * 100) : null;
+  // Las incidencias (causas fuera del control del chofer, validadas por Krisia al cerrar)
+  // NO entran al denominador: el % mide solo lo que sí estuvo en sus manos.
+  // Lo que quedó SIN marcar sí cuenta en contra: no marcar no puede salir gratis.
+  const entregasBase = entregas.length - entregasInc;
+  const externosBase = externos.length - externosInc;
+  // null = sin actividad evaluable de ese tipo (no se calcula %)
+  const cumplimientoEntregas = entregasBase ? Math.round(entregasOk / entregasBase * 100) : null;
+  const cumplimientoExternos = externosBase ? Math.round(externosOk / externosBase * 100) : null;
   const d = (ruta && ruta.docsEntregados) || {};
   // Documentos según la operación real:
   //  · Entrega a cliente (E): basta UNO — factura, albarán, remisión por préstamo o remisión de entrega
@@ -1178,7 +1185,7 @@ function resumenRuta(ruta){
   const hayLlevar = paradas.some(p => p.tipo === "B");
   const okLlevar = !hayLlevar || !!d.ordenes;
   const docsOk = okEntregas && okLlevar;
-  return { cumplimientoEntregas, cumplimientoExternos, entregasTotal: entregas.length, entregasOk, externosTotal: externos.length, externosOk, noCompletadas, incidenciasCount, docsOk };
+  return { cumplimientoEntregas, cumplimientoExternos, entregasTotal: entregas.length, entregasOk, entregasInc, entregasBase, externosTotal: externos.length, externosOk, externosInc, externosBase, noCompletadas, incidenciasCount, docsOk };
 }
 const RUTA_PDF_CSS = `
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -1202,6 +1209,7 @@ const RUTA_PDF_CSS = `
   .resumen { display:flex; gap:8px; margin-top:6px; }
   .resumen .box { flex:1; border:1px solid #999; padding:6px 8px; font-size:10px; }
   .resumen .box b { display:block; font-size:14px; color:#182B55; }
+  .nota { font-size:9px; color:#555; margin-top:6px; line-height:1.4; }
 `;
 function buildHojaRutaHtml(ruta){
   const paradas = (ruta.paradas) || [];
@@ -1289,9 +1297,10 @@ function buildCierreRutaHtml(ruta){
         <div class="box">Externos completados<b>${r.externosOk} / ${r.externosTotal}</b></div>
         <div class="box">Incidencias<b>${r.incidenciasCount}</b></div>
         <div class="box">Docs a Krisia<b>${r.docsOk?"Sí":"No"}</b></div>
-        <div class="box">Cumpl. entregas a clientes<b>${r.cumplimientoEntregas===null?"Sin actividad":r.cumplimientoEntregas+"%"}</b></div>
-        <div class="box">Cumpl. actividades con externos<b>${r.cumplimientoExternos===null?"Sin actividad":r.cumplimientoExternos+"%"}</b></div>
+        <div class="box">Cumpl. entregas a clientes<b>${r.cumplimientoEntregas===null?"Sin actividad":r.cumplimientoEntregas+"% ("+r.entregasOk+"/"+r.entregasBase+")"}</b></div>
+        <div class="box">Cumpl. actividades con externos<b>${r.cumplimientoExternos===null?"Sin actividad":r.cumplimientoExternos+"% ("+r.externosOk+"/"+r.externosBase+")"}</b></div>
       </div>
+      <div class="nota">El cumplimiento se calcula sobre las actividades que estuvieron en manos del chofer. Las incidencias validadas por Krisia (${r.incidenciasCount}) quedan fuera del cálculo. Las actividades sin marcar sí cuentan como no realizadas.</div>
       <div class="sec">INCIDENCIAS DEL DÍA</div>
       <table><tr><td style="height:48px">${escHtml(ruta.incidencias)}</td></tr></table>
       <div class="firmas">
@@ -3078,16 +3087,19 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
               <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Entregas a clientes</div>
               {res.cumplimientoEntregas===null
                 ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
-                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoEntregas>=90?"#4caf7d":res.cumplimientoEntregas>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoEntregas}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.entregasOk}/{res.entregasTotal})</span></div>}
+                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoEntregas>=90?"#4caf7d":res.cumplimientoEntregas>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoEntregas}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.entregasOk}/{res.entregasBase})</span></div>}
+              {res.entregasInc>0 && <div style={{fontSize:11, color:C.muted, marginTop:3}}>{res.entregasInc} incidencia(s) excluida(s) de {res.entregasTotal}</div>}
             </div>
             <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
               <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Actividades con externos</div>
               {res.cumplimientoExternos===null
                 ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
-                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoExternos>=90?"#4caf7d":res.cumplimientoExternos>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoExternos}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.externosOk}/{res.externosTotal})</span></div>}
+                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoExternos>=90?"#4caf7d":res.cumplimientoExternos>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoExternos}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.externosOk}/{res.externosBase})</span></div>}
+              {res.externosInc>0 && <div style={{fontSize:11, color:C.muted, marginTop:3}}>{res.externosInc} incidencia(s) excluida(s) de {res.externosTotal}</div>}
             </div>
           </div>
           <div style={{fontSize:12, color:C.muted, marginTop:10}}>{res.incidenciasCount} incidencia(s) · Docs a Krisia: {res.docsOk?"Sí":"No"}</div>
+          <div style={{fontSize:11.5, color:C.muted, marginTop:6, lineHeight:1.5}}>El % solo cuenta lo que estuvo en manos del chofer: las incidencias quedan fuera. Si una incidencia no se justifica, cámbiala a ✗ antes de cerrar y ahí sí le afecta. Lo que quede sin marcar cuenta como no realizado.</div>
         </div>
 
         <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
@@ -3848,9 +3860,9 @@ const BONOS_DEF = {
   andres: {
     nombre:"Andrés", puesto:"Aux. de Logística y Distribución", naKpi:"a6", naReparto:"equal",
     kpis: [
-      { id:"a1", label:"Cumplimiento de ruta", peso:0.20, auto:true, autoKey:"puntualidad", estim:true, cap:"% de actividades cumplidas (sugerido: cumplimiento de externos — recolecciones/proveedores)",
+      { id:"a1", label:"Cumplimiento de ruta", peso:0.20, auto:true, autoKey:"puntualidad", estim:true, cap:"% de actividades cumplidas (cumplimiento de externos — recolecciones/proveedores). Excluye incidencias validadas",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.25, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / total × 100)",
+      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.25, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / entregas evaluables × 100). Excluye incidencias validadas",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
       { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
         ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },
@@ -3933,11 +3945,13 @@ function autoValoresBonos(periodo, ordenes, rutas){
   const aTiempo = entregadas.filter(o => getFE(o, "entregada") <= new Date(o.fechaRequerida + "T23:59:59"));
   const cumplPedidos = entregadas.length ? Number(((aTiempo.length / entregadas.length) * 100).toFixed(1)) : "";
   // Andrés — a2 "entregas ejecutadas" = SOLO clientes; a1 "puntualidad" = cumplimiento de EXTERNOS
+  // Mismo criterio que los tableros y el cierre: las incidencias validadas por Krisia NO entran
+  // al denominador (base = total − incidencias). Lo que quedó sin marcar sí cuenta en contra.
   const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
-  let entTot=0, entOk=0, extTot=0, extOk=0;
-  rutasMes.forEach(r => { const s=resumenRuta(r); entTot+=s.entregasTotal; entOk+=s.entregasOk; extTot+=s.externosTotal; extOk+=s.externosOk; });
-  const entregasEjec = entTot ? Math.round(entOk/entTot*100) : "";
-  const externosPct = extTot ? Math.round(extOk/extTot*100) : "";
+  let entBase=0, entOk=0, extBase=0, extOk=0;
+  rutasMes.forEach(r => { const s=resumenRuta(r); entBase+=s.entregasBase; entOk+=s.entregasOk; extBase+=s.externosBase; extOk+=s.externosOk; });
+  const entregasEjec = entBase ? Math.round(entOk/entBase*100) : "";
+  const externosPct = extBase ? Math.round(extOk/extBase*100) : "";
   // Andrés a4 — cumplimiento documental: por cada día (ruta) hay hasta 2 obligaciones
   //  · si hay entrega a cliente (E): cumple si está palomeada factura O albarán
   //  · si hay "llevar a externo" (B): cumple si está palomeada la orden de externos

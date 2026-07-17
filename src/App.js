@@ -3791,17 +3791,20 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 }
 
 
-function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables, miEmail }) {
+function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asignables, miEmail }) {
   const [texto, setTexto] = useState("");
   const [para, setPara] = useState(asignables[0].email);
   const [verDe, setVerDe] = useState("mios"); // "mios" | "todos" | email
   const [completando, setCompletando] = useState([]);
   const [confirm, setConfirm] = useState("");
+  const [deshacer, setDeshacer] = useState(null); // {id, texto} de la última completada
+  const timerDeshacer = useRef(null);
   const etiquetaDe = (email) => { const a = asignables.find(x => x.email === email); return a ? (a.label === "Yo" ? "Yo" : a.label.split(" · ")[0]) : (email||"").split("@")[0]; };
-  const visibles = !esAdmin ? tareas
-    : verDe === "mios" ? tareas.filter(t => t.para === miEmail)
-    : verDe === "todos" ? tareas
-    : tareas.filter(t => t.para === verDe);
+  const activas = tareas.filter(t => !t.completada);
+  const visibles = !esAdmin ? activas
+    : verDe === "mios" ? activas.filter(t => t.para === miEmail)
+    : verDe === "todos" ? activas
+    : activas.filter(t => t.para === verDe);
   const agregar = async () => {
     const t = texto.trim(); if (!t) return;
     await onAgregar(t, esAdmin ? para : null);
@@ -3812,7 +3815,24 @@ function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables, miEma
       setTimeout(() => setConfirm(""), 2500);
     }
   };
-  const marcar = (id) => { setCompletando(c => [...c, id]); setTimeout(() => onCompletar(id), 650); };
+  const marcar = (id) => {
+    const t = tareas.find(x => x.id === id);
+    setCompletando(c => [...c, id]);
+    setTimeout(() => {
+      onCompletar(id);
+      // Ventana para deshacer un toque accidental (6 segundos)
+      setDeshacer({ id, texto: (t && t.texto) || "" });
+      if (timerDeshacer.current) clearTimeout(timerDeshacer.current);
+      timerDeshacer.current = setTimeout(() => setDeshacer(null), 6000);
+    }, 650);
+  };
+  const revivir = () => {
+    if (!deshacer) return;
+    onDeshacer(deshacer.id);
+    setCompletando(c => c.filter(x => x !== deshacer.id));
+    if (timerDeshacer.current) clearTimeout(timerDeshacer.current);
+    setDeshacer(null);
+  };
   return (
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"20px 18px",marginTop:24}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
@@ -3836,13 +3856,22 @@ function Pendientes({ tareas, onAgregar, onCompletar, esAdmin, asignables, miEma
       </div>
       {confirm && <div style={{color:"#4caf7d",fontSize:13,fontWeight:700,marginBottom:10}}>{confirm}</div>}
       {visibles.length === 0 && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>{(!esAdmin || verDe==="mios") ? "No tienes pendientes 🎉" : "Sin pendientes aquí 🎉"}</div>}
+      {deshacer && (
+        <div style={{display:"flex",alignItems:"center",gap:10,background:"#13351f",border:"1px solid #4caf7d",borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+          <div style={{flex:1,fontSize:13,color:"#cdeed9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✓ Completada: {deshacer.texto}</div>
+          <button onClick={revivir} style={{border:"none",borderRadius:8,background:"#4caf7d",color:"#fff",padding:"8px 14px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ Deshacer</button>
+        </div>
+      )}
       {visibles.map(t => {
         const done = completando.includes(t.id);
         const ajena = esAdmin && verDe !== "mios" && t.para !== miEmail;
         return (
-          <div key={t.id} onClick={()=>!done && marcar(t.id)} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 4px",borderBottom:"1px solid "+C.border,cursor:"pointer",opacity:done?0.4:1,transition:"opacity 0.35s"}}>
-            <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
-            <div style={{flex:1,color:C.text,fontSize:14,textDecoration:done?"line-through":"none"}}>{t.texto}</div>
+          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid "+C.border,opacity:done?0.4:1,transition:"opacity 0.35s"}}>
+            <div onClick={()=>!done && marcar(t.id)} title="Marcar como completada"
+              style={{padding:"8px", margin:"-4px 0", cursor:"pointer", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center"}}>
+              <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
+            </div>
+            <div style={{flex:1,color:C.text,fontSize:14,textDecoration:done?"line-through":"none",padding:"4px 0"}}>{t.texto}</div>
             {ajena && <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{etiquetaDe(t.para)}</span>}
           </div>
         );
@@ -5522,6 +5551,15 @@ if (usuario) {
       const arr = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       arr.sort((a, b) => (a.fecha?.seconds || 0) - (b.fecha?.seconds || 0));
       setTareas(arr);
+      // Depurar completadas con más de 15 días (fuego y olvido; las reglas ya limitan quién puede)
+      if (!window.__tareasDepuradas) {
+        window.__tareasDepuradas = true;
+        const corte = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+        snap.docs.forEach(d => {
+          const t = d.data();
+          if (t.completada && t.completadaEl && t.completadaEl < corte) { deleteDoc(doc(db, "tareas", d.id)).catch(()=>{}); }
+        });
+      }
     });
     return unsub;
   }, [usuario, rol]);
@@ -5532,7 +5570,15 @@ if (usuario) {
       creadoPorNombre: usuario.displayName || usuario.email, fecha: serverTimestamp(),
     });
   };
-  const completarTarea = async (id) => { try { await deleteDoc(doc(db, "tareas", id)); } catch (e) {} };
+  // Completar NO borra: marca la tarea como completada (con quién y cuándo) para
+  // poder deshacer un toque accidental. Las completadas con más de 15 días se
+  // depuran solas al cargar, para que la colección no crezca sin límite.
+  const completarTarea = async (id) => {
+    try { await updateDoc(doc(db, "tareas", id), { completada: true, completadaEl: new Date().toISOString(), completadaPor: usuario.email }); } catch (e) {}
+  };
+  const deshacerTarea = async (id) => {
+    try { await updateDoc(doc(db, "tareas", id), { completada: false, completadaEl: "", completadaPor: "" }); } catch (e) {}
+  };
 
   // ── Rutas (hoja de ruta diaria + cierre) ──────────────────────────────────
   useEffect(() => {
@@ -6416,6 +6462,7 @@ const cancelar = async (id) => {
             tareas={tareas}
             onAgregar={agregarTarea}
             onCompletar={completarTarea}
+            onDeshacer={deshacerTarea}
             esAdmin={rol === "admin"}
             miEmail={usuario.email}
             asignables={(() => {

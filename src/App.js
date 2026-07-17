@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Component } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDoc, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
@@ -4474,13 +4474,16 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
     const nueva = fechaConHora(diaISO, hhmm);
     if (!window.confirm("¿Cambiar "+CHK_TIPO_LBL(reg.tipo)+" de "+chkHora(reg.ts)+" a "+hhmm+"?\n\nQuedará registrado que lo corrigió "+quienCorrige()+".")) return;
     try {
-      await updateDoc(doc(db, "checadas", reg.id), {
+      const cambios = {
         ts: Timestamp.fromDate(nueva),
         corregido: true,
-        tsOriginal: reg.corregido ? undefined : Timestamp.fromDate(reg.ts), // conserva el original la 1a vez
         corregidoPor: quienCorrige(),
         corregidoEl: serverTimestamp(),
-      });
+      };
+      // Conserva la hora original SOLO la primera vez; updateDoc no acepta undefined,
+      // así que el campo se agrega condicionalmente en vez de mandarlo vacío.
+      if (!reg.corregido) cambios.tsOriginal = Timestamp.fromDate(reg.ts);
+      await updateDoc(doc(db, "checadas", reg.id), cambios);
       setVer(v=>v+1);
     } catch(e){ alert("No se pudo corregir: "+e.message); }
   };
@@ -4712,6 +4715,9 @@ function BandaChecada({ pin }){
     } catch(e) {
       // Aquí son horas y es dinero: el error tiene que ser inequívoco.
       setMsg({ t: e.message === "Failed to fetch" ? "Sin conexión: tu checada NO se registró" : e.message, c: "#c0392b" });
+      // Si el servidor rechazó (p.ej. ya checó esto en el kiosco), los botones están
+      // desactualizados: se refrescan solos para ofrecer el paso correcto.
+      if (e.message !== "Failed to fetch") { try { setSt(await pedir({ accion:"estado" })); } catch(e2){} }
     }
     setEnvi(false);
   };
@@ -4806,6 +4812,15 @@ function RutaMovil(){
   const ultRefresco = useRef(0);              // timestamp del último refresco, para no repetir de más
   const C2 = C;
 
+  // Si las paradas ya traen un orden consecutivo (1..k), se reconstruye la secuencia
+  // para NO borrarle al chofer lo que ya había asignado: al corregir el kilometraje,
+  // o cuando Krisia agrega una actividad antes del inicio, solo toca lo que falta.
+  const seqDesdeOrden = (ps) => {
+    const con = (ps || []).filter(p => Number(p.orden) > 0).sort((a, b) => a.orden - b.orden);
+    const consecutivo = con.length > 0 && con.every((p, i) => Number(p.orden) === i + 1);
+    return consecutivo ? con.map(p => p.idx) : [];
+  };
+
   const llamar = async (accion, extra) => {
     const resp = await fetch("/api/ruta-movil", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -4826,7 +4841,7 @@ function RutaMovil(){
       if (resp.status === 401) { alert("PIN incorrecto"); setPin(""); setCargando(false); return; }
       if (!resp.ok) throw new Error(data.error || ("Error " + resp.status));
       setPinOk(true); setRuta(data.ruta); setHoy(data.hoy || ""); setUltAct(horaLocal()); ultRefresco.current = Date.now();
-      if (data.ruta) { setKmIni(data.ruta.kmInicial || ""); setSeq([]); }
+      if (data.ruta) { setKmIni(data.ruta.kmInicial || ""); setSeq(seqDesdeOrden(data.ruta.paradas)); }
     } catch (e) { setErr("No se pudo cargar la ruta: " + e.message); }
     setCargando(false);
   };
@@ -4929,7 +4944,10 @@ function RutaMovil(){
     try {
       const r = await llamar("preparar", { rutaId: ruta.id, kmInicial: String(kmIni).trim(), orden: seq });
       setRuta(r.ruta);
-    } catch (e) { alert(e.message); }
+    } catch (e) {
+      alert(e.message);
+      if (e.message !== "Failed to fetch") cargarHoy(pin); // la ruta cambió: traer la versión fresca
+    }
     setGuardando(false);
   };
   const iniciarRuta = async () => {
@@ -4937,7 +4955,10 @@ function RutaMovil(){
     try {
       const r = await llamar("iniciar", { rutaId: ruta.id });
       setRuta(r.ruta);
-    } catch (e) { alert(e.message); }
+    } catch (e) {
+      alert(e.message);
+      if (e.message !== "Failed to fetch") cargarHoy(pin); // la ruta cambió: traer la versión fresca
+    }
     setGuardando(false);
   };
 
@@ -5103,7 +5124,7 @@ function RutaMovil(){
         <button onClick={iniciarRuta} disabled={guardando} style={{...btnGrande("#4caf7d"), opacity:guardando?0.6:1}}>
           {guardando ? "Iniciando…" : "▶️ Iniciar ruta"}
         </button>
-        <button onClick={()=>{ setRuta(p=>({...p, preparada:false})); setSeq([]); }}
+        <button onClick={()=>{ setRuta(p=>({...p, preparada:false})); setSeq(seqDesdeOrden(paradas)); }}
           style={{width:"100%", border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit", marginTop:10}}>
           ✏️ Corregir kilometraje u orden
         </button>
@@ -5525,6 +5546,50 @@ if (usuario) {
   const guardarRuta = async (ruta) => {
     const id = String(ruta.id);
     const payload = { ...ruta, id, actualizadoPor: usuario.email, actualizado: new Date().toISOString() };
+    // ── Protección contra copias viejas ──
+    // Si Krisia abrió la ruta ANTES de que el chofer la preparara/avanzara y guarda
+    // DESPUÉS, su copia en pantalla no trae el orden, el km, ni las marcas del chofer,
+    // y setDoc reemplazaría el arreglo completo borrándoselos. Antes de escribir se
+    // lee la versión actual y se rellena lo que la copia no trae. Solo se RELLENAN
+    // huecos: lo que Krisia sí capturó (estatus, obs, etc.) se respeta tal cual.
+    try {
+      const snapAct = await getDoc(doc(db, "rutas", id));
+      if (snapAct.exists()) {
+        const act = snapAct.data();
+        // Una copia vieja en "planeada" no puede regresar una ruta ya iniciada.
+        if (act.estado === "en_ruta" && payload.estado === "planeada") payload.estado = "en_ruta";
+        if (!payload.kmInicial && act.kmInicial) payload.kmInicial = act.kmInicial;
+        if (!payload.horaSalida && act.horaSalida) payload.horaSalida = act.horaSalida;
+        // ¿El celular escribió DESPUÉS de que Krisia abrió su copia? actualizadoMovil
+        // solo lo escribe el celular, así que si difiere, la copia de ella es vieja
+        // respecto a lo que el chofer hizo. Solo en ese caso se rellenan las marcas:
+        // así una limpieza deliberada de Krisia (des-marcar una parada, quitar una
+        // hora) sí se respeta cuando su copia está al día.
+        const movilCambio = (act.actualizadoMovil || "") !== (ruta.actualizadoMovil || "");
+        const actP = act.paradas || [];
+        payload.paradas = (payload.paradas || []).map((pa, i) => {
+          const q = actP[i];
+          if (!q) return pa;
+          // Solo si es claramente la misma parada (misma posición, tipo, cliente y pedido).
+          const misma = pa.tipo === q.tipo && (pa.cliente || "") === (q.cliente || "") && (pa.noPedido || "") === (q.noPedido || "");
+          if (!misma) return pa;
+          const r2 = { ...pa };
+          if (!r2.orden && q.orden) r2.orden = q.orden; // el orden solo existe en el celular: siempre se rellena
+          if (movilCambio) {
+            if (!r2.estatus && q.estatus) r2.estatus = q.estatus;
+            if (!r2.horaReal && q.horaReal) r2.horaReal = q.horaReal;
+            if (!r2.obs && q.obs) r2.obs = q.obs;
+          }
+          return r2;
+        });
+        // Documentos palomeados desde el celular: no se pierden por una copia vieja.
+        if (movilCambio) {
+          const de = { ...(payload.docsEntregados || {}) };
+          Object.entries(act.docsEntregados || {}).forEach(([k, v]) => { if (v && !de[k]) de[k] = v; });
+          payload.docsEntregados = de;
+        }
+      }
+    } catch (e) { console.log("reconciliar ruta:", e); }
     await setDoc(doc(db, "rutas", id), payload, { merge: true });
     // Directorio de clientes: guarda/actualiza automáticamente cliente + dirección de las paradas.
     try { await upsertClientesDir((ruta.paradas || []).map(p => ({ nombre: p.cliente, direccion: p.direccion, contacto: p.contacto }))); } catch (e) { console.log("dir clientes:", e); }
@@ -5534,11 +5599,12 @@ if (usuario) {
   useEffect(() => {
     if (!usuario?.email) return;
     if (!(rol === "admin" || rol === "seguimiento")) return;
+    if (vista !== "rutas") return;
     const unsub = onSnapshot(collection(db, "directorioClientes"), snap => {
       setClientesDir(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")));
     });
     return unsub;
-  }, [usuario, rol]);
+  }, [usuario, rol, vista]);
   const clienteDirId = (nombre) => String(nombre || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/[\/\\#\[\]\.\$]/g, "-").slice(0, 140);
   const upsertClientesDir = async (entradas) => {
     const vistos = new Set();
@@ -5636,11 +5702,12 @@ if (usuario) {
   // ── Pago a bordadores ──
   useEffect(() => {
     if (!usuario?.email || rol !== "admin") return;
+    if (vista !== "pagos") return;
     const unsub = onSnapshot(collection(db, "liquidaciones"), snap => {
       setLiquidaciones(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     return unsub;
-  }, [usuario, rol]);
+  }, [usuario, rol, vista]);
   const setPrecioLogo = async (logoId, precio) => {
     if (!logoId) return;
     try { await setDoc(doc(db, "logos", logoId), { precio: (precio===null||precio===undefined||isNaN(precio)) ? null : Number(precio) }, { merge: true }); }

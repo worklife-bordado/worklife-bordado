@@ -36,6 +36,23 @@ onMessage(messaging, (payload) => {
 // Los datos siguen llegando en vivo: la caché no los deja viejos.
 // Si el navegador no permite IndexedDB (modo incógnito, almacenamiento lleno),
 // se cae a memoria y la app sigue funcionando igual, solo sin el ahorro.
+// ── Blindaje contra el traductor del navegador ──
+// Google Translate envuelve los textos en <font> y descoloca los nodos que React
+// administra; al siguiente re-render, React truena con "removeChild: el nodo no es
+// hijo de este nodo". Esto corre al cargar el bundle para cubrir TODOS los modos
+// (app, kiosco y ruta móvil): el efecto que ya existía en AppInner nunca corría en
+// los modos del chofer porque esos retornan antes de montarlo.
+try {
+  document.documentElement.lang = "es";
+  document.documentElement.setAttribute("translate", "no");
+  document.documentElement.classList.add("notranslate");
+  if (!document.querySelector('meta[name="google"][content="notranslate"]')) {
+    const m = document.createElement("meta");
+    m.name = "google"; m.content = "notranslate";
+    document.head.appendChild(m);
+  }
+} catch (e) {}
+
 let db;
 try {
   db = initializeFirestore(firebaseApp, {

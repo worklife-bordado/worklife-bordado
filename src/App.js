@@ -36,6 +36,26 @@ onMessage(messaging, (payload) => {
 // Los datos siguen llegando en vivo: la caché no los deja viejos.
 // Si el navegador no permite IndexedDB (modo incógnito, almacenamiento lleno),
 // se cae a memoria y la app sigue funcionando igual, solo sin el ahorro.
+// URL de Google Maps con las paradas de una ruta EN EL ORDEN DEL CHOFER.
+// Mismo criterio que el botón "Visualiza tu ruta" del celular: sin origen (Maps
+// arranca desde la ubicación actual), máximo 9 escalas + 1 destino de Google.
+function urlMapsOrdenChofer(paradas) {
+  const conOrden = (paradas || []).filter(p => Number(p.orden) > 0 && p.direccion)
+    .sort((a, b) => a.orden - b.orden).map(p => p.direccion);
+  if (!conOrden.length) return null;
+  if (conOrden.length === 1) {
+    return { url: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(conOrden[0]), n: 1, total: 1 };
+  }
+  const usadas = conOrden.slice(0, 10);
+  const destino = usadas[usadas.length - 1];
+  const escalas = usadas.slice(0, -1);
+  return {
+    url: "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(destino)
+      + (escalas.length ? "&waypoints=" + escalas.map(encodeURIComponent).join("%7C") : ""),
+    n: usadas.length, total: conOrden.length,
+  };
+}
+
 // ── Blindaje contra el traductor del navegador ──
 // Google Translate envuelve los textos en <font> y descoloca los nodos que React
 // administra; al siguiente re-render, React truena con "removeChild: el nodo no es
@@ -3060,6 +3080,30 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
         <datalist id="wl-dir-clientes">{(clientesDir||[]).map(c => <option key={c.id} value={c.nombre}/>)}</datalist>
         <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
       </div>
+
+      {(() => {
+        const conOrden = (r.paradas || []).filter(p => Number(p.orden) > 0).length;
+        const m = urlMapsOrdenChofer(r.paradas);
+        if (!conOrden) return (
+          <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:12.5, color:C.muted}}>
+            🗺️ El chofer aún no asigna el orden de esta ruta — cuando lo haga, aquí podrás verla en Google Maps.
+          </div>
+        );
+        return (
+          <div style={{display:"flex", alignItems:"center", gap:12, background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px", marginBottom:14, flexWrap:"wrap"}}>
+            <div style={{flex:1, minWidth:200, fontSize:12.5, color:C.muted}}>
+              Orden del chofer: <b style={{color:C.text}}>{(r.paradas||[]).filter(p=>Number(p.orden)>0).sort((a,b)=>a.orden-b.orden).map(p=>p.orden+". "+(p.cliente||"—")).join("  →  ")}</b>
+              {conOrden < (r.paradas||[]).length ? <span> · {(r.paradas||[]).length - conOrden} sin orden aún</span> : null}
+            </div>
+            {m && (
+              <a href={m.url} target="_blank" rel="noopener noreferrer"
+                style={{border:"none", borderRadius:9, background:"#5c8fe0", color:"#fff", padding:"10px 16px", fontSize:13, fontWeight:800, textDecoration:"none", whiteSpace:"nowrap"}}>
+                🗺️ Ver en Google Maps{m.n < m.total ? " ("+m.n+" de "+m.total+")" : ""}
+              </a>
+            )}
+          </div>
+        );
+      })()}
 
       {cerrada && (
         <div style={{display:"flex", alignItems:"center", gap:10, background:"#13351f", border:"1px solid "+C.success, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:"#cdeed9"}}>

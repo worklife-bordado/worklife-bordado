@@ -4915,6 +4915,9 @@ function RutaMovil(){
   const [guardObs, setGuardObs] = useState(null); // idx que se está guardando
   const [okObs, setOkObs] = useState(null);       // idx con "Guardado ✓" visible
   const [incDia, setIncDia] = useState("");       // incidencias del día (campo libre de la ruta)
+  const [kmFin, setKmFin] = useState("");         // kilometraje final (se captura al regresar)
+  const [guardKmF, setGuardKmF] = useState(false);
+  const [okKmF, setOkKmF] = useState(false);
   const [guardInc, setGuardInc] = useState(false);
   const [okInc, setOkInc] = useState(false);
   const [ultAct, setUltAct] = useState("");   // hora del último refresco
@@ -5018,7 +5021,7 @@ function RutaMovil(){
     setAbierto(idx);
     setBorrador(b => ({ ...b, [idx]: b[idx] !== undefined ? b[idx] : (textoActual || "") }));
   };
-  useEffect(() => { if (ruta && ruta.id) setIncDia(ruta.incidencias || ""); }, [ruta && ruta.id]); // eslint-disable-line
+  useEffect(() => { if (ruta && ruta.id) { setIncDia(ruta.incidencias || ""); setKmFin(ruta.kmFinal || ""); } }, [ruta && ruta.id]); // eslint-disable-line
 
   const marcar = async (idx, estatus) => {
     const actual = (ruta.paradas || []).find(x => x.idx === idx) || {};
@@ -5050,6 +5053,16 @@ function RutaMovil(){
     setAbierto(null);
     setBorrador(b => { const n = { ...b }; delete n[idx]; return n; });
     setPendInc(pi => pi === idx ? null : pi); // si era una Inc sin motivo, no se registra
+  };
+  const guardarKmFinal = async () => {
+    if (!/^\d{1,8}$/.test(String(kmFin).trim()) || Number(kmFin) <= 0) { alert("Captura el kilometraje final del vehículo."); return; }
+    setGuardKmF(true);
+    try {
+      const r = await llamar("kmfinal", { rutaId: ruta.id, kmFinal: String(kmFin).trim() });
+      setRuta(p => ({ ...p, kmFinal: r.kmFinal }));
+      setOkKmF(true); setTimeout(() => setOkKmF(false), 2500);
+    } catch (e) { alert(e.message); }
+    setGuardKmF(false);
   };
   const guardarIncDia = async () => {
     setGuardInc(true);
@@ -5303,6 +5316,8 @@ function RutaMovil(){
       <div style={{color:C2.muted, fontSize:13, marginBottom:14}}>
         {fmtDate(ruta.fecha)} · {hechas}/{total} paradas registradas
         {ruta.kmInicial ? <> · 🔢 Km inicial {ruta.kmInicial}</> : null}
+        {ruta.kmFinal ? <> · 🏁 Km final {ruta.kmFinal}</> : null}
+        {ruta.kmInicial && ruta.kmFinal ? <> · 🚗 {Number(ruta.kmFinal) - Number(ruta.kmInicial)} km recorridos</> : null}
         {ruta.horaSalida ? <> · 🕐 Salida {ruta.horaSalida}</> : null}
       </div>
       {enRuta && !cerrada && (
@@ -5442,6 +5457,26 @@ function RutaMovil(){
           </div>
         )}
       </div>
+
+      {!cerrada && (
+        <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginBottom:12}}>
+          <div style={{fontSize:13.5, fontWeight:800, marginBottom:2}}>🏁 Kilometraje final</div>
+          <div style={{fontSize:11.5, color:C2.muted, marginBottom:8}}>Lee el odómetro al regresar. Con esto se calculan los kilómetros del día.</div>
+          <input value={kmFin} onChange={e=>setKmFin(e.target.value.replace(/\D/g,""))}
+            inputMode="numeric" pattern="[0-9]*" placeholder={ruta.kmInicial ? "Mayor a "+ruta.kmInicial : "Ej. 128610"}
+            style={{width:"100%", boxSizing:"border-box", border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.text, padding:"14px", fontSize:22, fontWeight:900, textAlign:"center", letterSpacing:2, fontFamily:"inherit"}}/>
+          <div style={{display:"flex", gap:10, alignItems:"center", marginTop:8}}>
+            <button disabled={guardKmF} onClick={guardarKmFinal}
+              style={{border:"none", borderRadius:10, background:"#5c8fe0", color:"#fff", padding:"12px 18px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardKmF?0.6:1}}>
+              {guardKmF ? "Guardando…" : "Guardar"}
+            </button>
+            {okKmF && <div style={{fontSize:12.5, color:C2.success, fontWeight:800}}>Guardado ✓</div>}
+            {ruta.kmInicial && kmFin && Number(kmFin) >= Number(ruta.kmInicial) && (
+              <div style={{marginLeft:"auto", fontSize:12, color:C2.muted}}>🚗 {Number(kmFin) - Number(ruta.kmInicial)} km</div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginTop:6, marginBottom:30}}>
         <div style={{fontSize:13.5, fontWeight:800, marginBottom:4}}>📄 Documentos para Krisia</div>
@@ -5720,6 +5755,7 @@ if (usuario) {
         // Una copia vieja en "planeada" no puede regresar una ruta ya iniciada.
         if (act.estado === "en_ruta" && payload.estado === "planeada") payload.estado = "en_ruta";
         if (!payload.kmInicial && act.kmInicial) payload.kmInicial = act.kmInicial;
+        if (!payload.kmFinal && act.kmFinal) payload.kmFinal = act.kmFinal;
         if (!payload.horaSalida && act.horaSalida) payload.horaSalida = act.horaSalida;
         // ¿El celular escribió DESPUÉS de que Krisia abrió su copia? actualizadoMovil
         // solo lo escribe el celular, así que si difiere, la copia de ella es vieja

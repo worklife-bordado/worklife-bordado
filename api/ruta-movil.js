@@ -50,6 +50,7 @@ function serializarRuta(ruta) {
     fecha: ruta.fecha,
     estado: ruta.estado || 'planeada',
     kmInicial: ruta.kmInicial || '',
+    kmFinal: ruta.kmFinal || '',
     horaSalida: ruta.horaSalida || '',
     responsable: ruta.responsable || '',
     preparada: estaPreparada(ruta),
@@ -257,6 +258,29 @@ export default async function handler(req, res) {
 
       await ref.update({ incidencias: texto.slice(0, 2000), actualizadoMovil: firma() });
       return res.status(200).json({ ok: true });
+    }
+
+    // 2.c4) Kilometraje final — al regresar, con la ruta iniciada
+    if (accion === 'kmfinal') {
+      const { rutaId, kmFinal } = body;
+      if (!rutaId) return res.status(400).json({ error: 'Datos inválidos' });
+
+      const km = String(kmFinal == null ? '' : kmFinal).trim();
+      if (!/^\d{1,8}$/.test(km) || Number(km) <= 0) {
+        return res.status(400).json({ error: 'Captura un kilometraje final válido' });
+      }
+
+      const { ref, ruta, error } = await cargarRuta(rutaId);
+      if (error) return res.status(error.code).json({ error: error.msg });
+      if (ruta.estado !== 'en_ruta') return res.status(409).json({ error: 'Primero debes iniciar la ruta' });
+
+      const ini = Number(ruta.kmInicial || 0);
+      if (ini && Number(km) < ini) {
+        return res.status(400).json({ error: 'El kilometraje final no puede ser menor al inicial (' + ruta.kmInicial + ')' });
+      }
+
+      await ref.update({ kmFinal: km, actualizadoMovil: firma() });
+      return res.status(200).json({ ok: true, kmFinal: km });
     }
 
     // 2.d) Documentos — requiere ruta iniciada

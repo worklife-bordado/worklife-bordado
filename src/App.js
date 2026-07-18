@@ -1327,8 +1327,8 @@ function buildCierreRutaHtml(ruta){
     <div class="body">
       <div class="sec">DATOS GENERALES</div>
       <table>
-        <tr><th>Hora salida bodega</th><th>Hora regreso bodega</th><th>Km inicial</th><th>Km final</th></tr>
-        <tr><td>${escHtml(ruta.horaSalida)}</td><td>${escHtml(ruta.horaRegreso)}</td><td>${escHtml(ruta.kmInicial)}</td><td>${escHtml(ruta.kmFinal)}</td></tr>
+        <tr><th>Inicio de ruta</th><th>Km inicial</th><th>Km final</th><th>Km recorridos</th></tr>
+        <tr><td>${escHtml(ruta.horaSalida)}</td><td>${escHtml(ruta.kmInicial)}</td><td>${escHtml(ruta.kmFinal)}</td><td>${ruta.kmInicial && ruta.kmFinal && Number(ruta.kmFinal) >= Number(ruta.kmInicial) ? (Number(ruta.kmFinal) - Number(ruta.kmInicial)) + " km" : ""}</td></tr>
       </table>
       <div class="sec">RESUMEN DE ENTREGAS A CLIENTES</div>
       <table>
@@ -3081,6 +3081,12 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
         <button onClick={()=>setR(null)} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.muted, padding:"9px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>← Volver</button>
       </div>
 
+      {cerrada && (
+        <div style={{display:"flex", alignItems:"center", gap:10, background:"#13351f", border:"1px solid "+C.success, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:"#cdeed9"}}>
+          🔒 <b>Ruta cerrada — solo lectura.</b> Para editarla, pulsa <b>Reabrir ruta</b> abajo.
+        </div>
+      )}
+
       {(() => {
         const conOrden = (r.paradas || []).filter(p => Number(p.orden) > 0).length;
         const m = urlMapsOrdenChofer(r.paradas);
@@ -3105,11 +3111,48 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
         );
       })()}
 
-      {cerrada && (
-        <div style={{display:"flex", alignItems:"center", gap:10, background:"#13351f", border:"1px solid "+C.success, borderRadius:10, padding:"11px 16px", marginBottom:16, fontSize:13, color:"#cdeed9"}}>
-          🔒 <b>Ruta cerrada — solo lectura.</b> Para editarla, pulsa <b>Reabrir ruta</b> abajo.
+
+        {/* Resumen automático */}
+        <div style={{border:"2px solid #4caf7d", background:"rgba(76,175,125,.10)", borderRadius:12, padding:"14px 16px", marginBottom:18}}>
+          <div style={{fontSize:13, fontWeight:700, color:C.text, marginBottom:10}}>Resumen del día (automático)</div>
+          <div style={{display:"flex", gap:14, flexWrap:"wrap"}}>
+            <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
+              <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Entregas a clientes</div>
+              {res.cumplimientoEntregas===null
+                ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
+                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoEntregas>=90?"#4caf7d":res.cumplimientoEntregas>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoEntregas}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.entregasOk}/{res.entregasBase})</span></div>}
+              {res.entregasInc>0 && <div style={{fontSize:11, color:C.muted, marginTop:3}}>{res.entregasInc} incidencia(s) excluida(s) de {res.entregasTotal}</div>}
+            </div>
+            <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
+              <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Actividades con externos</div>
+              {res.cumplimientoExternos===null
+                ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
+                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoExternos>=90?"#4caf7d":res.cumplimientoExternos>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoExternos}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.externosOk}/{res.externosBase})</span></div>}
+              {res.externosInc>0 && <div style={{fontSize:11, color:C.muted, marginTop:3}}>{res.externosInc} incidencia(s) excluida(s) de {res.externosTotal}</div>}
+            </div>
+          </div>
+          <div style={{fontSize:12, color:C.muted, marginTop:10}}>{res.incidenciasCount} incidencia(s) · Docs: {(() => {
+            // Mismo criterio que docsOk y el KPI documental:
+            //  · Entregas a cliente (E): basta UNO — factura, albarán o remisión
+            //  · Llevar a externo (B): orden de trabajo
+            //  · Recoger (R) y Devolución (D): no requieren documento
+            const d = r.docsEntregados || {};
+            const hayE = (r.paradas || []).some(p => p.tipo === "E");
+            const hayB = (r.paradas || []).some(p => p.tipo === "B");
+            if (!hayE && !hayB) return <span style={{color:C.muted}}>sin documentos requeridos hoy</span>;
+            const nombres = { facturas:"Factura", albaranes:"Albarán", remisiones:"Rem. préstamo", remisionesEntrega:"Rem. entrega" };
+            const marcadosE = Object.keys(nombres).filter(k => d[k]).map(k => nombres[k]);
+            const partes = [];
+            if (hayE) partes.push(marcadosE.length
+              ? <span key="e">Entrega: {marcadosE.join(" · ")} <b style={{color:"#4caf7d"}}>✓</b></span>
+              : <span key="e">Entrega: <b style={{color:"#c0392b"}}>falta uno (factura, albarán o remisión)</b></span>);
+            if (hayB) partes.push(<span key="b">Orden de trabajo {d.ordenes ? <b style={{color:"#4caf7d"}}>✓</b> : <b style={{color:"#c0392b"}}>✗</b>}</span>);
+            return partes.map((pz, i) => <span key={i}>{i > 0 ? " · " : ""}{pz}</span>);
+          })()}</div>
+          <div style={{fontSize:12.5, color:C.text, marginTop:10}}>🔢 Km inicial <b>{r.kmInicial || "—"}</b> · 🏁 Km final <b>{r.kmFinal || "—"}</b> · 🚗 Recorridos <b>{r.kmInicial && r.kmFinal && Number(r.kmFinal) >= Number(r.kmInicial) ? (Number(r.kmFinal) - Number(r.kmInicial)) + " km" : "—"}</b>{r.horaSalida ? <> · 🕐 Inicio {r.horaSalida}</> : null}</div>
+          <div style={{fontSize:12.5, color:C.text, marginTop:8}}>⚠️ Incidencias del día: {r.incidencias ? <span style={{color:"#f5a623"}}>{r.incidencias}</span> : <span style={{color:C.muted}}>sin incidencias registradas</span>}</div>
+          <div style={{fontSize:11.5, color:C.muted, marginTop:6, lineHeight:1.5}}>El % solo cuenta lo que estuvo en manos del chofer: las incidencias quedan fuera. Si una incidencia no se justifica, cámbiala a ✗ antes de cerrar y ahí sí le afecta. Lo que quede sin marcar cuenta como no realizado.</div>
         </div>
-      )}
 
       <div style={{opacity: cerrada?0.55:1, pointerEvents: cerrada?"none":"auto"}}>
       {/* Datos generales */}
@@ -3117,6 +3160,13 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
         <div><label style={lbl}>Fecha</label><input type="date" value={r.fecha} onChange={e=>set("fecha",e.target.value)} style={iS}/></div>
         <div><label style={lbl}>Responsable (chofer)</label><input value={r.responsable} onChange={e=>set("responsable",e.target.value)} style={iS}/></div>
         <div><label style={lbl}>Km inicial</label><input value={r.kmInicial} onChange={e=>set("kmInicial",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Km final</label><input value={r.kmFinal} onChange={e=>set("kmFinal",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Km recorridos</label>
+          <div style={{...iS, display:"flex", alignItems:"center", background:"transparent", fontWeight:800}}>
+            {r.kmInicial && r.kmFinal && Number(r.kmFinal) >= Number(r.kmInicial) ? (Number(r.kmFinal) - Number(r.kmInicial)) + " km" : "—"}
+          </div>
+        </div>
+        <div><label style={lbl}>Inicio de ruta</label><input value={r.horaSalida} onChange={e=>set("horaSalida",e.target.value)} placeholder="Se llena al iniciar desde el celular" style={iS}/></div>
       </div>
 
       {/* Paradas */}
@@ -3154,34 +3204,6 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
       {/* ── Cierre de Ruta ── */}
       <div style={{borderTop:"1px solid "+C.border, paddingTop:18}}>
         <div style={{fontSize:17, fontWeight:800, color:C.text, marginBottom:6}}>Cierre de Ruta</div>
-        {/* Resumen automático */}
-        <div style={{border:"2px solid #4caf7d", background:"rgba(76,175,125,.10)", borderRadius:12, padding:"14px 16px", marginBottom:18}}>
-          <div style={{fontSize:13, fontWeight:700, color:C.text, marginBottom:10}}>Cumplimiento del día (automático)</div>
-          <div style={{display:"flex", gap:14, flexWrap:"wrap"}}>
-            <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
-              <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Entregas a clientes</div>
-              {res.cumplimientoEntregas===null
-                ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
-                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoEntregas>=90?"#4caf7d":res.cumplimientoEntregas>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoEntregas}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.entregasOk}/{res.entregasBase})</span></div>}
-              {res.entregasInc>0 && <div style={{fontSize:11, color:C.muted, marginTop:3}}>{res.entregasInc} incidencia(s) excluida(s) de {res.entregasTotal}</div>}
-            </div>
-            <div style={{flex:"1 1 200px", background:C.surface, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px"}}>
-              <div style={{fontSize:12, color:C.muted, marginBottom:4}}>Actividades con externos</div>
-              {res.cumplimientoExternos===null
-                ? <div style={{fontSize:18, fontWeight:800, color:C.muted}}>Sin actividad</div>
-                : <div style={{fontSize:28, fontWeight:800, color: res.cumplimientoExternos>=90?"#4caf7d":res.cumplimientoExternos>=70?"#f5a623":"#c0392b"}}>{res.cumplimientoExternos}% <span style={{fontSize:12,color:C.muted,fontWeight:600}}>({res.externosOk}/{res.externosBase})</span></div>}
-              {res.externosInc>0 && <div style={{fontSize:11, color:C.muted, marginTop:3}}>{res.externosInc} incidencia(s) excluida(s) de {res.externosTotal}</div>}
-            </div>
-          </div>
-          <div style={{fontSize:12, color:C.muted, marginTop:10}}>{res.incidenciasCount} incidencia(s) · Docs a Krisia: {res.docsOk?"Sí":"No"}</div>
-          <div style={{fontSize:11.5, color:C.muted, marginTop:6, lineHeight:1.5}}>El % solo cuenta lo que estuvo en manos del chofer: las incidencias quedan fuera. Si una incidencia no se justifica, cámbiala a ✗ antes de cerrar y ahí sí le afecta. Lo que quede sin marcar cuenta como no realizado.</div>
-        </div>
-
-        <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
-          <div><label style={lbl}>Hora salida bodega</label><input value={r.horaSalida} onChange={e=>set("horaSalida",e.target.value)} placeholder="08:30" style={iS}/></div>
-          <div><label style={lbl}>Hora regreso bodega</label><input value={r.horaRegreso} onChange={e=>set("horaRegreso",e.target.value)} placeholder="16:45" style={iS}/></div>
-          <div><label style={lbl}>Km final</label><input value={r.kmFinal} onChange={e=>set("kmFinal",e.target.value)} style={iS}/></div>
-        </div>
 
         {/* Resultado por parada */}
         <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:10}}>Resultado de cada parada</div>

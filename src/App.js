@@ -4887,6 +4887,26 @@ function RutaMovil(){
     return consecutivo ? con.map(p => p.idx) : [];
   };
 
+  // URL de Google Maps con TODAS las paradas de la ruta, en orden. Sin origen:
+  // Maps arranca desde la ubicación actual del chofer. El límite de Google es
+  // 9 escalas + 1 destino, así que con más de 10 direcciones se toman las
+  // primeras 10 (las que siguen en su orden) y el botón lo dice.
+  const urlRutaCompleta = (ps) => {
+    const dirs = (ps || []).filter(p => p.direccion).map(p => p.direccion);
+    if (!dirs.length) return null;
+    if (dirs.length === 1) {
+      return { url: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(dirs[0]), n: 1, total: 1 };
+    }
+    const usadas = dirs.slice(0, 10);
+    const destino = usadas[usadas.length - 1];
+    const escalas = usadas.slice(0, -1);
+    return {
+      url: "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(destino)
+        + (escalas.length ? "&waypoints=" + escalas.map(encodeURIComponent).join("%7C") : ""),
+      n: usadas.length, total: dirs.length,
+    };
+  };
+
   const llamar = async (accion, extra) => {
     const resp = await fetch("/api/ruta-movil", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -5140,7 +5160,7 @@ function RutaMovil(){
                     {p.horario && <span style={{fontSize:11.5, color:C2.muted}}>🕐 {p.horario}</span>}
                   </div>
                   <div style={{fontSize:14.5, fontWeight:800, marginTop:5}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
-                  {p.direccion && <div style={{fontSize:12, color:C2.muted, marginTop:2}}>📍 {p.direccion}</div>}
+                  {p.direccion && <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{display:"block", fontSize:12, color:C2.muted, marginTop:2, textDecoration:"underline dotted", textUnderlineOffset:"3px"}}>📍 {p.direccion}</a>}
                 </div>
               </div>
             );
@@ -5187,6 +5207,12 @@ function RutaMovil(){
           })}
         </div>
 
+        {(() => { const m = urlRutaCompleta(plan); return m ? (
+          <a href={m.url} target="_blank" rel="noopener noreferrer"
+            style={{display:"block", textAlign:"center", borderRadius:12, background:"#5c8fe0", color:"#fff", padding:"13px", fontSize:14, fontWeight:800, textDecoration:"none", marginTop:14, fontFamily:"inherit"}}>
+            🗺️ Visualiza tu ruta en Google Maps
+          </a>
+        ) : null; })()}
         <button onClick={iniciarRuta} disabled={guardando} style={{...btnGrande("#4caf7d"), opacity:guardando?0.6:1}}>
           {guardando ? "Iniciando…" : "▶️ Iniciar ruta"}
         </button>
@@ -5238,6 +5264,13 @@ function RutaMovil(){
       {enRuta && !cerrada && (
         <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>▶️ Ruta iniciada — ve marcando cada actividad conforme la termines.</div>
       )}
+      {!cerrada && (() => { const m = urlRutaCompleta(lista); return m ? (
+        <a href={m.url} target="_blank" rel="noopener noreferrer"
+          style={{display:"block", textAlign:"center", border:"none", borderRadius:14, background:"#5c8fe0", color:"#fff", padding:"16px", fontSize:16, fontWeight:900, textDecoration:"none", marginBottom:14, fontFamily:"inherit"}}>
+          🗺️ Visualiza tu ruta
+          <div style={{fontSize:11.5, fontWeight:600, opacity:.85, marginTop:3}}>{m.n < m.total ? "Abre las primeras "+m.n+" de "+m.total+" paradas en Google Maps" : "Abre tus "+m.total+" paradas en Google Maps"}</div>
+        </a>
+      ) : null; })()}
       {cerrada && (
         <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>🔒 Esta ruta ya fue cerrada por Krisia — solo lectura.</div>
       )}
@@ -5256,7 +5289,7 @@ function RutaMovil(){
                   {p.horario && <span style={{fontSize:11.5, color:C2.muted}}>🕐 {p.horario}</span>}
                 </div>
                 <div style={{fontSize:14.5, fontWeight:800, marginTop:5}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
-                {p.direccion && <div style={{fontSize:12, color:C2.muted, marginTop:2}}>📍 {p.direccion}</div>}
+                {p.direccion && <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{display:"block", fontSize:12, color:C2.muted, marginTop:2, textDecoration:"underline dotted", textUnderlineOffset:"3px"}}>📍 {p.direccion}</a>}
                 <div style={{display:"flex", gap:8, marginTop:10}}>
                   <button disabled={guardando} onClick={()=>colocar(p.idx, posSiguiente())}
                     style={{flex:1, border:"none", borderRadius:10, background:"#4caf7d", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⚡ La sigo ahora</button>
@@ -5305,9 +5338,10 @@ function RutaMovil(){
             {p.contacto && <div style={{fontSize:12.5, color:C2.muted, marginTop:2}}>👤 {p.contacto}</div>}
             {p.direccion && (
               <div style={{display:"flex", alignItems:"center", gap:8, marginTop:6}}>
-                <div style={{flex:1, fontSize:12.5, color:C2.muted}}>📍 {p.direccion}</div>
-                <button onClick={()=>window.open("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion), "_blank")}
-                  style={{border:"none", borderRadius:8, background:"#5c8fe0", color:"#fff", padding:"8px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>🗺️ Navegar</button>
+                <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer"
+                  style={{flex:1, fontSize:12.5, color:C2.muted, textDecoration:"underline dotted", textUnderlineOffset:"3px"}}>📍 {p.direccion}</a>
+                <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer"
+                  style={{border:"none", borderRadius:8, background:"#5c8fe0", color:"#fff", padding:"8px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", textDecoration:"none", display:"inline-block"}}>🗺️ Navegar</a>
               </div>
             )}
             {p.obs && abierto !== p.idx && (

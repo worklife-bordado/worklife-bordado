@@ -156,10 +156,14 @@ export default async function handler(req, res) {
       // Si registró ENTRADA y aún no hay ruta cargada para hoy, avisar a quienes
       // cargan rutas (admin + seguimiento). Fuego y olvido: un fallo aquí jamás
       // debe estorbar la checada. Como solo hay una entrada por día, no se duplica.
-      if (tipo === 'entrada') {
+      if (tipo === 'entrada' && emp.esChofer) {
         try {
-          const rutasHoy = await db.collection('rutas').where('fecha', '==', hoyMX()).limit(1).get();
-          if (rutasHoy.empty) {
+          const rutasHoy = await db.collection('rutas').where('fecha', '==', hoyMX()).get();
+          // Solo cuenta una ruta ASIGNADA a él: si Krisia cargó la ruta pero olvidó
+          // asignarla, el aviso también debe llegarle — para el chofer es lo mismo
+          // que no tener ruta.
+          const tieneRuta = rutasHoy.docs.some(d => d.data().choferId === emp.id);
+          if (!tieneRuta) {
             const usuariosSnap = await db.collection('config').doc('usuarios').get();
             const roles = usuariosSnap.exists ? (usuariosSnap.data().roles || {}) : {};
             const destinos = Object.entries(roles)
@@ -168,7 +172,7 @@ export default async function handler(req, res) {
             await Promise.all(destinos.map(para => db.collection('notificaciones').add({
               para,
               titulo: '🚚 Entrada registrada sin ruta cargada',
-              cuerpo: (emp.nombre || 'El chofer') + ' registró su entrada a las ' + hora + ' y todavía no hay ruta para hoy (' + hoyMX() + ').',
+              cuerpo: (emp.nombre || 'El chofer') + ' registró su entrada a las ' + hora + ' y no tiene ruta asignada para hoy (' + hoyMX() + ').',
               tipo: 'ruta',
               ordenId: '',
               leida: false,

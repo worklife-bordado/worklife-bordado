@@ -2936,7 +2936,7 @@ function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
   return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaReal:"", docs:false, obs:"" };
 }
-function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente }) {
+function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente }) {
   const [r, setR] = useState(null);
   const [guardando, setGuardando] = useState(false);
   const [dirOpen, setDirOpen] = useState(false);
@@ -2966,7 +2966,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
 
   const abrir = (ruta) => setR({
     docsEntregados:{ facturas:false, albaranes:false, remisiones:false, remisionesEntrega:false, ordenes:false },
-    incidencias:"", paradas:[], horaSalida:"", horaRegreso:"", kmInicial:"", kmFinal:"", responsable:"Andrés", estado:"planeada",
+    incidencias:"", paradas:[], horaSalida:"", horaRegreso:"", kmInicial:"", kmFinal:"", responsable:"", choferId:"", estado:"planeada",
     ...ruta,
     paradas:(ruta.paradas||[]).map(p => ({ ...nuevaParada(p.tipo), ...p })),
     docsEntregados:{ facturas:false, albaranes:false, remisiones:false, remisionesEntrega:false, ordenes:false, ...(ruta.docsEntregados||{}) },
@@ -2974,7 +2974,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
   const nueva = () => setR({
     id: Date.now(),
     fecha: new Date().toISOString().slice(0,10),
-    responsable:"Andrés", kmInicial:"", kmFinal:"", horaSalida:"", horaRegreso:"",
+    responsable:"", choferId:"", kmInicial:"", kmFinal:"", horaSalida:"", horaRegreso:"",
     paradas:[], docsEntregados:{ facturas:false, albaranes:false, remisiones:false, remisionesEntrega:false, ordenes:false },
     incidencias:"", estado:"planeada",
   });
@@ -3158,7 +3158,14 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
       {/* Datos generales */}
       <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))", gap:12, marginBottom:18}}>
         <div><label style={lbl}>Fecha</label><input type="date" value={r.fecha} onChange={e=>set("fecha",e.target.value)} style={iS}/></div>
-        <div><label style={lbl}>Responsable (chofer)</label><input value={r.responsable} onChange={e=>set("responsable",e.target.value)} style={iS}/></div>
+        <div><label style={lbl}>Responsable (chofer)</label>{choferes.length ? (
+          <select value={r.choferId || ""} onChange={e=>{ const c = choferes.find(x=>x.id===e.target.value); set("choferId", c ? c.id : ""); if (c) set("responsable", c.nombre); }} style={iS}>
+            <option value="">— Elegir chofer —</option>
+            {choferes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            {r.choferId && !choferes.some(c=>c.id===r.choferId) ? <option value={r.choferId}>{r.responsable || "(chofer dado de baja)"}</option> : null}
+          </select>
+        ) : (<input value={r.responsable} onChange={e=>set("responsable",e.target.value)} style={iS}/>)}
+        {!r.choferId && <div style={{fontSize:10.5, color:"#f5a623", marginTop:4}}>Sin asignar: no le aparecerá a ningún chofer</div>}</div>
         <div><label style={lbl}>Km inicial</label><input value={r.kmInicial} onChange={e=>set("kmInicial",e.target.value)} style={iS}/></div>
         <div><label style={lbl}>Km final</label><input value={r.kmFinal} onChange={e=>set("kmFinal",e.target.value)} style={iS}/></div>
         <div><label style={lbl}>Km recorridos</label>
@@ -3238,7 +3245,7 @@ function Rutas({ rutas, ordenes, onGuardar, onImprimirHoja, onImprimirCierre, cl
         })}
 
         {/* Documentos a Krisia */}
-        <div style={{fontSize:14, fontWeight:800, color:C.text, margin:"16px 0 10px"}}>Documentos que entrega Andrés a Krisia</div>
+        <div style={{fontSize:14, fontWeight:800, color:C.text, margin:"16px 0 10px"}}>Documentos que entrega {r.responsable || "el chofer"} a Krisia</div>
         <div style={{fontSize:11.5, color:C.muted, margin:"-4px 0 10px"}}>Entrega a cliente: basta uno — factura, albarán o remisión (préstamo o entrega). Llevar a externo: orden de trabajo. Las recolecciones no requieren documento.</div>
         <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:8, marginBottom:18}}>
           {[["facturas","Facturas firmadas por clientes"],["albaranes","Albaranes de salida firmados"],["remisiones","Remisiones por préstamo firmadas"],["remisionesEntrega","Remisiones de entrega firmadas"],["ordenes","Órdenes de trabajo de externos"]].map(([k,t]) => (
@@ -4073,7 +4080,13 @@ function autoValoresBonos(periodo, ordenes, rutas){
   // Andrés — a2 "entregas ejecutadas" = SOLO clientes; a1 "puntualidad" = cumplimiento de EXTERNOS
   // Mismo criterio que los tableros y el cierre: las incidencias validadas por Krisia NO entran
   // al denominador (base = total − incidencias). Lo que quedó sin marcar sí cuenta en contra.
-  const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
+  // Solo las rutas de Andrés: con más choferes, cada quien lo suyo. El criterio es
+  // el nombre del responsable: cubre las rutas viejas (nacían con responsable
+  // "Andrés") y las nuevas que Krisia le asigne (el selector escribe el nombre).
+  // Una ruta SIN asignar no cuenta para nadie: bajo la regla actual ningún chofer
+  // puede trabajarla, y contarla sería castigar un olvido ajeno.
+  const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta)
+    .filter(r => (r.responsable||"").trim() === "Andrés");
   let entBase=0, entOk=0, extBase=0, extOk=0;
   rutasMes.forEach(r => { const s=resumenRuta(r); entBase+=s.entregasBase; entOk+=s.entregasOk; extBase+=s.externosBase; extOk+=s.externosOk; });
   const entregasEjec = entBase ? Math.round(entOk/entBase*100) : "";
@@ -4569,7 +4582,7 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
   const setEmp = (i, campo, val) => setEmpleados(p => p.map((e,idx)=> idx===i ? { ...e, [campo]:val } : e));
   const delEmp = (i) => { if(window.confirm("¿Quitar a este empleado del checador? Sus registros anteriores no se borran.")) setEmpleados(p => p.filter((_,idx)=>idx!==i)); };
   const guardar = async () => {
-    const limpio = empleados.filter(e => (e.nombre||"").trim()).map(e => ({ id:e.id||nuevoId(), nombre:e.nombre.trim(), pin:String(e.pin||"").trim(), activo:e.activo!==false }));
+    const limpio = empleados.filter(e => (e.nombre||"").trim()).map(e => ({ id:e.id||nuevoId(), nombre:e.nombre.trim(), pin:String(e.pin||"").trim(), activo:e.activo!==false, esChofer:!!e.esChofer }));
     try { await onGuardarRoster(limpio); alert("Empleados guardados."); } catch(e){ alert("Error: "+e.message); }
   };
 
@@ -4712,7 +4725,8 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
             <div key={e.id||i} style={{display:"flex", gap:8, alignItems:"center", marginBottom:8, flexWrap:"wrap"}}>
               <input value={e.nombre} onChange={ev=>setEmp(i,"nombre",ev.target.value)} placeholder="Nombre" style={{flex:"1 1 160px", background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"8px 10px", fontSize:13}}/>
               <input value={e.pin} inputMode="numeric" onChange={ev=>setEmp(i,"pin",ev.target.value.replace(/[^0-9]/g,"").slice(0,4))} placeholder="PIN" style={{width:80, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"8px 10px", fontSize:13, textAlign:"center"}}/>
-              <label style={{fontSize:12, color:C2.muted, display:"flex", alignItems:"center", gap:4}}><input type="checkbox" checked={e.activo!==false} onChange={ev=>setEmp(i,"activo",ev.target.checked)}/>Activo</label>
+              <label style={{fontSize:12, color:C2.muted, display:"flex", alignItems:"center", gap:4}}><input type="checkbox" checked={!!e.esChofer} onChange={ev=>setEmp(i,"esChofer",ev.target.checked)}/> Chofer</label>
+                <label style={{fontSize:12, color:C2.muted, display:"flex", alignItems:"center", gap:4}}><input type="checkbox" checked={e.activo!==false} onChange={ev=>setEmp(i,"activo",ev.target.checked)}/>Activo</label>
               <button onClick={()=>delEmp(i)} style={{border:"none", background:"none", color:"#c0392b", cursor:"pointer", fontSize:16}}>✕</button>
             </div>
           ))}
@@ -5167,7 +5181,7 @@ function RutaMovil(){
         <div style={{fontSize:22, fontWeight:900}}>En espera de ruta</div>
         <div style={{color:C2.muted, fontSize:13.5, marginTop:10, lineHeight:1.5}}>
           {fmtDate(vencida ? fechaLocal() : (hoy || fechaLocal()))}<br/>
-          Aquí aparecerá tu ruta en cuanto Krisia la cargue.
+          Aquí aparecerá tu ruta en cuanto Krisia la cargue y te la asigne.
         </div>
         <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{marginTop:20, border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"12px 22px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando ? "Revisando…" : "🔄 Volver a revisar"}</button>
         {ultAct && <div style={{fontSize:10.5, color:C2.muted, marginTop:10, opacity:.8}}>Revisado {ultAct}</div>}
@@ -5559,6 +5573,7 @@ function AppInner() {
   const [bonoPdf, setBonoPdf] = useState(null);
   const [salariosBonos, setSalariosBonos] = useState(null);
   const [checadorRoster, setChecadorRoster] = useState([]);
+  const [choferes, setChoferes] = useState([]);  // {id, nombre} de choferes activos, SIN pines
   // Evita que el traductor del navegador (Google Translate) modifique el DOM y
   // provoque el crash "removeChild ... not a child" al re-renderizar. La app ya está en español.
   useEffect(() => {
@@ -5763,6 +5778,14 @@ if (usuario) {
   }, [usuario, rol]);
   const guardarRuta = async (ruta) => {
     const id = String(ruta.id);
+    // Regla de negocio: un chofer solo puede tener UNA ruta por día.
+    if (ruta.choferId && ruta.fecha) {
+      const choque = (rutas || []).find(x => String(x.id) !== id && x.fecha === ruta.fecha && x.choferId === ruta.choferId);
+      if (choque) {
+        // throw (no return): así el editor muestra el error y NO se cierra como si hubiera guardado
+        throw new Error((ruta.responsable || "Ese chofer") + " ya tiene una ruta para el " + ruta.fecha + ". Un chofer solo puede tener una ruta por día.");
+      }
+    }
     const payload = { ...ruta, id, actualizadoPor: usuario.email, actualizado: new Date().toISOString() };
     // ── Protección contra copias viejas ──
     // Si Krisia abrió la ruta ANTES de que el chofer la preparara/avanzara y guarda
@@ -5778,6 +5801,13 @@ if (usuario) {
         if (act.estado === "en_ruta" && payload.estado === "planeada") payload.estado = "en_ruta";
         if (!payload.kmInicial && act.kmInicial) payload.kmInicial = act.kmInicial;
         if (!payload.kmFinal && act.kmFinal) payload.kmFinal = act.kmFinal;
+        // El reclamo del chofer (al preparar una ruta libre) tampoco se pierde por
+        // una copia vieja: si se borrara, la ruta volvería a estar "libre" y otro
+        // chofer podría tomarla a media jornada.
+        if (!payload.choferId && act.choferId) {
+          payload.choferId = act.choferId;
+          if (!payload.responsable && act.responsable) payload.responsable = act.responsable;
+        }
         if (!payload.horaSalida && act.horaSalida) payload.horaSalida = act.horaSalida;
         // ¿El celular escribió DESPUÉS de que Krisia abrió su copia? actualizadoMovil
         // solo lo escribe el celular, así que si difiere, la copia de ella es vieja
@@ -5909,8 +5939,22 @@ if (usuario) {
     const u1 = onSnapshot(doc(db, "checadorConfig", "roster"), snap => setChecadorRoster(snap.exists() ? (snap.data().empleados || []) : []));
     return () => u1();
   }, [usuario, rol]);
+  // Lista de choferes (sin pines): la usan admin Y seguimiento para asignar rutas.
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    const un = onSnapshot(doc(db, "config", "choferes"),
+      snap => setChoferes(snap.exists() ? (snap.data().choferes || []) : []),
+      () => setChoferes([]));
+    return un;
+  }, [usuario, rol]);
+
   const guardarChecadorRoster = async (empleados) => {
     await setDoc(doc(db, "checadorConfig", "roster"), { empleados, actualizadoPor: usuario.email }, { merge: true });
+    // Lista de choferes SIN pines: es lo único del roster que Seguimiento necesita
+    // (para asignar rutas). Vive en su propio documento para no exponer los PINs.
+    const choferes = empleados.filter(e => e.esChofer && e.activo !== false).map(e => ({ id: e.id, nombre: e.nombre }));
+    await setDoc(doc(db, "config", "choferes"), { choferes, actualizadoPor: usuario.email }, { merge: true });
   };
   const guardarUsuarios = async (lista) => {
     const roles = {};
@@ -6762,6 +6806,7 @@ const cancelar = async (id) => {
         <Rutas
           rutas={rutas}
           ordenes={ordenes}
+          choferes={choferes}
           clientesDir={clientesDir}
           onImportarClientes={upsertClientesDir}
           onBorrarCliente={borrarClienteDir}

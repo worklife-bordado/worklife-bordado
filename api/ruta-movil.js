@@ -53,6 +53,7 @@ function serializarRuta(ruta) {
     kmFinal: ruta.kmFinal || '',
     horaSalida: ruta.horaSalida || '',
     responsable: ruta.responsable || '',
+    choferId: ruta.choferId || '',
     preparada: estaPreparada(ruta),
     incidencias: ruta.incidencias || '',
     docsEntregados: ruta.docsEntregados || {},
@@ -90,6 +91,11 @@ export default async function handler(req, res) {
       const snap = await ref.get();
       if (!snap.exists) return { error: { code: 404, msg: 'Ruta no encontrada' } };
       const ruta = { id: snap.id, ...snap.data() };
+      // Solo Krisia asigna rutas: el chofer únicamente puede tocar la SUYA.
+      // Una ruta sin asignar no es de nadie — ni para verla ni para escribirla.
+      if (ruta.choferId !== emp.id) {
+        return { error: { code: 403, msg: ruta.choferId ? 'Esta ruta está asignada a otro chofer' : 'Esta ruta aún no tiene chofer asignado. Pide a Krisia que te la asigne.' } };
+      }
       if (!permitirCerrada && ruta.estado === 'cerrada') {
         return { error: { code: 409, msg: 'La ruta ya está cerrada' } };
       }
@@ -102,7 +108,12 @@ export default async function handler(req, res) {
       const snap = await db.collection('rutas').where('fecha', '==', hoy).get();
       if (snap.empty) return res.status(200).json({ ruta: null, hoy });
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const ruta = docs.find(r => r.estado !== 'cerrada') || docs[0];
+      // Cada chofer ve SOLO su ruta. Las rutas sin chofer asignado (de antes de
+      // tener varios choferes) las ve cualquier chofer, para no romper la transición.
+      // Cada chofer ve SOLO la ruta que Krisia le asignó. Sin asignación, no hay ruta.
+      const mias = docs.filter(r => r.choferId === emp.id);
+      if (!mias.length) return res.status(200).json({ ruta: null, hoy });
+      const ruta = mias.find(r => r.estado !== 'cerrada') || mias[0];
       return res.status(200).json({ hoy, ruta: serializarRuta(ruta) });
     }
 

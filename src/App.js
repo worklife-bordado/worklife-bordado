@@ -4745,9 +4745,15 @@ function BandaChecada({ pin }){
     if (!r.ok) throw new Error(d.error || ("Error " + r.status));
     return d;
   };
+  const [stErr, setStErr] = useState(false);
+  const reintentarEstado = async () => {
+    setStErr(false);
+    try { setSt(await pedir({ accion:"estado" })); } catch(e){ setStErr(true); }
+  };
   useEffect(() => {
     let vivo = true;
-    (async () => { try { const d = await pedir({ accion:"estado" }); if (vivo) setSt(d); } catch(e){ /* la ruta sigue usable */ } })();
+    setStErr(false);
+    (async () => { try { const d = await pedir({ accion:"estado" }); if (vivo) setSt(d); } catch(e){ if (vivo) setStErr(true); } })();
     return () => { vivo = false; };
   }, [pin]); // eslint-disable-line
 
@@ -4774,7 +4780,21 @@ function BandaChecada({ pin }){
     setEnvi(false);
   };
 
-  if (!st) return null;
+  const cajaBase = { background:C.card, border:"1px solid "+C.border, borderRadius:14, padding:"12px 13px", marginBottom:14, textAlign:"left" };
+  // La banda NUNCA desaparece en silencio: si son horas y dinero, un fallo de red
+  // tiene que verse y poderse reintentar, no dejar al chofer sin forma de checar.
+  if (!st) return (
+    <div style={{...cajaBase, border: stErr ? "1px solid #f5a623" : cajaBase.border}}>
+      {stErr ? (
+        <div style={{display:"flex", alignItems:"center", gap:10}}>
+          <div style={{flex:1, fontSize:12.5, color:"#ffd899", fontWeight:700}}>🕐 No se pudo cargar tu jornada.</div>
+          <button onClick={reintentarEstado} style={{border:"none", borderRadius:9, background:"#f5a623", color:"#1a1d27", padding:"9px 14px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>Reintentar</button>
+        </div>
+      ) : (
+        <div style={{fontSize:12.5, color:C.muted}}>🕐 Cargando tu jornada…</div>
+      )}
+    </div>
+  );
 
   const caja = { background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 13px", marginBottom:14 };
 
@@ -6533,6 +6553,11 @@ const cancelar = async (id) => {
         <div key={n.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 16px",marginBottom:8,display:"flex",alignItems:"center",gap:12}}>
           <div style={{flex:1, cursor:"pointer"}}
             onClick={async () => {
+              if (n.tipo === "ruta") {
+                setVista("rutas");
+                try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}
+                return;
+              }
               if (n.tipo === "resumen") {
                 setVista("lista");
                 try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}

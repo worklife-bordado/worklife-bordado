@@ -153,6 +153,31 @@ export default async function handler(req, res) {
       const ts = creado.data().ts;
       const hora = ts && ts.toDate ? horaDe(ts.toDate()) : horaDe(new Date());
 
+      // Si registró ENTRADA y aún no hay ruta cargada para hoy, avisar a quienes
+      // cargan rutas (admin + seguimiento). Fuego y olvido: un fallo aquí jamás
+      // debe estorbar la checada. Como solo hay una entrada por día, no se duplica.
+      if (tipo === 'entrada') {
+        try {
+          const rutasHoy = await db.collection('rutas').where('fecha', '==', hoyMX()).limit(1).get();
+          if (rutasHoy.empty) {
+            const usuariosSnap = await db.collection('config').doc('usuarios').get();
+            const roles = usuariosSnap.exists ? (usuariosSnap.data().roles || {}) : {};
+            const destinos = Object.entries(roles)
+              .filter(([, rol]) => rol === 'admin' || rol === 'seguimiento')
+              .map(([email]) => email);
+            await Promise.all(destinos.map(para => db.collection('notificaciones').add({
+              para,
+              titulo: '🚚 Entrada registrada sin ruta cargada',
+              cuerpo: (emp.nombre || 'El chofer') + ' registró su entrada a las ' + hora + ' y todavía no hay ruta para hoy (' + hoyMX() + ').',
+              tipo: 'ruta',
+              ordenId: '',
+              leida: false,
+              fecha: FieldValue.serverTimestamp(),
+            })));
+          }
+        } catch (eNotif) { console.error('aviso sin ruta:', eNotif); }
+      }
+
       const regs2 = await leerDia(db, emp.id);
       return res.status(200).json({
         ok: true,

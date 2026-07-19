@@ -3978,11 +3978,11 @@ const BONOS_DEF = {
   krisia: {
     nombre: "Krisia", puesto: "Coord. de Operaciones y Almacén",
     kpis: [
-      { id:"k1", label:"Exactitud de inventario", peso:0.40, cap:"% (piezas correctas / auditadas × 100)",
+      { id:"k1", label:"Exactitud de inventario", peso:0.40, umb:{tipo:"min",meta:98,parcial:95,pp:0.7}, cap:"% (piezas correctas / auditadas × 100)",
         ev:v=> v>=98?{p:1,n:"Meta cumplida (≥98%)"}:v>=95?{p:0.7,n:"Parcial (95–97.9%)"}:{p:0,n:"No cumplido (<95%)"} },
-      { id:"k2", label:"Cumplimiento de pedidos", peso:0.25, auto:true, autoKey:"cumplPedidos", cap:"% (pedidos completos a tiempo / total × 100)",
+      { id:"k2", label:"Cumplimiento de pedidos", peso:0.25, auto:true, autoKey:"cumplPedidos", umb:{tipo:"min",meta:97,parcial:94,pp:0.7}, cap:"% (pedidos completos a tiempo / total × 100)",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.7,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"k3", label:"Control de mermas", peso:0.20, auto:true, autoKey:"mermas", cap:"% de mermas sobre piezas del mes (registradas en Retrabajo)",
+      { id:"k3", label:"Control de mermas", peso:0.20, auto:true, autoKey:"mermas", umb:{tipo:"max",meta:0.5,parcial:1,pp:0.5}, cap:"% de mermas sobre piezas del mes (registradas en Retrabajo)",
         ev:v=> v<=0.5?{p:1,n:"Meta cumplida (≤0.5%)"}:v<1?{p:0.5,n:"Parcial (0.51–0.99%)"}:{p:0,n:"No cumplido (≥1%)"} },
       { id:"k4", label:"Orden y disciplina operativa", peso:0.10, cap:"semanas con checklist (0–4)",
         ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
@@ -3993,13 +3993,13 @@ const BONOS_DEF = {
   andres: {
     nombre:"Andrés", puesto:"Aux. de Logística y Distribución", naKpi:"a6", naReparto:"equal",
     kpis: [
-      { id:"a1", label:"Cumplimiento de ruta", peso:0.20, auto:true, autoKey:"puntualidad", estim:true, cap:"% de actividades cumplidas (cumplimiento de externos — recolecciones/proveedores). Excluye incidencias validadas",
+      { id:"a1", label:"Cumplimiento de ruta", peso:0.20, auto:true, autoKey:"puntualidad", estim:true, umb:{tipo:"min",meta:97,parcial:94,pp:0.5}, cap:"% de actividades cumplidas (cumplimiento de externos — recolecciones/proveedores). Excluye incidencias validadas",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.25, auto:true, autoKey:"entregasEjec", cap:"% (entregas ejecutadas / entregas evaluables × 100). Excluye incidencias validadas",
+      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.25, auto:true, autoKey:"entregasEjec", umb:{tipo:"min",meta:97,parcial:94,pp:0.5}, cap:"% (entregas ejecutadas / entregas evaluables × 100). Excluye incidencias validadas",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
       { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
         ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },
-      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, auto:true, autoKey:"docs", cap:"% documentación entregada (factura/albarán/remisión en entregas + orden de trabajo en externos)",
+      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, auto:true, autoKey:"docs", umb:{tipo:"min",meta:100,parcial:50,parcialEstricto:true,pp:0.5}, cap:"% documentación entregada (factura/albarán/remisión en entregas + orden de trabajo en externos)",
         ev:v=> v>=100?{p:1,n:"Meta cumplida (100%)"}:v>50?{p:0.5,n:"Parcial (51–99%)"}:{p:0,n:"No cumplido (≤50%)"} },
       { id:"a5", label:"Relación con clientes y externos", peso:0.05, cap:"número de quejas (0 = meta)",
         ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con quejas"} },
@@ -4022,6 +4022,45 @@ const BONOS_DEF = {
   },
 };
 const BONOS_ORDEN = ["krisia","andres","isidra"];
+
+// ── Objetivos de KPIs editables (config/bonosKpis) ──
+// Los KPIs con descriptor `umb` son de umbral porcentual y sus metas se pueden
+// ajustar desde el módulo de Bonos sin tocar código. Los categóricos (checklists,
+// criterios 2/1/0, conteos) quedan fijos: sus reglas no son números ajustables.
+function evDesdeUmb(u){
+  const pp = u.pp != null ? u.pp : 0.5;
+  if (u.tipo === "max") {
+    return v => v <= u.meta ? { p:1, n:"Meta cumplida (≤"+u.meta+"%)" }
+      : v < u.parcial ? { p:pp, n:"Parcial (<"+u.parcial+"%)" }
+      : { p:0, n:"No cumplido (≥"+u.parcial+"%)" };
+  }
+  if (u.parcialEstricto) {
+    return v => v >= u.meta ? { p:1, n:"Meta cumplida (≥"+u.meta+"%)" }
+      : v > u.parcial ? { p:pp, n:"Parcial (>"+u.parcial+"% y <"+u.meta+"%)" }
+      : { p:0, n:"No cumplido (≤"+u.parcial+"%)" };
+  }
+  return v => v >= u.meta ? { p:1, n:"Meta cumplida (≥"+u.meta+"%)" }
+    : v >= u.parcial ? { p:pp, n:"Parcial (≥"+u.parcial+"% y <"+u.meta+"%)" }
+    : { p:0, n:"No cumplido (<"+u.parcial+"%)" };
+}
+// Definición vigente de un colaborador: BONOS_DEF + ajustes guardados (pesos y
+// umbrales). Con cfg vacío o nulo, devuelve exactamente los valores de siempre.
+function bonosDefEfectiva(clave, cfg){
+  const base = BONOS_DEF[clave];
+  if (!base) return base;
+  const umbCfg = ((cfg || {}).kpiUmbrales || {})[clave] || {};
+  const pesCfg = ((cfg || {}).kpiPesos || {})[clave] || {};
+  return { ...base, kpis: base.kpis.map(k => {
+    const peso = (pesCfg[k.id] != null && pesCfg[k.id] !== "") ? Number(pesCfg[k.id]) : k.peso;
+    if (!k.umb) return { ...k, peso };
+    const o = umbCfg[k.id] || {};
+    const umbEf = { ...k.umb,
+      meta: (o.meta != null && o.meta !== "") ? Number(o.meta) : k.umb.meta,
+      parcial: (o.parcial != null && o.parcial !== "") ? Number(o.parcial) : k.umb.parcial,
+    };
+    return { ...k, peso, umbEf, ev: evDesdeUmb(umbEf) };
+  }) };
+}
 function esNAval(v){ return String(v==null?"":v).toUpperCase().trim()==="NA"; }
 function bonoPesosEfectivos(def, capturas){
   const pesos = {}; def.kpis.forEach(k => pesos[k.id]=k.peso);
@@ -4109,10 +4148,23 @@ function autoValoresBonos(periodo, ordenes, rutas){
   return { krisia:{ k2:cumplPedidos, k3:mermasPct }, andres:{ a1:externosPct, a2:entregasEjec, a4:docsPct }, isidra:{} };
 }
 // Recibo imprimible (solo admin)
-function buildReciboBonoHtml(clave, capturas, sal, periodo){
-  const def = BONOS_DEF[clave];
+function buildReciboBonoHtml(clave, capturas, sal, periodo, kpiCfg, snap){
+  const def = bonosDefEfectiva(clave, kpiCfg);
   const bonoMax = (sal && sal.bonoMax) || 0;
-  const calc = calcColaborador(def, capturas, bonoMax);
+  // Período CERRADO con foto congelada: el recibo se arma desde el snapshot y
+  // NUNCA se recalcula — cambiar los objetivos después no reescribe recibos
+  // firmados. Solo el dinero se deriva (bonoMax congelado × peso congelado).
+  let calc;
+  if (snap && snap.filas) {
+    const filas = snap.filas.map(f => {
+      const na = f.esNAfila && esNAval(f.resultado);
+      const monto = bonoMax * f.peso;
+      return { ...f, monto, bono: na ? 0 : f.pago * monto };
+    });
+    calc = { filas, totalBono: filas.reduce((t, f) => t + f.bono, 0) };
+  } else {
+    calc = calcColaborador(def, capturas, bonoMax);
+  }
   const rows = calc.filas.map((f,i) => `<tr>
       <td>${i+1}. ${escHtml(f.label)}</td>
       <td style="text-align:center">${f.esNAfila ? "NA" : (f.resultado===""?"—":escHtml(String(f.resultado)))}</td>
@@ -4138,12 +4190,15 @@ function buildReciboBonoHtml(clave, capturas, sal, periodo){
       <table>
         <tr><th style="text-align:left">BONO DEL MES</th><th style="text-align:right">$${fmtMoney(calc.totalBono)}</th></tr>
       </table>
-      <div class="firmas"><div class="firma">Entrega — WorkLife Uniformes</div><div class="firma">Recibí de conformidad — ${escHtml(def.nombre)}</div></div>
+      ${snap && snap.filas ? '<div class="nota">Resultados congelados al cierre del período. Cambios posteriores a los objetivos de KPIs no modifican este recibo.</div>' : ""}
+  <div class="firmas"><div class="firma">Entrega — WorkLife Uniformes</div><div class="firma">Recibí de conformidad — ${escHtml(def.nombre)}</div></div>
     </div>
   </div></body></html>`;
 }
 
-function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onImprimir, onGuardarSalarios }){
+function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onImprimir, onGuardarSalarios, kpiCfg, onGuardarKpiCfg }){
+  // Definición vigente (con objetivos editados). Con kpiCfg vacío = reglas de siempre.
+  const defDe = (cl) => bonosDefEfectiva(cl, kpiCfg);
   const [p, setP] = useState(null);
   const [guardando, setGuardando] = useState(false);
   const [cfgOpen, setCfgOpen] = useState(false);
@@ -4186,7 +4241,119 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
       )}
     </div>
   );
+  // ── Editor de objetivos de KPIs (solo administración) ──
+  const [objOpen, setObjOpen] = useState(false);
+  const [objLocal, setObjLocal] = useState(null); // { pesos:{cl:{id:"20"}}, umb:{cl:{id:{meta,parcial}}} }
+  const iniciarObjetivos = () => {
+    const pesos = {}, umb = {};
+    BONOS_ORDEN.forEach(cl => {
+      pesos[cl] = {}; umb[cl] = {};
+      defDe(cl).kpis.forEach(k => {
+        pesos[cl][k.id] = String(Math.round(k.peso * 1000) / 10); // en %
+        if (k.umbEf) umb[cl][k.id] = { meta: String(k.umbEf.meta), parcial: String(k.umbEf.parcial) };
+      });
+    });
+    setObjLocal({ pesos, umb });
+  };
+  const guardarObjetivos = async () => {
+    const kpiPesos = {}, kpiUmbrales = {};
+    for (const cl of BONOS_ORDEN) {
+      let suma = 0;
+      kpiPesos[cl] = {}; kpiUmbrales[cl] = {};
+      for (const k of BONOS_DEF[cl].kpis) {
+        const pv = Number((objLocal.pesos[cl] || {})[k.id]);
+        if (!(pv >= 0)) { alert("Peso inválido en " + BONOS_DEF[cl].nombre + " · " + k.label); return; }
+        suma += pv;
+        kpiPesos[cl][k.id] = Math.round(pv * 10) / 1000; // de % a fracción
+        if (k.umb) {
+          const o = (objLocal.umb[cl] || {})[k.id] || {};
+          const meta = Number(o.meta), parcial = Number(o.parcial);
+          if (!(meta >= 0) || !(parcial >= 0)) { alert("Umbral inválido en " + BONOS_DEF[cl].nombre + " · " + k.label); return; }
+          if (k.umb.tipo === "max" ? !(meta < parcial) : !(meta > parcial)) {
+            alert(BONOS_DEF[cl].nombre + " · " + k.label + ": la meta debe ser " + (k.umb.tipo === "max" ? "MENOR" : "MAYOR") + " que el parcial."); return;
+          }
+          kpiUmbrales[cl][k.id] = { meta, parcial };
+        }
+      }
+      if (Math.abs(suma - 100) > 0.11) { alert("Los pesos de " + BONOS_DEF[cl].nombre + " suman " + (Math.round(suma * 10) / 10) + "% y deben sumar 100%."); return; }
+    }
+    if (!window.confirm("Los objetivos nuevos aplican del período ABIERTO en adelante. Los meses ya cerrados quedan congelados como se firmaron. ¿Guardar?")) return;
+    try { await onGuardarKpiCfg({ kpiPesos, kpiUmbrales }); setObjOpen(false); setObjLocal(null); }
+    catch (e) { alert("No se pudo guardar: " + e.message); }
+  };
+  const PanelObjetivos = () => !esAdmin ? null : (
+    <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
+      <div onClick={()=>{ setObjOpen(o=>{ const nv=!o; if (nv && !objLocal) iniciarObjetivos(); return nv; }); }} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <span>{objOpen?"▾":"▸"} 🎯 Objetivos de KPIs (metas y pesos · solo administración)</span>
+        {(kpiCfg && (kpiCfg.actualizadoPor)) && <span style={{fontSize:11, color:C2.muted}}>Último cambio: {kpiCfg.actualizadoPor}</span>}
+      </div>
+      {objOpen && objLocal && (
+        <div style={{marginTop:12}}>
+          <div style={{fontSize:12, color:C2.muted, marginBottom:10, lineHeight:1.5}}>
+            Meta = 100% del KPI · Parcial = pago parcial. Los KPIs de criterios (checklists, quejas, conteos) son fijos: solo su peso es editable. Los pesos de cada persona deben sumar 100%. Los cambios aplican del período abierto en adelante; los cerrados no se tocan.
+          </div>
+          {BONOS_ORDEN.map(cl => {
+            const suma = BONOS_DEF[cl].kpis.reduce((t,k)=> t + (Number((objLocal.pesos[cl]||{})[k.id]) || 0), 0);
+            return (
+              <div key={cl} style={{marginBottom:14}}>
+                <div style={{fontSize:13, fontWeight:800, color:C2.text, marginBottom:6}}>
+                  {BONOS_DEF[cl].nombre}
+                  <span style={{fontSize:11.5, fontWeight:700, marginLeft:10, color: Math.abs(suma-100)<=0.11 ? C2.success : "#c0392b"}}>pesos: {Math.round(suma*10)/10}%</span>
+                </div>
+                {BONOS_DEF[cl].kpis.map(k => (
+                  <div key={k.id} style={{display:"flex", alignItems:"center", gap:8, marginBottom:6, flexWrap:"wrap"}}>
+                    <div style={{flex:"1 1 220px", fontSize:12.5, color:C2.text}}>{k.label}</div>
+                    <label style={{fontSize:11, color:C2.muted}}>peso %</label>
+                    <input value={(objLocal.pesos[cl]||{})[k.id] ?? ""} inputMode="decimal"
+                      onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setObjLocal(o=>({ ...o, pesos:{ ...o.pesos, [cl]:{ ...(o.pesos[cl]||{}), [k.id]: v } } })); }}
+                      style={{width:60, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"6px 8px", fontSize:12.5, fontFamily:"inherit"}}/>
+                    {k.umb ? (<>
+                      <label style={{fontSize:11, color:C2.muted}}>{k.umb.tipo==="max" ? "meta ≤" : "meta ≥"}</label>
+                      <input value={((objLocal.umb[cl]||{})[k.id]||{}).meta ?? ""} inputMode="decimal"
+                        onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setObjLocal(o=>({ ...o, umb:{ ...o.umb, [cl]:{ ...(o.umb[cl]||{}), [k.id]:{ ...((o.umb[cl]||{})[k.id]||{}), meta:v } } } })); }}
+                        style={{width:62, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"6px 8px", fontSize:12.5, fontFamily:"inherit"}}/>
+                      <label style={{fontSize:11, color:C2.muted}}>parcial</label>
+                      <input value={((objLocal.umb[cl]||{})[k.id]||{}).parcial ?? ""} inputMode="decimal"
+                        onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setObjLocal(o=>({ ...o, umb:{ ...o.umb, [cl]:{ ...(o.umb[cl]||{}), [k.id]:{ ...((o.umb[cl]||{})[k.id]||{}), parcial:v } } } })); }}
+                        style={{width:62, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"6px 8px", fontSize:12.5, fontFamily:"inherit"}}/>
+                    </>) : (
+                      <span style={{fontSize:10.5, color:C2.muted, background:C2.surface, border:"1px solid "+C2.border, borderRadius:10, padding:"3px 9px"}}>criterios fijos</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          <div style={{display:"flex", gap:10}}>
+            <button onClick={guardarObjetivos} style={{border:"none", borderRadius:8, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>Guardar objetivos</button>
+            <button onClick={()=>{ iniciarObjetivos(); }} style={{border:"1px solid "+C2.border, borderRadius:8, cursor:"pointer", background:C2.surface, color:C2.muted, padding:"9px 14px", fontSize:12.5, fontWeight:700, fontFamily:"inherit"}}>Descartar cambios</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
   const mesActual = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+  useEffect(() => {
+    if (!esAdmin || kpiCfg == null || window.__bonosSnapBackfill) return;
+    const sinFoto = (bonos || []).filter(b => b.estado === "cerrado" && !b.calcSnapshot);
+    if (!sinFoto.length) return;
+    window.__bonosSnapBackfill = true;
+    sinFoto.forEach(b => {
+      const calcSnapshot = {};
+      BONOS_ORDEN.forEach(cl => {
+        // La historia se congela con las reglas ORIGINALES (sin ediciones): estos
+        // meses se pagaron con esas metas, y así queda inmune al orden en que el
+        // admin edite objetivos vs. abra este módulo por primera vez.
+        const d = bonosDefEfectiva(cl, null);
+        const c = calcColaborador(d, (b.capturas||{})[cl] || {}, 0);
+        calcSnapshot[cl] = {
+          filas: c.filas.map(f => ({ id:f.id, label:f.label, peso:f.peso, resultado:f.resultado, pago:f.pago, nivel:f.nivel, esNAfila:!!f.esNAfila })),
+          umbrales: Object.fromEntries(d.kpis.filter(k => k.umbEf).map(k => [k.id, k.umbEf])),
+        };
+      });
+      Promise.resolve(onGuardar({ ...b, id: b.id || b.periodo, calcSnapshot, calcSnapshotFecha: new Date().toISOString(), calcSnapshotNota: "congelado retroactivo con las reglas originales" })).catch(() => {});
+    });
+  }, [esAdmin, bonos, kpiCfg]); // eslint-disable-line
 
   // ── LISTA ──
   if (!p){
@@ -4208,11 +4375,20 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
           </div>
         </div>
         <PanelSueldos />
+        <PanelObjetivos />
         {ordenados.length===0 && <div style={{color:C2.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay períodos. Crea el del mes actual para empezar.</div>}
         {ordenados.map(b => {
           let totalNomina = 0;
           if (esAdmin){
-            BONOS_ORDEN.forEach(cl => { const c=calcColaborador(BONOS_DEF[cl], (b.capturas||{})[cl], bonoMaxDeP(b, cl)); totalNomina += baseDe(cl)+c.totalBono; });
+            BONOS_ORDEN.forEach(cl => {
+              const bm = bonoMaxDeP(b, cl);
+              const snap = (b.calcSnapshot || {})[cl];
+              // Período cerrado con foto: el total sale del snapshot, no de recalcular.
+              const total = (b.estado === "cerrado" && snap)
+                ? snap.filas.reduce((t, f) => t + ((f.esNAfila && esNAval(f.resultado)) ? 0 : f.pago * bm * f.peso), 0)
+                : calcColaborador(defDe(cl), (b.capturas||{})[cl], bm).totalBono;
+              totalNomina += baseDe(cl) + total;
+            });
           }
           return (
             <div key={b.id} onClick={()=>setP({ ...b, capturas:{ krisia:{...((b.capturas||{}).krisia||{})}, andres:{...((b.capturas||{}).andres||{})}, isidra:{...((b.capturas||{}).isidra||{})} } })}
@@ -4241,6 +4417,18 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
         payload.estado=estado;
         if(estado==="cerrado"){
           payload.fechaCierre=new Date().toISOString();
+          // Congela el RESULTADO calculado (niveles, pagos, pesos y umbrales usados):
+          // los recibos de este período quedan inmunes a ediciones futuras de objetivos.
+          payload.calcSnapshot = {};
+          BONOS_ORDEN.forEach(cl => {
+            const d = defDe(cl);
+            const c = calcColaborador(d, (p.capturas||{})[cl] || {}, 0);
+            payload.calcSnapshot[cl] = {
+              filas: c.filas.map(f => ({ id:f.id, label:f.label, peso:f.peso, resultado:f.resultado, pago:f.pago, nivel:f.nivel, esNAfila:!!f.esNAfila })),
+              umbrales: Object.fromEntries(d.kpis.filter(k => k.umbEf).map(k => [k.id, k.umbEf])),
+            };
+          });
+          payload.calcSnapshotFecha = new Date().toISOString();
           // Congela SOLO el tope de bono (no el sueldo) para que el recibo sea reproducible sin filtrar sueldos.
           if(esAdmin && salarios) payload.bonoMaxSnapshot = { krisia:((salarios.krisia||{}).bonoMax)||0, andres:((salarios.andres||{}).bonoMax)||0, isidra:((salarios.isidra||{}).bonoMax)||0 };
         }
@@ -4282,7 +4470,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
 
       <div style={{opacity: cerrado?0.6:1, pointerEvents: cerrado?"none":"auto"}}>
       {BONOS_ORDEN.map(cl => {
-        const def = BONOS_DEF[cl];
+        const def = defDe(cl);
         const caps = (p.capturas||{})[cl] || {};
         const bonoMax = bonoMaxDe(cl);
         const calc = esAdmin ? calcColaborador(def, caps, bonoMax) : null;
@@ -4338,7 +4526,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
           return (
             <div key={cl} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:"1px solid "+C2.border}}>
               <span style={{fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</span>
-              <button disabled={!listo} onClick={()=>onImprimir(buildReciboBonoHtml(cl, (p.capturas||{})[cl]||{}, {bonoMax:bm}, p.periodo), "Recibo bono "+BONOS_DEF[cl].nombre)}
+              <button disabled={!listo} onClick={()=>onImprimir(buildReciboBonoHtml(cl, (p.capturas||{})[cl]||{}, {bonoMax:bm}, p.periodo, kpiCfg, cerrado ? (p.calcSnapshot||{})[cl] : null), "Recibo bono "+BONOS_DEF[cl].nombre)}
                 style={{border:"none", borderRadius:8, cursor:listo?"pointer":"not-allowed", background:listo?"#5c8fe0":C2.surface, color:listo?"#fff":C2.muted, padding:"8px 16px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir</button>
             </div>
           );
@@ -5926,6 +6114,23 @@ if (usuario) {
     const id = String(payload.id || payload.periodo);
     await setDoc(doc(db, "bonos", id), { ...payload, id, actualizadoPor: usuario.email, actualizado: new Date().toISOString() }, { merge: true });
   };
+  // Objetivos de KPIs: legibles por admin y seguimiento (Krisia evalúa con ellos),
+  // editables solo desde el panel de administración. Doc aparte de bonosSalarios
+  // precisamente para no exponer sueldos a seguimiento.
+  const [kpiCfg, setKpiCfg] = useState(null);
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) { setKpiCfg(null); return; }
+    const un = onSnapshot(doc(db, "config", "bonosKpis"),
+      snap => setKpiCfg(snap.exists() ? snap.data() : {}),
+      () => setKpiCfg({}));
+    return un;
+  }, [usuario, rol]);
+  const guardarBonosKpis = async (data) => {
+    const prev = kpiCfg || {};
+    const log = [{ fecha: new Date().toISOString(), por: usuario.email }, ...(prev.log || [])].slice(0, 30);
+    await setDoc(doc(db, "config", "bonosKpis"), { ...data, log, actualizadoPor: usuario.email, actualizado: new Date().toISOString() });
+  };
   const guardarSalariosBonos = async (data) => {
     await setDoc(doc(db, "config", "bonosSalarios"), { ...data, actualizadoPor: usuario.email }, { merge: true });
   };
@@ -6850,6 +7055,8 @@ const cancelar = async (id) => {
           onGuardar={guardarBono}
           onImprimir={imprimirBono}
           onGuardarSalarios={guardarSalariosBonos}
+          kpiCfg={kpiCfg || {}}
+          onGuardarKpiCfg={guardarBonosKpis}
         />
       )}
 

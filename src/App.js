@@ -2474,6 +2474,7 @@ function Calendario({ ordenes, onBack, onSelect }) {
   const [mes, setMes] = useState(hoy.getMonth());
   const [filtroCampo, setFiltroCampo] = useState("todos");
   const [filtroValor, setFiltroValor] = useState("");
+  const [filtroEstatus, setFiltroEstatus] = useState("todos");
 
   const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
   const primerDia = new Date(anio, mes, 1).getDay();
@@ -2486,6 +2487,7 @@ function Calendario({ ordenes, onBack, onSelect }) {
 
   // Filtrar órdenes
   const ordenesFiltradas = ordenes.filter(o => {
+    if (filtroEstatus !== "todos" && (o.etapa||"nueva") !== filtroEstatus) return false;
     if (!filtroValor) return true;
     if (filtroCampo === "cliente") return (o.cliente||"") === filtroValor;
     if (filtroCampo === "vendedor") return (o.creadoPorNombre||"") === filtroValor;
@@ -2535,6 +2537,19 @@ function Calendario({ ordenes, onBack, onSelect }) {
         )}
         {filtroValor && (
           <Btn onClick={() => { setFiltroCampo("todos"); setFiltroValor(""); }} variant="ghost" size="sm">✕ Limpiar</Btn>
+        )}
+      </div>
+
+      {/* Filtro por estatus de la orden */}
+      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        <span style={{fontSize:12,color:C.muted}}>Estatus:</span>
+        <select value={filtroEstatus} onChange={e => setFiltroEstatus(e.target.value)}
+          style={{background:C.card,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontSize:12,minWidth:180}}>
+          <option value="todos">Todos los estatus</option>
+          {ETAPAS.map(et => <option key={et.id} value={et.id}>{et.label}</option>)}
+        </select>
+        {filtroEstatus !== "todos" && (
+          <Btn onClick={() => setFiltroEstatus("todos")} variant="ghost" size="sm">✕ Limpiar</Btn>
         )}
       </div>
 

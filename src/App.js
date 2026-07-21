@@ -2690,6 +2690,137 @@ function SeguimientoPublico({ token }) {
   );
 }
 
+// ── Calendario público del bordador (proveedor externo, solo lectura por token) ──
+function CalendarioBordador({ token }) {
+  const [info, setInfo] = useState(undefined);   // undefined=cargando, null=token inválido, {nombre} si existe
+  const [ordenes, setOrdenes] = useState([]);
+  const hoy = new Date();
+  const [anio, setAnio] = useState(hoy.getFullYear());
+  const [mes, setMes] = useState(hoy.getMonth());
+
+  // 1) Validar el token -> obtener el nombre del bordador
+  useEffect(() => {
+    if (!token) { setInfo(null); return; }
+    const unsub = onSnapshot(doc(db, "config", "bordadorTokens"),
+      snap => {
+        const mapa = (snap.exists() && snap.data().mapa) ? snap.data().mapa : {};
+        let nombre = null;
+        for (const nm in mapa) { if (mapa[nm] === token) { nombre = nm; break; } }
+        setInfo(nombre ? { nombre } : null);
+      },
+      () => setInfo(null)
+    );
+    return () => unsub();
+  }, [token]);
+
+  // 2) Con el nombre, escuchar SOLO sus órdenes en tiempo real
+  useEffect(() => {
+    if (!info || !info.nombre) { setOrdenes([]); return; }
+    const qy = query(collection(db, "calendarioBordador"), where("bordador", "==", info.nombre));
+    const unsub = onSnapshot(qy,
+      snap => setOrdenes(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      () => setOrdenes([])
+    );
+    return () => unsub();
+  }, [info]);
+
+  const NAVY = "#182B55", ORANGE = "#F7941D", GREY = "#8b90a7";
+  const wrap = { minHeight:"100vh", background:"#0f1117", color:"#e8eaf0", fontFamily:"'Barlow','Segoe UI',sans-serif", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 12px", boxSizing:"border-box" };
+
+  if (info === undefined) return <div style={{...wrap, justifyContent:"center"}}>Cargando…</div>;
+  if (info === null) return (
+    <div style={{...wrap, justifyContent:"center", textAlign:"center"}}>
+      <div style={{fontSize:48, marginBottom:12}}>🔍</div>
+      <div style={{fontSize:18, fontWeight:800}}>Enlace no válido</div>
+      <div style={{color:GREY, marginTop:8, fontSize:14}}>Solicita tu enlace personal a WORK-LIFE.</div>
+    </div>
+  );
+
+  const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const primerDia = new Date(anio, mes, 1).getDay();
+  const diasEnMes = new Date(anio, mes + 1, 0).getDate();
+  const etColor = (et) => (ETAPAS.find(e => e.id === et) || {}).color || C.muted;
+  const etLabel = (et) => (ETAPAS.find(e => e.id === et) || {}).label || "Nueva";
+
+  // Agrupar por día (fecha de entrega requerida o reprogramada)
+  const porDia = {};
+  ordenes.forEach(o => {
+    const iso = o.fechaReprogramada || o.fechaRequerida;
+    if (!iso) return;
+    const [y,m,d] = iso.split("-").map(Number);
+    if (y === anio && (m-1) === mes) { (porDia[d] = porDia[d] || []).push(o); }
+  });
+
+  const cambiarMes = (delta) => {
+    let nm = mes + delta, na = anio;
+    if (nm < 0) { nm = 11; na--; } else if (nm > 11) { nm = 0; na++; }
+    setMes(nm); setAnio(na);
+  };
+
+  const celdas = [];
+  for (let i = 0; i < primerDia; i++) celdas.push(null);
+  for (let d = 1; d <= diasEnMes; d++) celdas.push(d);
+
+  const esHoy = (d) => d === hoy.getDate() && mes === hoy.getMonth() && anio === hoy.getFullYear();
+
+  return (
+    <div style={wrap}>
+      <div style={{maxWidth:920, width:"100%"}}>
+        <div style={{textAlign:"center", marginBottom:16}}>
+          <img src={LOGO_WL} alt="WORK-LIFE" style={{height:76, objectFit:"contain"}} />
+          <div style={{fontSize:12, color:GREY, textTransform:"uppercase", letterSpacing:1, marginTop:6}}>Calendario de entregas</div>
+          <div style={{fontSize:20, fontWeight:800, marginTop:2}}>{info.nombre}</div>
+        </div>
+
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, gap:8}}>
+          <button onClick={() => cambiarMes(-1)} style={{background:"#1a1d27", border:"1px solid #2e3450", color:"#e8eaf0", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:14}}>‹ Anterior</button>
+          <div style={{fontSize:18, fontWeight:800}}>{meses[mes]} {anio}</div>
+          <button onClick={() => cambiarMes(1)} style={{background:"#1a1d27", border:"1px solid #2e3450", color:"#e8eaf0", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:14}}>Siguiente ›</button>
+        </div>
+
+        <div style={{display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4}}>
+          {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map(d => (
+            <div key={d} style={{textAlign:"center", fontSize:11, color:GREY, fontWeight:700, padding:"4px 0", textTransform:"uppercase"}}>{d}</div>
+          ))}
+          {celdas.map((d, i) => {
+            if (d === null) return <div key={"e"+i} style={{minHeight:84}} />;
+            const items = porDia[d] || [];
+            return (
+              <div key={d} style={{minHeight:84, background:"#1a1d27", border:"1px solid "+(esHoy(d)?ORANGE:"#2e3450"), borderRadius:8, padding:6, display:"flex", flexDirection:"column", gap:3, overflow:"hidden"}}>
+                <div style={{fontSize:12, fontWeight:700, color: esHoy(d)?ORANGE:GREY}}>{d}</div>
+                {items.slice(0,4).map(o => {
+                  const pz = ((o.prendas)||[]).reduce((a,p)=> a + (parseInt(p.cantidad)||0), 0);
+                  return (
+                  <div key={o.id} title={etLabel(o.etapa)} style={{background:etColor(o.etapa)+"22", borderLeft:"3px solid "+etColor(o.etapa), borderRadius:4, padding:"3px 5px", fontSize:10.5, lineHeight:1.25, overflow:"hidden"}}>
+                    <div style={{fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>#{o.numero||"—"}{pz?(" · "+pz+" pz"):""}</div>
+                    <div style={{color:GREY, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{etLabel(o.etapa)}</div>
+                  </div>
+                  );
+                })}
+                {items.length > 4 && <div style={{fontSize:10, color:GREY}}>+{items.length-4} más</div>}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Leyenda de estatus */}
+        <div style={{display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", marginTop:16}}>
+          {ETAPAS.map(et => (
+            <div key={et.id} style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color:GREY}}>
+              <span style={{width:10, height:10, borderRadius:2, background:et.color, display:"inline-block"}} />{et.label}
+            </div>
+          ))}
+        </div>
+
+        <div style={{textAlign:"center", color:GREY, fontSize:11, marginTop:20}}>
+          WORK-LIFE · Esta página se actualiza sola · Solo lectura
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function LoginScreen({ onLogin, error }) {
   return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:24}}>
@@ -5736,6 +5867,8 @@ function AppInner() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
   if (_seg) return <SeguimientoPublico token={_seg} />;
+  const _brd = new URLSearchParams(window.location.search).get("bordador");
+  if (_brd) return <CalendarioBordador token={_brd} />;
   const _chk = new URLSearchParams(window.location.search).get("checador");
   if (_chk) { try { localStorage.setItem("wl_modo", "checador"); } catch(e){} return <ChecadorPublico />; }
   const _rm = new URLSearchParams(window.location.search).get("rutamovil");
@@ -5868,6 +6001,32 @@ if (usuario) {
         ? all.filter(o => !(o.etapa === "nueva" && !o.liberada))
         : all;
       setOrdenes(data);
+      // Backfill del espejo de calendario del bordador — SOLO una vez, y solo admin.
+      // Puebla calendarioBordador con las órdenes ya existentes (que nacieron antes de
+      // esta función) para que el calendario del bordador arranque completo, sin esperar
+      // a que cada orden se vuelva a guardar. Escribe solo campos NO comerciales.
+      if (esAdmin && all.length && !window.__calBordadorBackfill) {
+        window.__calBordadorBackfill = true;
+        (async () => {
+          for (const o of all) {
+            try {
+              const bord = (o.bordador || "").trim();
+              const ref = doc(db, "calendarioBordador", String(o.id));
+              if (!bord || o.etapa === "cancelada") { try { await deleteDoc(ref); } catch(e){} continue; }
+              const piezas = ((o.prendas) || []).reduce((a,p) => a + (parseInt(p.cantidad)||0), 0);
+              await setDoc(ref, {
+                bordador: bord,
+                numero: o.numero || "",
+                piezas: piezas,
+                etapa: o.etapa || "nueva",
+                fechaRequerida: o.fechaRequerida || "",
+                fechaReprogramada: o.fechaReprogramada || "",
+                actualizado: serverTimestamp(),
+              }, { merge: true });
+            } catch(e) {}
+          }
+        })();
+      }
       // Mantener el contador global al día — SOLO una vez por sesión (no en cada cambio).
       if (esPriv && all.length && !contadorSync.current) {
         contadorSync.current = true;
@@ -5928,6 +6087,36 @@ if (usuario) {
   const quitarBordador = async (nombre) => {
     const nueva = bordadores.filter(b => b !== nombre);
     await setDoc(doc(db, "config", "bordadores"), { lista: nueva }, { merge: true });
+  };
+
+  // ── Enlaces de calendario para bordadores (token por proveedor) ──────────
+  const [bordadorTokens, setBordadorTokens] = useState({});
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "config", "bordadorTokens"),
+      snap => setBordadorTokens((snap.exists() && snap.data().mapa) ? snap.data().mapa : {}),
+      () => setBordadorTokens({})
+    );
+    return unsub;
+  }, []);
+  const copiarEnlaceBordador = async (nombre) => {
+    let token = bordadorTokens[nombre];
+    if (!token) {
+      // Genera un token largo aleatorio la primera vez y lo guarda.
+      const gen = () => {
+        try {
+          const a = new Uint8Array(18); crypto.getRandomValues(a);
+          return Array.from(a, x => x.toString(16).padStart(2,"0")).join("");
+        } catch(e) {
+          return (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).replace(/[^a-z0-9]/g,"");
+        }
+      };
+      token = gen();
+      const nuevoMapa = { ...bordadorTokens, [nombre]: token };
+      await setDoc(doc(db, "config", "bordadorTokens"), { mapa: nuevoMapa }, { merge: true });
+    }
+    const url = window.location.origin + "/?bordador=" + token;
+    try { await navigator.clipboard.writeText(url); alert("Enlace de " + nombre + " copiado:\n\n" + url + "\n\nEnvíaselo. Verá su calendario en tiempo real (solo lectura)."); }
+    catch(e) { alert("Enlace de " + nombre + ":\n\n" + url); }
   };
 
   // ── Tareas pendientes (personales) ────────────────────────────────────────
@@ -6329,12 +6518,39 @@ if (usuario) {
       });
     } catch (e) { console.log("syncSeguimiento error:", e); }
   };
+
+  // Espejo del calendario para el bordador: SOLO campos no comerciales (sin precios ni cliente).
+  // El id del espejo es el mismo id de la orden, para poder actualizar/limpiar 1:1.
+  const syncCalendarioBordador = async (orden) => {
+    if (!orden || !orden.id) return;
+    try {
+      const bord = (orden.bordador || "").trim();
+      const ref = doc(db, "calendarioBordador", String(orden.id));
+      // Si la orden no tiene bordador asignado, o fue cancelada, se retira del espejo
+      // para que no le aparezca a nadie.
+      if (!bord || orden.etapa === "cancelada") {
+        try { await deleteDoc(ref); } catch(e) {}
+        return;
+      }
+      const piezas = ((orden.prendas) || []).reduce((a,p) => a + (parseInt(p.cantidad)||0), 0);
+      await setDoc(ref, {
+        bordador: bord,
+        numero: orden.numero || "",
+        piezas: piezas,
+        etapa: orden.etapa || "nueva",
+        fechaRequerida: orden.fechaRequerida || "",
+        fechaReprogramada: orden.fechaReprogramada || "",
+        actualizado: serverTimestamp(),
+      });
+    } catch (e) { console.log("syncCalendarioBordador error:", e); }
+  };
   // Guarda en "ordenes" y actualiza el seguimiento público
   const guardarOrden = async (orden) => {
     if (!orden.seguimientoToken) orden = { ...orden, seguimientoToken: genToken() };
     orden = await recomprimirOrden(orden);
     await setDoc(doc(db, "ordenes", String(orden.id)), orden);
     await syncSeguimiento(orden);
+    await syncCalendarioBordador(orden);
     await upsertLogosDeOrden(orden);
   };
   // Catálogo de logos (para autocompletado en la orden y precios en Pago a bordadores)
@@ -7122,6 +7338,7 @@ const cancelar = async (id) => {
             {bordadores.map(b => (
               <div key={b} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid "+C.border}}>
                 <div style={{flex:1,color:C.text,fontSize:14}}>{b}</div>
+                <Btn variant="ghost" size="sm" onClick={()=>copiarEnlaceBordador(b)} style={{color:"#F7941D"}}>🔗 Enlace</Btn>
                 <Btn variant="ghost" size="sm" onClick={async ()=>{ const n=window.prompt("Nuevo nombre para \""+b+"\":", b); if(n&&n.trim()) await renombrarBordador(b, n); }}>Renombrar</Btn>
                 <Btn variant="ghost" size="sm" onClick={async ()=>{ if(window.confirm("¿Quitar \""+b+"\" de la lista? (las órdenes que ya lo tengan no cambian)")) await quitarBordador(b); }} style={{color:"#c0392b"}}>Quitar</Btn>
               </div>

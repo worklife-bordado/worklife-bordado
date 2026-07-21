@@ -4992,6 +4992,66 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
   });
   const filas = Object.values(porEmpDia).sort((a,b)=> a.dia===b.dia ? a.nombre.localeCompare(b.nombre) : b.dia.localeCompare(a.dia));
 
+  // Exporta el reporte del rango a un archivo Excel: una hoja de detalle por día
+  // y una hoja de resumen (total de horas por trabajador).
+  const [exportando, setExportando] = useState(false);
+  const exportarExcel = async () => {
+    if (!filas.length) { alert("No hay registros en este rango para exportar."); return; }
+    setExportando(true);
+    try {
+      const XLSX = await cargarXLSX();
+      const hm = (ms) => { const min = Math.max(0, Math.round(ms/60000)); return Math.floor(min/60) + "h " + (min%60) + "m"; };
+      const horasDec = (ms) => Math.round(Math.max(0, ms) / 3600000 * 100) / 100; // horas con 2 decimales
+
+      // ── Hoja 1: Detalle por día (ordenado por trabajador y fecha) ──
+      const detalle = [...filas].sort((a,b) => a.nombre === b.nombre ? a.dia.localeCompare(b.dia) : a.nombre.localeCompare(b.nombre));
+      const filasDetalle = detalle.map(f => {
+        const r = chkResumenDia(f.regs);
+        const anom = f.regs.find(x => x.anomalia);
+        const corr = f.regs.some(x => x.corregido);
+        return {
+          "Trabajador": f.nombre,
+          "Fecha": f.dia.split("-").reverse().join("/"),
+          "Entrada": chkHora(r.entrada),
+          "Inicio comida": chkHora(r.ci),
+          "Fin comida": chkHora(r.cf),
+          "Salida": chkHora(r.salida),
+          "Horas trabajadas": hm(r.netoMs),
+          "Horas (decimal)": horasDec(r.netoMs),
+          "Observaciones": [anom ? "Anomalía: "+anom.anomalia : "", corr ? "Contiene correcciones" : ""].filter(Boolean).join(" · "),
+        };
+      });
+      const ws1 = XLSX.utils.json_to_sheet(filasDetalle);
+      ws1["!cols"] = [{wch:22},{wch:12},{wch:9},{wch:12},{wch:11},{wch:9},{wch:16},{wch:14},{wch:26}];
+
+      // ── Hoja 2: Resumen por trabajador (total del rango) ──
+      const porEmp = {};
+      detalle.forEach(f => {
+        const r = chkResumenDia(f.regs);
+        if (!porEmp[f.nombre]) porEmp[f.nombre] = { dias:0, ms:0 };
+        porEmp[f.nombre].dias += 1;
+        porEmp[f.nombre].ms += Math.max(0, r.netoMs);
+      });
+      const filasResumen = Object.keys(porEmp).sort((a,b)=>a.localeCompare(b)).map(nombre => ({
+        "Trabajador": nombre,
+        "Días con registro": porEmp[nombre].dias,
+        "Total horas": hm(porEmp[nombre].ms),
+        "Total horas (decimal)": horasDec(porEmp[nombre].ms),
+      }));
+      const ws2 = XLSX.utils.json_to_sheet(filasResumen);
+      ws2["!cols"] = [{wch:22},{wch:18},{wch:14},{wch:20}];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws2, "Resumen");
+      XLSX.utils.book_append_sheet(wb, ws1, "Detalle por día");
+      const nombreArch = "Checador_" + desde + "_a_" + hasta + ".xlsx";
+      XLSX.writeFile(wb, nombreArch);
+    } catch (e) {
+      alert("No se pudo exportar: " + (e.message || e));
+    }
+    setExportando(false);
+  };
+
   return (
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
       <div style={{fontSize:22, fontWeight:800, color:C2.text, marginBottom:16}}>🕐 Checador</div>
@@ -5008,6 +5068,10 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
             <input type="date" value={desde} onChange={e=>setDesde(e.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, color:C2.text, padding:"7px 9px", fontSize:13}}/>
             <span style={{fontSize:13, color:C2.muted}}>al</span>
             <input type="date" value={hasta} onChange={e=>setHasta(e.target.value)} style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:8, color:C2.text, padding:"7px 9px", fontSize:13}}/>
+            <button onClick={exportarExcel} disabled={exportando || cargando || !filas.length}
+              style={{marginLeft:"auto", border:"none", borderRadius:8, background:(exportando||cargando||!filas.length)?C2.border:"#1f8f4e", color:"#fff", padding:"8px 14px", fontSize:13, fontWeight:700, cursor:(exportando||cargando||!filas.length)?"default":"pointer", fontFamily:"inherit"}}>
+              {exportando ? "Generando…" : "⬇️ Descargar Excel"}
+            </button>
           </div>
           {cargando && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Cargando registros…</div>}
           {!cargando && filas.length === 0 && <div style={{color:C2.muted, textAlign:"center", padding:"30px 0"}}>Sin registros en este rango.</div>}

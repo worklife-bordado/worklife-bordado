@@ -4789,8 +4789,9 @@ function ChecadorPublico(){
       setMsg({ texto: d.mensaje || ((t?t.lbl:tipo) + " registrada"), color: t?t.color:C2.success, nombre });
       setTimeout(salir, 2200);
     } catch(e){
-      setMsg({ texto: e.message === "Failed to fetch" ? "Sin conexión: la checada NO se registró" : e.message, color:"#c0392b", nombre, error:true });
-      setTimeout(()=>setMsg(null), 3000); // el error no cierra la sesión: puede reintentar
+      // El error NO se desvanece solo: se queda fijo hasta que la persona lo confirme,
+      // para que nadie se vaya creyendo que checó cuando en realidad falló.
+      setMsg({ texto: e.message === "Failed to fetch" ? "Sin conexión: la checada NO se registró" : e.message, color:"#c0392b", nombre, error:true, tipoIntento:tipo });
     }
     setEnviando(false);
   };
@@ -4802,6 +4803,18 @@ function ChecadorPublico(){
         <div style={{fontSize:52, marginBottom:12}}>{msg.error ? "⚠️" : "✓"}</div>
         <div style={{fontSize:20, fontWeight:800, color:msg.color}}>{msg.texto}</div>
         {!msg.error && <div style={{color:C2.muted, marginTop:10, fontSize:14}}>Gracias, {msg.nombre}.</div>}
+        {msg.error && (
+          <div style={{marginTop:20, display:"flex", gap:10, justifyContent:"center", flexWrap:"wrap"}}>
+            <button onClick={()=>{ const t = msg.tipoIntento; setMsg(null); if (t) checar(t); }} disabled={enviando}
+              style={{border:"none", borderRadius:10, background:C2.accent, color:"#1a1d27", padding:"12px 22px", fontSize:16, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>
+              Reintentar
+            </button>
+            <button onClick={salir}
+              style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"12px 22px", fontSize:16, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>
+              Entendido
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -6005,7 +6005,7 @@ if (usuario) {
       // Puebla calendarioBordador con las órdenes ya existentes (que nacieron antes de
       // esta función) para que el calendario del bordador arranque completo, sin esperar
       // a que cada orden se vuelva a guardar. Escribe solo campos NO comerciales.
-      if (esAdmin && all.length && !window.__calBordadorBackfill) {
+      if (rolActual === "admin" && all.length && !window.__calBordadorBackfill) {
         window.__calBordadorBackfill = true;
         (async () => {
           for (const o of all) {

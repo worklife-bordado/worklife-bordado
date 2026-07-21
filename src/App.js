@@ -2791,8 +2791,9 @@ function CalendarioBordador({ token }) {
                 {items.slice(0,4).map(o => {
                   const pz = ((o.prendas)||[]).reduce((a,p)=> a + (parseInt(p.cantidad)||0), 0);
                   return (
-                  <div key={o.id} title={etLabel(o.etapa)} style={{background:etColor(o.etapa)+"22", borderLeft:"3px solid "+etColor(o.etapa), borderRadius:4, padding:"3px 5px", fontSize:10.5, lineHeight:1.25, overflow:"hidden"}}>
-                    <div style={{fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>#{o.numero||"—"}{pz?(" · "+pz+" pz"):""}</div>
+                  <div key={o.id} title={"#"+(o.numero||"")+" · "+etLabel(o.etapa)} style={{background:etColor(o.etapa)+"22", borderLeft:"3px solid "+etColor(o.etapa), borderRadius:4, padding:"3px 5px", fontSize:10.5, lineHeight:1.25, overflow:"hidden"}}>
+                    <div style={{fontWeight:800, wordBreak:"break-all"}}>#{o.numero||"—"}</div>
+                    {pz? <div style={{color:GREY}}>{pz} pz</div> : null}
                     <div style={{color:GREY, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{etLabel(o.etapa)}</div>
                   </div>
                   );

@@ -4895,8 +4895,8 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
   useEffect(()=>{ setEmpleados(roster || []); }, [roster]);
   const C2 = C;
   const hoy = new Date();
-  const iniSemana = new Date(hoy); iniSemana.setDate(hoy.getDate() - 6);
-  const [desde, setDesde] = useState(chkFechaISO(iniSemana));
+  // Por default el reporte muestra SOLO el día de hoy; el admin puede ampliar el rango a mano.
+  const [desde, setDesde] = useState(chkFechaISO(hoy));
   const [hasta, setHasta] = useState(chkFechaISO(hoy));
   const [checadas, setChecadas] = useState([]);
   const [cargando, setCargando] = useState(false);

@@ -2789,12 +2789,11 @@ function CalendarioBordador({ token }) {
               <div key={d} style={{minHeight:84, background:"#1a1d27", border:"1px solid "+(esHoy(d)?ORANGE:"#2e3450"), borderRadius:8, padding:6, display:"flex", flexDirection:"column", gap:3, overflow:"hidden"}}>
                 <div style={{fontSize:12, fontWeight:700, color: esHoy(d)?ORANGE:GREY}}>{d}</div>
                 {items.slice(0,4).map(o => {
-                  const pz = ((o.prendas)||[]).reduce((a,p)=> a + (parseInt(p.cantidad)||0), 0);
+                  const pz = parseInt(o.piezas) || 0;
                   return (
-                  <div key={o.id} title={"#"+(o.numero||"")+" · "+etLabel(o.etapa)} style={{background:etColor(o.etapa)+"22", borderLeft:"3px solid "+etColor(o.etapa), borderRadius:4, padding:"3px 5px", fontSize:10.5, lineHeight:1.25, overflow:"hidden"}}>
-                    <div style={{fontWeight:800, wordBreak:"break-all"}}>#{o.numero||"—"}</div>
-                    {pz? <div style={{color:GREY}}>{pz} pz</div> : null}
-                    <div style={{color:GREY, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{etLabel(o.etapa)}</div>
+                  <div key={o.id} title={"#"+(o.numero||"")+" · "+etLabel(o.etapa)} style={{background:etColor(o.etapa)+"22", borderLeft:"3px solid "+etColor(o.etapa), borderRadius:4, padding:"3px 4px", lineHeight:1.2, overflow:"hidden"}}>
+                    <div style={{fontWeight:800, fontSize:12, whiteSpace:"nowrap"}}>#{o.numero||"—"}</div>
+                    <div style={{color:GREY, fontSize:9.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{etLabel(o.etapa)}{pz?(" · "+pz+" pz"):""}</div>
                   </div>
                   );
                 })}
@@ -6013,8 +6012,9 @@ if (usuario) {
             try {
               const bord = (o.bordador || "").trim();
               const ref = doc(db, "calendarioBordador", String(o.id));
-              if (!bord || o.etapa === "cancelada") { try { await deleteDoc(ref); } catch(e){} continue; }
-              const piezas = ((o.prendas) || []).reduce((a,p) => a + (parseInt(p.cantidad)||0), 0);
+              // Solo "Nueva" y "En Bordado" (lo que el bordador debe trabajar).
+              if (!bord || (o.etapa !== "nueva" && o.etapa !== "bordado")) { try { await deleteDoc(ref); } catch(e){} continue; }
+              const piezas = (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
               await setDoc(ref, {
                 bordador: bord,
                 numero: o.numero || "",
@@ -6527,13 +6527,16 @@ if (usuario) {
     try {
       const bord = (orden.bordador || "").trim();
       const ref = doc(db, "calendarioBordador", String(orden.id));
-      // Si la orden no tiene bordador asignado, o fue cancelada, se retira del espejo
-      // para que no le aparezca a nadie.
-      if (!bord || orden.etapa === "cancelada") {
+      // El bordador solo debe ver lo que tiene que trabajar: órdenes en "Nueva" o
+      // "En Bordado". Cualquier otra etapa (o sin bordador) se retira del espejo para
+      // que no le aparezca. Así, cuando una orden avanza a Calidad/Entregada, desaparece
+      // sola de su calendario.
+      const visibleParaBordador = (bord && (orden.etapa === "nueva" || orden.etapa === "bordado"));
+      if (!visibleParaBordador) {
         try { await deleteDoc(ref); } catch(e) {}
         return;
       }
-      const piezas = ((orden.prendas) || []).reduce((a,p) => a + (parseInt(p.cantidad)||0), 0);
+      const piezas = (orden.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
       await setDoc(ref, {
         bordador: bord,
         numero: orden.numero || "",

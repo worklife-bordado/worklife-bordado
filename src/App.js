@@ -171,6 +171,9 @@ const TALLA_GRUPOS = [
 ];
 // Flat keys used internally (all 42 keys)
 const TALLAS = TALLA_GRUPOS.flatMap(g => [g.ropa, g.num, g.idx]);
+// Clave para salir del modo checador en la tablet (cámbiala por la que tú quieras).
+const CLAVE_SALIDA_CHECADOR = "8006";
+
 const ETAPAS = [
   {id:"nueva",     label:"Nueva",           color:"#8b90a7"},
   {id:"bordado",   label:"En Bordado",      color:"#5c8fe0"},
@@ -4823,7 +4826,16 @@ function ChecadorPublico(){
           <button onClick={()=>setPin(pin.slice(0,-1))} style={{border:"1px solid "+C2.border, borderRadius:12, background:C2.surface, color:C2.muted, padding:"18px", fontSize:16, cursor:"pointer", fontFamily:"inherit"}}>⌫</button>
         </div>
         {cargando && <div style={{textAlign:"center", color:C2.muted, fontSize:13, marginTop:16}}>Un momento…</div>}
-        <div onClick={()=>{ try{ localStorage.removeItem("wl_modo"); }catch(e){} window.location.href = "/"; }} style={{textAlign:"center", color:C2.muted, fontSize:11, marginTop:26, cursor:"pointer", textDecoration:"underline", opacity:.7}}>Salir del modo checador</div>
+        <div onClick={()=>{
+          const clave = window.prompt("Clave de administrador para salir del modo checador:");
+          if (clave === null) return;               // canceló
+          if (clave === CLAVE_SALIDA_CHECADOR) {
+            try{ localStorage.removeItem("wl_modo"); }catch(e){}
+            window.location.href = "/";
+          } else {
+            alert("Clave incorrecta. El modo checador permanece activo.");
+          }
+        }} style={{textAlign:"center", color:C2.muted, fontSize:11, marginTop:26, cursor:"pointer", textDecoration:"underline", opacity:.7}}>Salir del modo checador</div>
       </div></div>
     );
   }

@@ -3085,11 +3085,13 @@ function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
   return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaReal:"", docs:false, obs:"" };
 }
-function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente }) {
+function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente, onEditarDireccion }) {
   const [r, setR] = useState(null);
   const [guardando, setGuardando] = useState(false);
   const [dirOpen, setDirOpen] = useState(false);
   const [dirBusca, setDirBusca] = useState("");
+  const [editDir, setEditDir] = useState(null);      // { id, direccion } — edición de dirección
+  const [guardandoCli, setGuardandoCli] = useState(false);
   const [importando, setImportando] = useState(false);
   const fileClientesRef = useRef(null);
   const handleExcelClientes = async (ev) => {
@@ -3106,7 +3108,7 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
       if (rows.length && String(rows[0][0] || "").toLowerCase().includes("cliente")) ini = 1; // salta encabezados
       const entradas = rows.slice(ini).map(f => ({ nombre: f[0], direccion: f[1], contacto: f[2] })).filter(e => String(e.nombre||"").trim() && String(e.direccion||"").trim());
       if (!entradas.length) { alert("No se encontraron filas válidas. El Excel debe tener: columna A = Cliente, columna B = Dirección, columna C = Contacto (opcional)."); }
-      else { await onImportarClientes(entradas); alert("Listo: " + entradas.length + " cliente(s) cargados o actualizados."); }
+      else { await onImportarClientes(entradas, { forzar:true }); alert("Listo: " + entradas.length + " cliente(s) cargados o actualizados."); }
     } catch (e) { alert("Error al importar: " + e.message); }
     setImportando(false);
   };
@@ -3181,12 +3183,36 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
               </div>
               <div style={{maxHeight:260, overflowY:"auto"}}>
                 {clientesDir.filter(c => !dirBusca.trim() || (c.nombre||"").toLowerCase().includes(dirBusca.toLowerCase()) || (c.direccion||"").toLowerCase().includes(dirBusca.toLowerCase())).map(c => (
-                  <div key={c.id} style={{display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderTop:"1px solid "+C.border}}>
-                    <div style={{flex:1, minWidth:0}}>
-                      <div style={{fontSize:13, fontWeight:700, color:C.text}}>{c.nombre}</div>
-                      <div style={{fontSize:11.5, color:C.muted}}>📍 {c.direccion}{c.contacto ? " · 👤 "+c.contacto : ""}</div>
+                  <div key={c.id} style={{padding:"8px 0", borderTop:"1px solid "+C.border}}>
+                    <div style={{display:"flex", alignItems:"center", gap:10}}>
+                      <div style={{flex:1, minWidth:0}}>
+                        <div style={{fontSize:13, fontWeight:700, color:C.text}}>{c.nombre}</div>
+                        {!(editDir && editDir.id === c.id) && (
+                          <div style={{fontSize:11.5, color:C.muted}}>📍 {c.direccion}{c.contacto ? " · 👤 "+c.contacto : ""}</div>
+                        )}
+                      </div>
+                      {!(editDir && editDir.id === c.id) && (
+                        <button onClick={()=>setEditDir({ id:c.id, direccion:c.direccion||"" })} title="Editar dirección" style={{border:"none", background:"transparent", color:C.accent, fontSize:15, cursor:"pointer"}}>✏️</button>
+                      )}
+                      <button onClick={()=>{ if(window.confirm("¿Quitar a \""+c.nombre+"\" del directorio? (No afecta rutas ya guardadas)")) onBorrarCliente(c.id); }} style={{border:"none", background:"transparent", color:"#c0392b", fontSize:16, cursor:"pointer"}}>✕</button>
                     </div>
-                    <button onClick={()=>{ if(window.confirm("¿Quitar a \""+c.nombre+"\" del directorio? (No afecta rutas ya guardadas)")) onBorrarCliente(c.id); }} style={{border:"none", background:"transparent", color:"#c0392b", fontSize:16, cursor:"pointer"}}>✕</button>
+                    {editDir && editDir.id === c.id && (
+                      <div style={{marginTop:6}}>
+                        <input autoFocus value={editDir.direccion} onChange={e=>setEditDir(v=>({...v, direccion:e.target.value}))} placeholder="Dirección" style={iS}/>
+                        <div style={{display:"flex", gap:8, marginTop:6, flexWrap:"wrap"}}>
+                          <button disabled={guardandoCli} onClick={async ()=>{
+                            const dir = (editDir.direccion||"").trim();
+                            if (!dir) { alert("La dirección no puede quedar vacía."); return; }
+                            setGuardandoCli(true);
+                            try { await onEditarDireccion(c.id, dir); setEditDir(null); }
+                            catch(err) { alert("No se pudo guardar: " + (err.message || err)); }
+                            setGuardandoCli(false);
+                          }} style={{border:"none", borderRadius:8, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"8px 14px", fontSize:12.5, fontWeight:800, fontFamily:"inherit", opacity:guardandoCli?0.6:1}}>{guardandoCli?"Guardando…":"Guardar dirección"}</button>
+                          <button onClick={()=>setEditDir(null)} style={{border:"1px solid "+C.border, borderRadius:8, cursor:"pointer", background:C.surface, color:C.muted, padding:"8px 14px", fontSize:12.5, fontWeight:700, fontFamily:"inherit"}}>Cancelar</button>
+                        </div>
+                        <div style={{fontSize:10.5, color:C.muted, marginTop:5}}>Aplica a las paradas que captures de ahora en adelante: las rutas ya guardadas no cambian.</div>
+                      </div>
+                    )}
                   </div>
                 ))}
                 {clientesDir.length===0 && <div style={{color:C.muted, fontSize:12.5, textAlign:"center", padding:"14px 0"}}>Aún no hay clientes guardados.</div>}
@@ -6337,7 +6363,8 @@ if (usuario) {
     return unsub;
   }, [usuario, rol, vista]);
   const clienteDirId = (nombre) => String(nombre || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/[\/\\#\[\]\.\$]/g, "-").slice(0, 140);
-  const upsertClientesDir = async (entradas) => {
+  const upsertClientesDir = async (entradas, opts) => {
+    const forzar = !!(opts && opts.forzar);          // la importación de Excel sí manda
     const vistos = new Set();
     for (const e of (entradas || [])) {
       const nombre = String(e.nombre || "").trim();
@@ -6346,13 +6373,26 @@ if (usuario) {
       const id = clienteDirId(nombre);
       if (!id || vistos.has(id)) continue;
       vistos.add(id);
-      const data = { nombre, direccion, actualizado: new Date().toISOString() };
+      const data = { nombre, actualizado: new Date().toISOString() };
+      // Si la dirección fue corregida a mano en el directorio, esa manda: guardar una
+      // ruta vieja (que trae la dirección anterior en sus paradas) ya no la revierte.
+      const fijada = !forzar && (clientesDir || []).some(c => c.id === id && c.direccionManual);
+      if (!fijada) data.direccion = direccion;
+      if (forzar) data.direccionManual = true;
       const contacto = String(e.contacto || "").trim();
       if (contacto) data.contacto = contacto;
       await setDoc(doc(db, "directorioClientes", id), data, { merge: true });
     }
   };
   const borrarClienteDir = async (id) => { await deleteDoc(doc(db, "directorioClientes", String(id))); };
+  // Corrige la dirección guardada de un cliente. No toca el nombre (de ahí sale el id
+  // del documento) ni las rutas ya capturadas: aplica de aquí en adelante.
+  const editarDireccionCliente = async (id, direccion) => {
+    const dir = String(direccion || "").trim();
+    if (!dir) throw new Error("La dirección no puede quedar vacía.");
+    await setDoc(doc(db, "directorioClientes", String(id)),
+      { direccion: dir, direccionManual: true, actualizado: new Date().toISOString(), actualizadoPor: usuario.email }, { merge: true });
+  };
   const imprimirHojaRuta = (ruta) => setRutaPdf({ html: buildHojaRutaHtml(ruta), titulo: "Hoja de Ruta Diaria", archivo: "HojaRuta_"+ruta.fecha+".html" });
   const imprimirCierreRuta = (ruta) => setRutaPdf({ html: buildCierreRutaHtml(ruta), titulo: "Cierre de Ruta", archivo: "CierreRuta_"+ruta.fecha+".html" });
 
@@ -7339,6 +7379,7 @@ const cancelar = async (id) => {
           clientesDir={clientesDir}
           onImportarClientes={upsertClientesDir}
           onBorrarCliente={borrarClienteDir}
+          onEditarDireccion={editarDireccionCliente}
           onGuardar={guardarRuta}
           onImprimirHoja={imprimirHojaRuta}
           onImprimirCierre={imprimirCierreRuta}

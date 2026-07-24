@@ -3829,7 +3829,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
   const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
   const iS = { background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "9px 11px", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%" };
   const tipoLabelCaja = { gasto: "Gasto (con nota)", reposicion: "Reposición (entra dinero)", fondo: "Fondo inicial", aChofer: "Entrega a chofer", reintegroChofer: "Reintegro de chofer" };
-  const tipoLabelChofer = { recibe: "Recibió efectivo", fleteComprob: "Flete con comprobante", fleteEfectivo: "Flete sin comprobante", devuelve: "Devolvió a caja" };
+  const tipoLabelChofer = { recibe: "Recibió efectivo", fleteComprob: "Gasto con comprobante", fleteEfectivo: "Gasto sin comprobante", devuelve: "Devolvió a caja" };
 
   const movMes = movVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
   const movChMes = movChoferVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
@@ -3872,7 +3872,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
           <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Registrar movimiento de caja</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <select value={tipo} onChange={e => setTipo(e.target.value)} style={iS}>
-              {Object.entries(tipoLabelCaja).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(tipoLabelCaja).filter(([k]) => k !== "aChofer" && k !== "reintegroChofer").map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <input value={importe} onChange={e => setImporte(e.target.value)} placeholder="Importe $" inputMode="decimal" style={{ ...iS, flex: 1, minWidth: 110 }} />

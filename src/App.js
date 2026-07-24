@@ -3686,6 +3686,291 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
   );
 }
 
+// ── Caja Chica (fondo fijo, la lleva Seguimiento; Administrador la ve) ───────
+const CAJA_FONDO_MAX = 5000;   // fondo objetivo de la caja
+const CAJA_MIN = 2000;         // por debajo de esto: solicitar reposición
+
+function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov, onAgregarMovChofer, onCerrarMes, onImprimir }) {
+  const esAdmin = rol === "admin";
+  const puedeCapturar = rol === "admin" || rol === "seguimiento";
+  const mesActual = new Date().toISOString().slice(0, 7);
+
+  // Solo movimientos NO cerrados (de meses ya cortados quedan archivados en 'cortes').
+  const mesesCerrados = new Set((cortes || []).map(c => c.mes));
+  const movVivos = (movimientos || []).filter(m => !mesesCerrados.has((m.fecha || "").slice(0, 7)));
+  const movChoferVivos = (movChofer || []).filter(m => !mesesCerrados.has((m.fecha || "").slice(0, 7)));
+
+  // ── Estado de la CAJA (fondo fijo), en orden cronológico ──
+  // Regla contable de caja chica: una REPOSICIÓN archiva los comprobantes acumulados
+  // (se entregan al que repone) y pone el pendiente en cero. Por eso se procesa en
+  // orden, no como una simple suma. El FONDO inicial entra efectivo sin tocar comprobantes.
+  const movOrden = [...movVivos].sort((a, b) => ((a.creadoEl || a.fecha || "")).localeCompare(b.creadoEl || b.fecha || ""));
+  const cajaCalc = movOrden.reduce((a, m) => {
+    const imp = Number(m.importe) || 0;
+    if (m.tipo === "fondo") { a.efectivo += imp; }
+    else if (m.tipo === "reposicion") { a.efectivo += imp; a.comprob = 0; }   // reponer limpia comprobantes
+    else if (m.tipo === "gasto") { a.efectivo -= imp; a.comprob += imp; }
+    else if (m.tipo === "aChofer") { a.efectivo -= imp; }
+    else if (m.tipo === "reintegroChofer") { a.efectivo += imp; }
+    return a;
+  }, { efectivo: 0, comprob: 0 });
+  const efectivoCaja = cajaCalc.efectivo;
+  const comprobPendientes = Math.max(0, cajaCalc.comprob);
+
+  // ── Estado del CHOFER (su propio fondo: efectivo vs comprobantes) ──
+  // Recibe efectivo de la caja (aChofer). Gasta en fletes con comprobante (fleteComprob)
+  // o sin comprobante (fleteEfectivo). Devuelve cambio a la caja (reintegroChofer en la caja).
+  const chofer = movChoferVivos.reduce((a, m) => {
+    const imp = Number(m.importe) || 0;
+    if (m.tipo === "recibe") a.efectivo += imp;                 // recibió efectivo de Seguimiento
+    else if (m.tipo === "fleteComprob") { a.efectivo -= imp; a.comprob += imp; }  // pagó flete, tiene nota
+    else if (m.tipo === "fleteEfectivo") a.efectivo -= imp;     // pagó sin comprobante
+    else if (m.tipo === "devuelve") a.efectivo -= imp;          // devolvió cambio a la caja
+    return a;
+  }, { efectivo: 0, comprob: 0 });
+
+  const bajoMinimo = efectivoCaja < CAJA_MIN;
+  const sugerido = Math.max(0, CAJA_FONDO_MAX - efectivoCaja);
+
+  // ── Captura de movimiento de caja ──
+  const [tipo, setTipo] = useState("gasto");
+  const [importe, setImporte] = useState("");
+  const [concepto, setConcepto] = useState("");
+  const [nota, setNota] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const registrar = async () => {
+    const imp = Number(String(importe).replace(/[^0-9.]/g, ""));
+    if (!imp || imp <= 0) { alert("Escribe un importe válido."); return; }
+    if (!concepto.trim()) { alert("Escribe el concepto."); return; }
+    if (tipo === "gasto" && imp > efectivoCaja) { alert("No hay suficiente efectivo en la caja ($" + fmtMoney(efectivoCaja) + ")."); return; }
+    if (tipo === "aChofer" && imp > efectivoCaja) { alert("No hay suficiente efectivo para entregar al chofer ($" + fmtMoney(efectivoCaja) + ")."); return; }
+    if ((tipo === "reposicion" || tipo === "fondo") && (efectivoCaja + imp) > CAJA_FONDO_MAX) {
+      alert("La reposición dejaría la caja en $" + fmtMoney(efectivoCaja + imp) + ", por encima del fondo de $" + fmtMoney(CAJA_FONDO_MAX) + ".\nSugerido para reponer al tope: $" + fmtMoney(sugerido));
+      return;
+    }
+    setGuardando(true);
+    try {
+      await onAgregarMov({
+        fecha: new Date().toISOString().slice(0, 10),
+        tipo, importe: imp, concepto: concepto.trim(), nota: nota.trim(),
+      });
+      setImporte(""); setConcepto(""); setNota("");
+    } catch (e) { alert("No se pudo registrar: " + (e.message || e)); }
+    setGuardando(false);
+  };
+
+  // ── Captura de movimiento del chofer ──
+  const [ctipo, setCtipo] = useState("fleteComprob");
+  const [cimporte, setCimporte] = useState("");
+  const [cconcepto, setCconcepto] = useState("");
+  const [cnota, setCnota] = useState("");
+  const [cguardando, setCguardando] = useState(false);
+
+  const registrarChofer = async () => {
+    const imp = Number(String(cimporte).replace(/[^0-9.]/g, ""));
+    if (!imp || imp <= 0) { alert("Escribe un importe válido."); return; }
+    if (!cconcepto.trim()) { alert("Escribe el concepto (ej. destino del flete)."); return; }
+    setCguardando(true);
+    try {
+      // "recibe" del chofer también sale de la caja: se registra el par para que la caja cuadre.
+      if (ctipo === "recibe") {
+        if (imp > efectivoCaja) { alert("La caja no tiene ese efectivo para entregar ($" + fmtMoney(efectivoCaja) + ")."); setCguardando(false); return; }
+        await onAgregarMov({ fecha: new Date().toISOString().slice(0, 10), tipo: "aChofer", importe: imp, concepto: "Efectivo a chofer: " + cconcepto.trim(), nota: cnota.trim() });
+      }
+      if (ctipo === "devuelve") {
+        await onAgregarMov({ fecha: new Date().toISOString().slice(0, 10), tipo: "reintegroChofer", importe: imp, concepto: "Devolución de chofer: " + cconcepto.trim(), nota: cnota.trim() });
+      }
+      await onAgregarMovChofer({
+        fecha: new Date().toISOString().slice(0, 10),
+        tipo: ctipo, importe: imp, concepto: cconcepto.trim(), nota: cnota.trim(),
+      });
+      setCimporte(""); setCconcepto(""); setCnota("");
+    } catch (e) { alert("No se pudo registrar: " + (e.message || e)); }
+    setCguardando(false);
+  };
+
+  const cerrarMes = async () => {
+    const mm = mesActual;
+    const delMes = movVivos.filter(m => (m.fecha || "").slice(0, 7) === mm);
+    if (!delMes.length) { alert("No hay movimientos de " + mm + " para cerrar."); return; }
+    if (!window.confirm("¿Cerrar el mes " + mm + "? Se archivan sus movimientos y ya no podrán editarse. El saldo actual queda como inicial del mes siguiente.")) return;
+    // Mes siguiente (para el saldo de apertura)
+    const [ay, am] = mm.split("-").map(Number);
+    const sig = am === 12 ? (ay + 1) + "-01" : ay + "-" + String(am + 1).padStart(2, "0");
+    const primerDiaSig = sig + "-01";
+    try {
+      await onCerrarMes({
+        mes: mm,
+        efectivoFinal: efectivoCaja,
+        comprobPendientes,
+        choferEfectivo: chofer.efectivo,
+        choferComprob: chofer.comprob,
+        cerradoPor: usuario.email,
+        cerradoEl: new Date().toISOString(),
+      });
+      // El efectivo NO se pierde al cerrar: se reinyecta como saldo de apertura del mes
+      // siguiente (tipo "fondo", que suma efectivo sin tocar comprobantes). El chofer,
+      // si trae efectivo, también arranca con su saldo.
+      if (efectivoCaja > 0) {
+        await onAgregarMov({ fecha: primerDiaSig, tipo: "fondo", importe: efectivoCaja, concepto: "Saldo inicial (cierre de " + nombreMesCaja(mm) + ")", nota: "" });
+      }
+      if (chofer.efectivo > 0) {
+        await onAgregarMovChofer({ fecha: primerDiaSig, tipo: "recibe", importe: chofer.efectivo, concepto: "Saldo inicial (cierre de " + nombreMesCaja(mm) + ")", nota: "" });
+      }
+      alert("Mes " + mm + " cerrado. El saldo pasó como inicial de " + nombreMesCaja(sig) + ".");
+    } catch (e) { alert("No se pudo cerrar: " + (e.message || e)); }
+  };
+
+  const wrap = { maxWidth: 900, margin: "0 auto", padding: "0 4px 40px" };
+  const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
+  const iS = { background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "9px 11px", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%" };
+  const tipoLabelCaja = { gasto: "Gasto (con nota)", reposicion: "Reposición (entra dinero)", fondo: "Fondo inicial", aChofer: "Entrega a chofer", reintegroChofer: "Reintegro de chofer" };
+  const tipoLabelChofer = { recibe: "Recibió efectivo", fleteComprob: "Flete con comprobante", fleteEfectivo: "Flete sin comprobante", devuelve: "Devolvió a caja" };
+
+  const movMes = movVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
+  const movChMes = movChoferVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
+
+  return (
+    <div style={wrap}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>💵 Caja chica</div>
+        <div style={{ fontSize: 12, color: C.muted }}>{esAdmin ? "Vista de administrador" : "La registra Seguimiento"} · {nombreMesCaja(mesActual)}</div>
+      </div>
+
+      {/* Tablero de saldos */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12, marginBottom: 6 }}>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ fontSize: 12, color: C.muted }}>Efectivo en caja</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: bajoMinimo ? "#f5a623" : C.success }}>${fmtMoney(efectivoCaja)}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Fondo: ${fmtMoney(CAJA_FONDO_MAX)}</div>
+        </div>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ fontSize: 12, color: C.muted }}>Comprobantes por reponer</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: C.text }}>${fmtMoney(comprobPendientes)}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Notas y facturas guardadas</div>
+        </div>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ fontSize: 12, color: C.muted }}>Chofer — efectivo</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: C.text }}>${fmtMoney(chofer.efectivo)}</div>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Comprobantes: ${fmtMoney(chofer.comprob)}</div>
+        </div>
+      </div>
+
+      {bajoMinimo && (
+        <div style={{ background: "#2a1f0e", border: "1px solid #f5a62366", borderRadius: 10, padding: "12px 16px", marginBottom: 14, color: "#f5a623", fontSize: 13, fontWeight: 700 }}>
+          ⚠️ El efectivo bajó de ${fmtMoney(CAJA_MIN)}. Solicitar reposición de ${fmtMoney(sugerido)} para volver al fondo de ${fmtMoney(CAJA_FONDO_MAX)}.
+        </div>
+      )}
+
+      {/* Captura de caja */}
+      {puedeCapturar && (
+        <div style={card}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Registrar movimiento de caja</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <select value={tipo} onChange={e => setTipo(e.target.value)} style={iS}>
+              {Object.entries(tipoLabelCaja).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input value={importe} onChange={e => setImporte(e.target.value)} placeholder="Importe $" inputMode="decimal" style={{ ...iS, flex: 1, minWidth: 110 }} />
+              <input value={nota} onChange={e => setNota(e.target.value)} placeholder="No. factura o nota" style={{ ...iS, flex: 1, minWidth: 110 }} />
+            </div>
+            <input value={concepto} onChange={e => setConcepto(e.target.value)} placeholder="Concepto" style={iS} />
+            <button disabled={guardando} onClick={registrar} style={{ border: "none", borderRadius: 9, background: C.accent, color: "#1a1d27", padding: "10px 16px", fontSize: 14, fontWeight: 800, cursor: guardando ? "default" : "pointer", fontFamily: "inherit", opacity: guardando ? 0.6 : 1 }}>{guardando ? "Guardando…" : "Registrar"}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Captura del chofer */}
+      {puedeCapturar && (
+        <div style={card}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimiento del chofer (fletes)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <select value={ctipo} onChange={e => setCtipo(e.target.value)} style={iS}>
+              {Object.entries(tipoLabelChofer).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <input value={cimporte} onChange={e => setCimporte(e.target.value)} placeholder="Importe $" inputMode="decimal" style={{ ...iS, flex: 1, minWidth: 110 }} />
+              <input value={cnota} onChange={e => setCnota(e.target.value)} placeholder="No. factura o nota" style={{ ...iS, flex: 1, minWidth: 110 }} />
+            </div>
+            <input value={cconcepto} onChange={e => setCconcepto(e.target.value)} placeholder="Concepto (destino del flete)" style={iS} />
+            <button disabled={cguardando} onClick={registrarChofer} style={{ border: "none", borderRadius: 9, background: "#4f46e5", color: "#fff", padding: "10px 16px", fontSize: 14, fontWeight: 800, cursor: cguardando ? "default" : "pointer", fontFamily: "inherit", opacity: cguardando ? 0.6 : 1 }}>{cguardando ? "Guardando…" : "Registrar flete"}</button>
+          </div>
+        </div>
+      )}
+
+      {/* Movimientos del mes: caja */}
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimientos de caja — {nombreMesCaja(mesActual)}</div>
+        {movMes.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>Sin movimientos este mes.</div> :
+          movMes.map(m => (
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: C.text }}>{m.concepto}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{fmtFechaCaja(m.fecha)} · {tipoLabelCaja[m.tipo] || m.tipo}{m.nota ? " · " + m.nota : ""}</div>
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 14, color: (m.tipo === "reposicion" || m.tipo === "reintegroChofer" || m.tipo === "fondo") ? C.success : "#c0392b" }}>
+                {(m.tipo === "reposicion" || m.tipo === "reintegroChofer" || m.tipo === "fondo") ? "+" : "−"}${fmtMoney(m.importe)}
+              </div>
+            </div>
+          ))}
+      </div>
+
+      {/* Movimientos del mes: chofer */}
+      <div style={card}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimientos del chofer — {nombreMesCaja(mesActual)}</div>
+        {movChMes.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>Sin movimientos este mes.</div> :
+          movChMes.map(m => (
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: C.text }}>{m.concepto}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{fmtFechaCaja(m.fecha)} · {tipoLabelChofer[m.tipo] || m.tipo}{m.nota ? " · " + m.nota : ""}</div>
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 14, color: m.tipo === "recibe" ? C.success : "#c0392b" }}>
+                {m.tipo === "recibe" ? "+" : "−"}${fmtMoney(m.importe)}
+              </div>
+            </div>
+          ))}
+      </div>
+
+      {/* Cierre mensual (solo admin) */}
+      {esAdmin && (
+        <div style={{ ...card, borderColor: C.accent + "66" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 6 }}>Cierre mensual</div>
+          <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>Archiva los movimientos de {nombreMesCaja(mesActual)}. El saldo actual pasa como inicial del mes siguiente. No se pueden borrar movimientos: un error se corrige con un movimiento de ajuste.</div>
+          <button onClick={cerrarMes} style={{ border: "1px solid " + C.accent, borderRadius: 9, background: C.surface, color: C.accent, padding: "9px 16px", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>Cerrar {nombreMesCaja(mesActual)}</button>
+        </div>
+      )}
+
+      {/* Historial de cierres */}
+      {(cortes || []).length > 0 && (
+        <div style={card}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Cierres anteriores</div>
+          {[...cortes].sort((a, b) => b.mes.localeCompare(a.mes)).map(c => (
+            <div key={c.mes} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: C.text }}>{nombreMesCaja(c.mes)}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>Efectivo final ${fmtMoney(c.efectivoFinal)} · Comprob. ${fmtMoney(c.comprobPendientes)} · Chofer ${fmtMoney(c.choferEfectivo)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function nombreMesCaja(mes) {
+  const [y, m] = (mes || "").split("-").map(Number);
+  const nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  return (nombres[(m || 1) - 1] || "") + " " + (y || "");
+}
+function fmtFechaCaja(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return d + "/" + m + "/" + y;
+}
+
 // ── Pago a bordadores (liquidación mensual) ─────────────────────────────────
 const MESES_NOMBRE = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 function nombreMesAnio(mes){ const [y,m]=(mes||"").split("-"); const n=MESES_NOMBRE[(parseInt(m)||1)-1]||""; return (n.charAt(0).toUpperCase()+n.slice(1))+" "+y; }
@@ -6040,6 +6325,9 @@ function AppInner() {
   const [remisiones, setRemisiones] = useState([]);
   const [remisionPdf, setRemisionPdf] = useState(null);
   const [liquidaciones, setLiquidaciones] = useState([]);
+  const [cajaMov, setCajaMov] = useState([]);
+  const [cajaMovChofer, setCajaMovChofer] = useState([]);
+  const [cajaCortes, setCajaCortes] = useState([]);
   const [pagoPdf, setPagoPdf] = useState(null);
   const [bonos, setBonos] = useState([]);
   const [bonoPdf, setBonoPdf] = useState(null);
@@ -6531,6 +6819,24 @@ if (usuario) {
     });
     return unsub;
   }, [usuario, rol, vista]);
+
+  // Caja chica: la ven admin y seguimiento.
+  useEffect(() => {
+    if (rol !== "admin" && rol !== "seguimiento") return;
+    const u1 = onSnapshot(collection(db, "cajaChica"), snap => setCajaMov(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    const u2 = onSnapshot(collection(db, "cajaChicaChofer"), snap => setCajaMovChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    const u3 = onSnapshot(collection(db, "cajaChicaCortes"), snap => setCajaCortes(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    return () => { u1(); u2(); u3(); };
+  }, [usuario, rol]);
+  const agregarCajaMov = async (m) => {
+    await addDoc(collection(db, "cajaChica"), { ...m, creadoPor: usuario.email, creadoEl: new Date().toISOString() });
+  };
+  const agregarCajaMovChofer = async (m) => {
+    await addDoc(collection(db, "cajaChicaChofer"), { ...m, creadoPor: usuario.email, creadoEl: new Date().toISOString() });
+  };
+  const cerrarMesCaja = async (corte) => {
+    await setDoc(doc(db, "cajaChicaCortes", corte.mes), corte, { merge: true });
+  };
   const setPrecioLogo = async (logoId, precio) => {
     if (!logoId) return;
     try { await setDoc(doc(db, "logos", logoId), { precio: (precio===null||precio===undefined||isNaN(precio)) ? null : Number(precio) }, { merge: true }); }
@@ -7190,6 +7496,22 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {(rol === "admin" || puedeEditarSeguimiento) && (
+            <ModTile onClick={() => setVista("caja")} label="Caja chica"
+              stat={<span style={{color:C.muted}}>Control de gastos</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gCaja" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#34d399"/><stop offset="1" stopColor="#059669"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCaja)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.4" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <rect x="24" y="34" width="40" height="26" rx="3"/>
+                  <path d="M24 42 h40"/>
+                </g>
+                <circle cx="44" cy="50" r="4.5" fill="#fff"/>
+              </svg>
+            </ModTile>
+            )}
+
             {rol === "admin" && (
             <ModTile onClick={() => setVista("pagos")} label="Pago bordadores"
               stat={<span style={{color:C.muted}}>{(() => { const sp = logosCatalogo.filter(l => l.precio===null||l.precio===undefined||l.precio==="").length; return sp>0 ? sp+" sin precio" : "Liquidación mensual"; })()}</span>}>
@@ -7415,6 +7737,17 @@ const cancelar = async (id) => {
           onEliminar={eliminarRemision}
           esAdmin={rol === "admin"}
         />
+      )}
+
+      {vista === "caja" && (rol === "admin" || rol === "seguimiento") && (
+        <div style={{padding:"20px 16px"}}>
+          <button onClick={() => setVista("home")} style={{border:"none", background:"transparent", color:C.accent, fontSize:14, cursor:"pointer", marginBottom:12, fontFamily:"inherit"}}>← Volver</button>
+          <CajaChica
+            usuario={usuario} rol={rol}
+            movimientos={cajaMov} movChofer={cajaMovChofer} cortes={cajaCortes}
+            onAgregarMov={agregarCajaMov} onAgregarMovChofer={agregarCajaMovChofer}
+            onCerrarMes={cerrarMesCaja} onImprimir={imprimirBono} />
+        </div>
       )}
 
       {vista === "pagos" && rol === "admin" && (

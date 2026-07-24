@@ -3762,6 +3762,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
 
   // ── Captura de movimiento del chofer ──
   const [ctipo, setCtipo] = useState("fleteComprob");
+  const [ccategoria, setCcategoria] = useState("flete");   // flete / insumos / otro (solo para gastos del chofer)
   const [cimporte, setCimporte] = useState("");
   const [cconcepto, setCconcepto] = useState("");
   const [cnota, setCnota] = useState("");
@@ -3770,7 +3771,8 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
   const registrarChofer = async () => {
     const imp = Number(String(cimporte).replace(/[^0-9.]/g, ""));
     if (!imp || imp <= 0) { alert("Escribe un importe válido."); return; }
-    if (!cconcepto.trim()) { alert("Escribe el concepto (ej. destino del flete)."); return; }
+    if (!cconcepto.trim()) { alert("Escribe el concepto (ej. destino del gasto)."); return; }
+    const esGasto = (ctipo === "fleteComprob" || ctipo === "fleteEfectivo");
     setCguardando(true);
     try {
       // "recibe" del chofer también sale de la caja: se registra el par para que la caja cuadre.
@@ -3784,6 +3786,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
       await onAgregarMovChofer({
         fecha: new Date().toISOString().slice(0, 10),
         tipo: ctipo, importe: imp, concepto: cconcepto.trim(), nota: cnota.trim(),
+        categoria: esGasto ? ccategoria : null,
       });
       setCimporte(""); setCconcepto(""); setCnota("");
     } catch (e) { alert("No se pudo registrar: " + (e.message || e)); }
@@ -3884,17 +3887,24 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
       {/* Captura del chofer */}
       {puedeCapturar && (
         <div style={card}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimiento del chofer (fletes)</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimiento del chofer</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <select value={ctipo} onChange={e => setCtipo(e.target.value)} style={iS}>
               {Object.entries(tipoLabelChofer).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
+            {(ctipo === "fleteComprob" || ctipo === "fleteEfectivo") && (
+              <select value={ccategoria} onChange={e => setCcategoria(e.target.value)} style={iS}>
+                <option value="flete">Categoría: Flete</option>
+                <option value="insumos">Categoría: Insumos</option>
+                <option value="otro">Categoría: Otro</option>
+              </select>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <input value={cimporte} onChange={e => setCimporte(e.target.value)} placeholder="Importe $" inputMode="decimal" style={{ ...iS, flex: 1, minWidth: 110 }} />
               <input value={cnota} onChange={e => setCnota(e.target.value)} placeholder="No. factura o nota" style={{ ...iS, flex: 1, minWidth: 110 }} />
             </div>
-            <input value={cconcepto} onChange={e => setCconcepto(e.target.value)} placeholder="Concepto (destino del flete)" style={iS} />
-            <button disabled={cguardando} onClick={registrarChofer} style={{ border: "none", borderRadius: 9, background: "#4f46e5", color: "#fff", padding: "10px 16px", fontSize: 14, fontWeight: 800, cursor: cguardando ? "default" : "pointer", fontFamily: "inherit", opacity: cguardando ? 0.6 : 1 }}>{cguardando ? "Guardando…" : "Registrar flete"}</button>
+            <input value={cconcepto} onChange={e => setCconcepto(e.target.value)} placeholder="Concepto (destino del flete o qué compró)" style={iS} />
+            <button disabled={cguardando} onClick={registrarChofer} style={{ border: "none", borderRadius: 9, background: "#4f46e5", color: "#fff", padding: "10px 16px", fontSize: 14, fontWeight: 800, cursor: cguardando ? "default" : "pointer", fontFamily: "inherit", opacity: cguardando ? 0.6 : 1 }}>{cguardando ? "Guardando…" : "Registrar movimiento"}</button>
           </div>
         </div>
       )}
@@ -3919,12 +3929,28 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
       {/* Movimientos del mes: chofer */}
       <div style={card}>
         <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimientos del chofer — {nombreMesCaja(mesActual)}</div>
+        {(() => {
+          const gastos = movChMes.filter(m => m.tipo === "fleteComprob" || m.tipo === "fleteEfectivo");
+          if (!gastos.length) return null;
+          const porCat = gastos.reduce((a, m) => { const c = m.categoria || "otro"; a[c] = (a[c] || 0) + (Number(m.importe) || 0); return a; }, {});
+          const etq = { flete: "Flete", insumos: "Insumos", otro: "Otro" };
+          return (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              {["flete", "insumos", "otro"].filter(c => porCat[c]).map(c => (
+                <div key={c} style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 8, padding: "6px 12px" }}>
+                  <span style={{ fontSize: 11, color: C.muted }}>{etq[c]}: </span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: C.text }}>${fmtMoney(porCat[c])}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         {movChMes.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>Sin movimientos este mes.</div> :
           movChMes.map(m => (
             <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, color: C.text }}>{m.concepto}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>{fmtFechaCaja(m.fecha)} · {tipoLabelChofer[m.tipo] || m.tipo}{m.nota ? " · " + m.nota : ""}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>{fmtFechaCaja(m.fecha)} · {tipoLabelChofer[m.tipo] || m.tipo}{m.categoria ? " · " + ({flete:"Flete",insumos:"Insumos",otro:"Otro"}[m.categoria] || m.categoria) : ""}{m.nota ? " · " + m.nota : ""}</div>
               </div>
               <div style={{ fontWeight: 800, fontSize: 14, color: m.tipo === "recibe" ? C.success : "#c0392b" }}>
                 {m.tipo === "recibe" ? "+" : "−"}${fmtMoney(m.importe)}

@@ -3884,6 +3884,24 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 
   const sinPrecio = Object.values(logosUsados).filter(n => precioDe(n)===null);
 
+  // Exporta los logos sin precio a un Excel (columnas Logo | Precio) para llenarlos
+  // y volver a importarlos con el mismo botón de importar del catálogo.
+  const [exportandoSP, setExportandoSP] = useState(false);
+  const exportarSinPrecio = async () => {
+    if (!sinPrecio.length) { alert("No hay logos sin precio este mes."); return; }
+    setExportandoSP(true);
+    try {
+      const XLSX = await cargarXLSX();
+      const filas = [...sinPrecio].sort((a,b)=>a.localeCompare(b)).map(n => ({ "Logo": n, "Precio": "" }));
+      const ws = XLSX.utils.json_to_sheet(filas, { header: ["Logo","Precio"] });
+      ws["!cols"] = [{wch:40},{wch:12}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Logos sin precio");
+      XLSX.writeFile(wb, "Logos_sin_precio_" + mes + ".xlsx");
+    } catch(e) { alert("No se pudo exportar: " + (e.message || e)); }
+    setExportandoSP(false);
+  };
+
   const subtotalLinea = (l) => (Number(l.precio)||0) * (parseInt(l.cantidad)||0);
   const totalOrden = (ord) => ord.lineas.reduce((s,l)=> s+subtotalLinea(l), 0);
   const bordadosOrden = (ord) => ord.lineas.reduce((s,l)=> s+(parseInt(l.cantidad)||0), 0);
@@ -3967,7 +3985,10 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 
       {sinPrecio.length>0 && (
         <div style={{background:"#2a1f0e",border:"1px solid "+C.accent+"66",borderRadius:10,padding:"12px 16px",marginBottom:16}}>
-          <div style={{fontSize:13,fontWeight:800,color:C.accent,marginBottom:8}}>⚠️ Logos sin precio usados este mes — captura su precio:</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.accent}}>⚠️ Logos sin precio usados este mes — captura su precio:</div>
+            <button onClick={exportarSinPrecio} disabled={exportandoSP} style={{border:"1px solid "+C.accent+"88",borderRadius:8,background:C.surface,color:C.accent,padding:"6px 12px",fontSize:12,fontWeight:800,cursor:exportandoSP?"default":"pointer",fontFamily:"inherit",opacity:exportandoSP?0.6:1}}>{exportandoSP?"Generando…":"⬇️ Exportar a Excel ("+sinPrecio.length+")"}</button>
+          </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
             {sinPrecio.map(n => {
               const l=(catalogoLogos||[]).find(x => (x.nombreLower||(x.nombre||"").toLowerCase())===n.toLowerCase());

@@ -3690,7 +3690,7 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
 const CAJA_FONDO_MAX = 5000;   // fondo objetivo de la caja
 const CAJA_MIN = 2000;         // por debajo de esto: solicitar reposición
 
-function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov, onAgregarMovChofer, onCerrarMes, onImprimir }) {
+function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov, onAgregarMovChofer, onCerrarMes, onImprimir, onAvisarBajo }) {
   const esAdmin = rol === "admin";
   const puedeCapturar = rol === "admin" || rol === "seguimiento";
   const mesActual = new Date().toISOString().slice(0, 7);
@@ -3731,6 +3731,13 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
 
   const bajoMinimo = efectivoCaja < CAJA_MIN;
   const sugerido = Math.max(0, CAJA_FONDO_MAX - efectivoCaja);
+
+  // Cuando el efectivo cruza el mínimo, avisa a los administradores por la campanita
+  // (una sola vez, controlado en el padre). Solo lo dispara quien captura.
+  useEffect(() => {
+    if (!onAvisarBajo) return;
+    onAvisarBajo(efectivoCaja, CAJA_MIN, sugerido);
+  }, [efectivoCaja]);
 
   // ── Captura de movimiento de caja ──
   const [tipo, setTipo] = useState("gasto");
@@ -6863,6 +6870,32 @@ if (usuario) {
   const cerrarMesCaja = async (corte) => {
     await setDoc(doc(db, "cajaChicaCortes", corte.mes), corte, { merge: true });
   };
+  // Avisa por la campanita a los administradores cuando el efectivo de la caja cruza
+  // por debajo del mínimo. Un doc marcador evita repetir el aviso hasta que se reponga.
+  const avisarCajaBaja = async (efectivo, minimo, sugerido) => {
+    try {
+      const marcRef = doc(db, "cajaChicaCortes", "_avisoBajo");
+      let yaAvisado = false;
+      try { const snap = await getDoc(marcRef); yaAvisado = snap.exists() && snap.data().activo === true; } catch (e) {}
+      if (efectivo >= minimo) {
+        // Se repuso: se limpia el marcador para poder avisar la próxima vez.
+        if (yaAvisado) { try { await setDoc(marcRef, { activo: false }, { merge: true }); } catch (e) {} }
+        return;
+      }
+      if (yaAvisado) return; // ya se avisó y sigue bajo: no repetir
+      const admins = Object.keys(rolesActivos || {}).filter(em => rolesActivos[em] === "admin");
+      const destinatarios = admins.length ? admins : ["gerencia@worklife.com.mx"];
+      for (const em of destinatarios) {
+        await addDoc(collection(db, "notificaciones"), {
+          para: em,
+          titulo: "Caja chica baja",
+          cuerpo: "El efectivo bajó a $" + fmtMoney(efectivo) + ". Reponer $" + fmtMoney(sugerido) + " para volver al fondo.",
+          tipo: "caja", leida: false, fecha: serverTimestamp(),
+        });
+      }
+      await setDoc(marcRef, { activo: true, efectivo, avisadoEl: new Date().toISOString() }, { merge: true });
+    } catch (e) { console.log("avisarCajaBaja:", e); }
+  };
   const setPrecioLogo = async (logoId, precio) => {
     if (!logoId) return;
     try { await setDoc(doc(db, "logos", logoId), { precio: (precio===null||precio===undefined||isNaN(precio)) ? null : Number(precio) }, { merge: true }); }
@@ -7681,6 +7714,11 @@ const cancelar = async (id) => {
                 try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}
                 return;
               }
+              if (n.tipo === "caja") {
+                setVista("caja");
+                try { await deleteDoc(doc(db, "notificaciones", n.id)); } catch (e) {}
+                return;
+              }
               let id = n.ordenId;
               if (id == null) {
                 const m = String(n.titulo || "").match(/#(\d+)/) || String(n.cuerpo || "").match(/#(\d+)/);
@@ -7772,7 +7810,7 @@ const cancelar = async (id) => {
             usuario={usuario} rol={rol}
             movimientos={cajaMov} movChofer={cajaMovChofer} cortes={cajaCortes}
             onAgregarMov={agregarCajaMov} onAgregarMovChofer={agregarCajaMovChofer}
-            onCerrarMes={cerrarMesCaja} onImprimir={imprimirBono} />
+            onCerrarMes={cerrarMesCaja} onImprimir={imprimirBono} onAvisarBajo={avisarCajaBaja} />
         </div>
       )}
 

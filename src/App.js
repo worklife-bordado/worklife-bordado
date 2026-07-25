@@ -3710,12 +3710,17 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
     if (m.tipo === "fondo") { a.efectivo += imp; }
     else if (m.tipo === "reposicion") { a.efectivo += imp; a.comprob = 0; }   // reponer limpia comprobantes
     else if (m.tipo === "gasto") { a.efectivo -= imp; a.comprob += imp; }
+    else if (m.tipo === "gastoSinComprob") { a.efectivo -= imp; }             // baja efectivo, sin respaldo
     else if (m.tipo === "aChofer") { a.efectivo -= imp; }
     else if (m.tipo === "reintegroChofer") { a.efectivo += imp; }
     return a;
   }, { efectivo: 0, comprob: 0 });
   const efectivoCaja = cajaCalc.efectivo;
   const comprobPendientes = Math.max(0, cajaCalc.comprob);
+  // Total gastado SIN comprobante en el mes en curso (dato de control).
+  const sinComprobMes = movVivos
+    .filter(m => m.tipo === "gastoSinComprob" && (m.fecha || "").slice(0, 7) === new Date().toISOString().slice(0, 7))
+    .reduce((s, m) => s + (Number(m.importe) || 0), 0);
 
   // ── Estado del CHOFER (su propio fondo: efectivo vs comprobantes) ──
   // Recibe efectivo de la caja (aChofer). Gasta en fletes con comprobante (fleteComprob)
@@ -3750,7 +3755,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
     const imp = Number(String(importe).replace(/[^0-9.]/g, ""));
     if (!imp || imp <= 0) { alert("Escribe un importe válido."); return; }
     if (!concepto.trim()) { alert("Escribe el concepto."); return; }
-    if (tipo === "gasto" && imp > efectivoCaja) { alert("No hay suficiente efectivo en la caja ($" + fmtMoney(efectivoCaja) + ")."); return; }
+    if ((tipo === "gasto" || tipo === "gastoSinComprob") && imp > efectivoCaja) { alert("No hay suficiente efectivo en la caja ($" + fmtMoney(efectivoCaja) + ")."); return; }
     if (tipo === "aChofer" && imp > efectivoCaja) { alert("No hay suficiente efectivo para entregar al chofer ($" + fmtMoney(efectivoCaja) + ")."); return; }
     if ((tipo === "reposicion" || tipo === "fondo") && (efectivoCaja + imp) > CAJA_FONDO_MAX) {
       alert("La reposición dejaría la caja en $" + fmtMoney(efectivoCaja + imp) + ", por encima del fondo de $" + fmtMoney(CAJA_FONDO_MAX) + ".\nSugerido para reponer al tope: $" + fmtMoney(sugerido));
@@ -3835,7 +3840,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
   const wrap = { maxWidth: 900, margin: "0 auto", padding: "0 4px 40px" };
   const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
   const iS = { background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "9px 11px", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%" };
-  const tipoLabelCaja = { gasto: "Gasto (con nota)", reposicion: "Reposición (entra dinero)", fondo: "Fondo inicial", aChofer: "Entrega a chofer", reintegroChofer: "Reintegro de chofer" };
+  const tipoLabelCaja = { gasto: "Gasto con comprobante", gastoSinComprob: "Gasto sin comprobante", reposicion: "Reposición (entra dinero)", fondo: "Fondo inicial", aChofer: "Entrega a chofer", reintegroChofer: "Reintegro de chofer" };
   const tipoLabelChofer = { recibe: "Recibió efectivo", fleteComprob: "Gasto con comprobante", fleteEfectivo: "Gasto sin comprobante", devuelve: "Devolvió a caja" };
 
   const movMes = movVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
@@ -3859,6 +3864,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
           <div style={{ fontSize: 12, color: C.muted }}>Comprobantes por reponer</div>
           <div style={{ fontSize: 26, fontWeight: 800, color: C.text }}>${fmtMoney(comprobPendientes)}</div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Notas y facturas guardadas</div>
+          {sinComprobMes > 0 && <div style={{ fontSize: 11, color: "#f5a623", marginTop: 4 }}>Sin comprobante este mes: ${fmtMoney(sinComprobMes)}</div>}
         </div>
         <div style={{ ...card, marginBottom: 0 }}>
           <div style={{ fontSize: 12, color: C.muted }}>Chofer — efectivo</div>

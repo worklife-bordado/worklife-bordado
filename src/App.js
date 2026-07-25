@@ -3745,6 +3745,10 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
   }, [efectivoCaja]);
 
   // ── Captura de movimiento de caja ──
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const [expDesde, setExpDesde] = useState(mesActual + "-01");
+  const [expHasta, setExpHasta] = useState(hoyISO);
+  const [exportando, setExportando] = useState(false);
   const [tipo, setTipo] = useState("gasto");
   const [importe, setImporte] = useState("");
   const [concepto, setConcepto] = useState("");
@@ -3837,6 +3841,87 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
     } catch (e) { alert("No se pudo cerrar: " + (e.message || e)); }
   };
 
+  const exportarCaja = async () => {
+    const enRango = (m) => { const f = m.fecha || ""; return f >= expDesde && f <= expHasta; };
+    const caja = (movimientos || []).filter(enRango);
+    const chofer = (movChofer || []).filter(enRango);
+    if (!caja.length && !chofer.length) { alert("No hay movimientos en ese rango."); return; }
+    setExportando(true);
+    try {
+      const XLSX = await cargarXLSX();
+      const signo = (m, esChofer) => {
+        if (esChofer) return m.tipo === "recibe" ? 1 : -1;
+        return (m.tipo === "reposicion" || m.tipo === "fondo" || m.tipo === "reintegroChofer") ? 1 : -1;
+      };
+      // ── Hoja 1: Movimientos (caja + chofer, marcados) ──
+      const filas = [];
+      [...caja].sort((a,b)=>(a.creadoEl||a.fecha||"").localeCompare(b.creadoEl||b.fecha||"")).forEach(m => {
+        filas.push({
+          "Origen": "Caja", "Fecha": fmtFechaCaja(m.fecha), "Tipo": tipoLabelCaja[m.tipo] || m.tipo,
+          "Categoría": "", "Concepto": m.concepto || "", "No. factura/nota": m.nota || "",
+          "Entra": signo(m,false) > 0 ? Number(m.importe)||0 : "", "Sale": signo(m,false) < 0 ? Number(m.importe)||0 : "",
+        });
+      });
+      [...chofer].sort((a,b)=>(a.creadoEl||a.fecha||"").localeCompare(b.creadoEl||b.fecha||"")).forEach(m => {
+        const catL = { flete:"Flete", insumos:"Insumos", otro:"Otro" };
+        filas.push({
+          "Origen": "Chofer", "Fecha": fmtFechaCaja(m.fecha), "Tipo": tipoLabelChofer[m.tipo] || m.tipo,
+          "Categoría": m.categoria ? (catL[m.categoria] || m.categoria) : "", "Concepto": m.concepto || "", "No. factura/nota": m.nota || "",
+          "Entra": signo(m,true) > 0 ? Number(m.importe)||0 : "", "Sale": signo(m,true) < 0 ? Number(m.importe)||0 : "",
+        });
+      });
+      const ws1 = XLSX.utils.json_to_sheet(filas, { header: ["Origen","Fecha","Tipo","Categoría","Concepto","No. factura/nota","Entra","Sale"] });
+      ws1["!cols"] = [{wch:8},{wch:11},{wch:22},{wch:10},{wch:30},{wch:16},{wch:10},{wch:10}];
+
+      // ── Hoja 2: Resumen del rango ──
+      const sum = (arr, f) => arr.reduce((a,m)=>a + (f(m)?(Number(m.importe)||0):0), 0);
+      const gastoComp = sum(caja, m=>m.tipo==="gasto");
+      const gastoSin = sum(caja, m=>m.tipo==="gastoSinComprob");
+      const repos = sum(caja, m=>m.tipo==="reposicion");
+      const fondo = sum(caja, m=>m.tipo==="fondo");
+      const aChofer = sum(caja, m=>m.tipo==="aChofer");
+      const reintegro = sum(caja, m=>m.tipo==="reintegroChofer");
+      const chRecibe = sum(chofer, m=>m.tipo==="recibe");
+      const chCompr = sum(chofer, m=>m.tipo==="fleteComprob");
+      const chSin = sum(chofer, m=>m.tipo==="fleteEfectivo");
+      const chDev = sum(chofer, m=>m.tipo==="devuelve");
+      const catFlete = sum(chofer, m=>(m.tipo==="fleteComprob"||m.tipo==="fleteEfectivo") && (m.categoria||"otro")==="flete");
+      const catIns = sum(chofer, m=>(m.tipo==="fleteComprob"||m.tipo==="fleteEfectivo") && m.categoria==="insumos");
+      const catOtro = sum(chofer, m=>(m.tipo==="fleteComprob"||m.tipo==="fleteEfectivo") && m.categoria==="otro");
+      const resumen = [
+        { "Concepto": "— CAJA —", "Monto": "" },
+        { "Concepto": "Fondo inicial capturado", "Monto": fondo },
+        { "Concepto": "Reposiciones", "Monto": repos },
+        { "Concepto": "Gasto con comprobante", "Monto": gastoComp },
+        { "Concepto": "Gasto sin comprobante", "Monto": gastoSin },
+        { "Concepto": "Entregado a chofer", "Monto": aChofer },
+        { "Concepto": "Reintegro de chofer", "Monto": reintegro },
+        { "Concepto": "", "Monto": "" },
+        { "Concepto": "— CHOFER —", "Monto": "" },
+        { "Concepto": "Recibió efectivo", "Monto": chRecibe },
+        { "Concepto": "Gasto con comprobante", "Monto": chCompr },
+        { "Concepto": "Gasto sin comprobante", "Monto": chSin },
+        { "Concepto": "Devolvió a caja", "Monto": chDev },
+        { "Concepto": "", "Monto": "" },
+        { "Concepto": "— GASTO DEL CHOFER POR CATEGORÍA —", "Monto": "" },
+        { "Concepto": "Flete", "Monto": catFlete },
+        { "Concepto": "Insumos", "Monto": catIns },
+        { "Concepto": "Otro", "Monto": catOtro },
+        { "Concepto": "", "Monto": "" },
+        { "Concepto": "Saldo actual en caja (a hoy)", "Monto": efectivoCaja },
+        { "Concepto": "Comprobantes por reponer (a hoy)", "Monto": comprobPendientes },
+      ];
+      const ws2 = XLSX.utils.json_to_sheet(resumen, { header: ["Concepto","Monto"] });
+      ws2["!cols"] = [{wch:38},{wch:14}];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws2, "Resumen");
+      XLSX.utils.book_append_sheet(wb, ws1, "Movimientos");
+      XLSX.writeFile(wb, "CajaChica_" + expDesde + "_a_" + expHasta + ".xlsx");
+    } catch (e) { alert("No se pudo exportar: " + (e.message || e)); }
+    setExportando(false);
+  };
+
   const wrap = { maxWidth: 900, margin: "0 auto", padding: "0 4px 40px" };
   const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
   const iS = { background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "9px 11px", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%" };
@@ -3851,6 +3936,15 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>💵 Caja chica</div>
         <div style={{ fontSize: 12, color: C.muted }}>{esAdmin ? "Vista de administrador" : "La registra Seguimiento"} · {nombreMesCaja(mesActual)}</div>
+      </div>
+
+      {/* Exportar a Excel por rango */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: C.muted }}>Exportar del</span>
+        <input type="date" value={expDesde} onChange={e => setExpDesde(e.target.value)} style={{ background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "7px 9px", fontSize: 13, fontFamily: "inherit" }} />
+        <span style={{ fontSize: 12, color: C.muted }}>al</span>
+        <input type="date" value={expHasta} onChange={e => setExpHasta(e.target.value)} style={{ background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "7px 9px", fontSize: 13, fontFamily: "inherit" }} />
+        <button onClick={exportarCaja} disabled={exportando} style={{ border: "none", borderRadius: 8, background: "#1f8f4e", color: "#fff", padding: "8px 14px", fontSize: 13, fontWeight: 800, cursor: exportando ? "default" : "pointer", fontFamily: "inherit", opacity: exportando ? 0.6 : 1 }}>{exportando ? "Generando…" : "⬇️ Descargar Excel"}</button>
       </div>
 
       {/* Tablero de saldos */}

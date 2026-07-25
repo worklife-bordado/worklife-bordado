@@ -3690,7 +3690,7 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
 const CAJA_FONDO_MAX = 5000;   // fondo objetivo de la caja
 const CAJA_MIN = 2000;         // por debajo de esto: solicitar reposición
 
-function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov, onAgregarMovChofer, onCerrarMes, onImprimir, onAvisarBajo }) {
+function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer, onAgregarMov, onAgregarMovChofer, onCerrarMes, onRegistrarCorteChofer, onImprimir, onAvisarBajo }) {
   const esAdmin = rol === "admin";
   const puedeCapturar = rol === "admin" || rol === "seguimiento";
   const mesActual = new Date().toISOString().slice(0, 7);
@@ -3711,6 +3711,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
     else if (m.tipo === "reposicion") { a.efectivo += imp; a.comprob = 0; }   // reponer limpia comprobantes
     else if (m.tipo === "gasto") { a.efectivo -= imp; a.comprob += imp; }
     else if (m.tipo === "gastoSinComprob") { a.efectivo -= imp; }             // baja efectivo, sin respaldo
+    else if (m.tipo === "comprobChofer") { a.comprob += imp; }                // comprobantes que entregó el chofer (el efectivo ya salió al entregárselo)
     else if (m.tipo === "aChofer") { a.efectivo -= imp; }
     else if (m.tipo === "reintegroChofer") { a.efectivo += imp; }
     return a;
@@ -3731,6 +3732,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
     else if (m.tipo === "fleteComprob") { a.efectivo -= imp; a.comprob += imp; }  // pagó flete, tiene nota
     else if (m.tipo === "fleteEfectivo") a.efectivo -= imp;     // pagó sin comprobante
     else if (m.tipo === "devuelve") a.efectivo -= imp;          // devolvió cambio a la caja
+    else if (m.tipo === "corteComprob") a.comprob -= imp;       // entregó comprobantes en el corte (se archivan)
     return a;
   }, { efectivo: 0, comprob: 0 });
 
@@ -3917,16 +3919,103 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws2, "Resumen");
       XLSX.utils.book_append_sheet(wb, ws1, "Movimientos");
+      // Hoja 3: cierres mensuales cuyo mes cae dentro del rango exportado.
+      const desdeMes = expDesde.slice(0, 7), hastaMes = expHasta.slice(0, 7);
+      const cierresRango = (cortes || []).filter(c => c.mes >= desdeMes && c.mes <= hastaMes);
+      if (cierresRango.length) {
+        const filasC = [...cierresRango].sort((a, b) => a.mes.localeCompare(b.mes)).map(c => ({
+          "Mes": nombreMesCaja(c.mes),
+          "Efectivo final": Number(c.efectivoFinal) || 0,
+          "Comprobantes por reponer": Number(c.comprobPendientes) || 0,
+          "Chofer efectivo": Number(c.choferEfectivo) || 0,
+          "Chofer comprobantes": Number(c.choferComprob) || 0,
+          "Cerrado por": c.cerradoPor || "",
+        }));
+        const ws3 = XLSX.utils.json_to_sheet(filasC, { header: ["Mes", "Efectivo final", "Comprobantes por reponer", "Chofer efectivo", "Chofer comprobantes", "Cerrado por"] });
+        ws3["!cols"] = [{ wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 15 }, { wch: 18 }, { wch: 26 }];
+        XLSX.utils.book_append_sheet(wb, ws3, "Cierres mensuales");
+      }
       XLSX.writeFile(wb, "CajaChica_" + expDesde + "_a_" + expHasta + ".xlsx");
     } catch (e) { alert("No se pudo exportar: " + (e.message || e)); }
     setExportando(false);
   };
 
+  // ── Corrección por AJUSTE (nadie borra: se anula con un movimiento inverso) ──
+  // Crea un movimiento espejo que revierte exactamente el efecto del original en los
+  // saldos, dejando ambos visibles y con rastro de quién ajustó.
+  const [ajustando, setAjustando] = useState(null);   // id del movimiento en proceso
+  const ajustarMovCaja = async (m) => {
+    if (m.ajuste || m.anulado) { alert("Este movimiento ya es un ajuste o ya fue anulado."); return; }
+    if (!window.confirm("¿Anular este movimiento de caja?\n\n" + (tipoLabelCaja[m.tipo] || m.tipo) + " · $" + fmtMoney(m.importe) + "\n" + (m.concepto || "") + "\n\nSe crea un movimiento de ajuste que lo cancela. El original queda visible con rastro.")) return;
+    setAjustando(m.id);
+    try {
+      await onAgregarMov({
+        fecha: new Date().toISOString().slice(0, 10),
+        tipo: m.tipo, importe: -(Number(m.importe) || 0),
+        concepto: "AJUSTE — anula: " + (m.concepto || (tipoLabelCaja[m.tipo] || m.tipo)),
+        nota: m.nota || "", ajuste: true, ajusteDe: m.id,
+      });
+    } catch (e) { alert("No se pudo ajustar: " + (e.message || e)); }
+    setAjustando(null);
+  };
+  const ajustarMovChofer = async (m) => {
+    if (m.ajuste || m.anulado) { alert("Este movimiento ya es un ajuste o ya fue anulado."); return; }
+    if (!window.confirm("¿Anular este movimiento del chofer?\n\n" + (tipoLabelChofer[m.tipo] || m.tipo) + " · $" + fmtMoney(m.importe) + "\n" + (m.concepto || "") + "\n\nSe crea un movimiento de ajuste que lo cancela.")) return;
+    setAjustando(m.id);
+    try {
+      await onAgregarMovChofer({
+        fecha: new Date().toISOString().slice(0, 10),
+        tipo: m.tipo, importe: -(Number(m.importe) || 0),
+        concepto: "AJUSTE — anula: " + (m.concepto || (tipoLabelChofer[m.tipo] || m.tipo)),
+        nota: m.nota || "", categoria: m.categoria || null, ajuste: true, ajusteDe: m.id,
+      });
+    } catch (e) { alert("No se pudo ajustar: " + (e.message || e)); }
+    setAjustando(null);
+  };
+
+  // Corte semanal del chofer (viernes): entrega comprobantes y devuelve el efectivo
+  // sobrante. Lo puede hacer Seguimiento. Deja al chofer en ceros y suma sus
+  // comprobantes a los "por reponer" de la caja (el gasto fue de la caja).
+  const [corteando, setCorteando] = useState(false);
+  const hacerCorteChofer = async () => {
+    if (chofer.efectivo <= 0 && chofer.comprob <= 0) { alert("El chofer no tiene efectivo ni comprobantes pendientes."); return; }
+    const hoy = new Date().toISOString().slice(0, 10);
+    const msg = "Corte del chofer:\n\n" +
+      "• Entrega comprobantes: $" + fmtMoney(chofer.comprob) + " (pasan a la caja para reponer)\n" +
+      "• Devuelve efectivo: $" + fmtMoney(chofer.efectivo) + " (regresa a la caja)\n\n" +
+      "El chofer queda en ceros. ¿Confirmar?";
+    if (!window.confirm(msg)) return;
+    setCorteando(true);
+    try {
+      // a) Comprobantes: se archivan del lado del chofer y entran a la caja como "por reponer".
+      if (chofer.comprob > 0) {
+        await onAgregarMovChofer({ fecha: hoy, tipo: "corteComprob", importe: chofer.comprob, concepto: "Corte semanal: entrega de comprobantes", nota: "" });
+        await onAgregarMov({ fecha: hoy, tipo: "comprobChofer", importe: chofer.comprob, concepto: "Comprobantes entregados por el chofer (corte)", nota: "" });
+      }
+      // b) Efectivo sobrante: el chofer lo devuelve y regresa a la caja.
+      if (chofer.efectivo > 0) {
+        await onAgregarMovChofer({ fecha: hoy, tipo: "devuelve", importe: chofer.efectivo, concepto: "Corte semanal: devolución de efectivo", nota: "" });
+        await onAgregarMov({ fecha: hoy, tipo: "reintegroChofer", importe: chofer.efectivo, concepto: "Efectivo devuelto por el chofer (corte)", nota: "" });
+      }
+      // Registrar el corte como evento (histórico semanal).
+      if (onRegistrarCorteChofer) {
+        await onRegistrarCorteChofer({
+          fecha: hoy,
+          comprobantesEntregados: chofer.comprob,
+          efectivoDevuelto: chofer.efectivo,
+          creadoEl: new Date().toISOString(),
+        });
+      }
+      alert("Corte realizado. El chofer quedó en ceros.");
+    } catch (e) { alert("No se pudo hacer el corte: " + (e.message || e)); }
+    setCorteando(false);
+  };
+
   const wrap = { maxWidth: 900, margin: "0 auto", padding: "0 4px 40px" };
   const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
   const iS = { background: C.bg, border: "1px solid " + C.border, borderRadius: 8, color: C.text, padding: "9px 11px", fontSize: 13, outline: "none", fontFamily: "inherit", width: "100%" };
-  const tipoLabelCaja = { gasto: "Gasto con comprobante", gastoSinComprob: "Gasto sin comprobante", reposicion: "Reposición (entra dinero)", fondo: "Fondo inicial", aChofer: "Entrega a chofer", reintegroChofer: "Reintegro de chofer" };
-  const tipoLabelChofer = { recibe: "Recibió efectivo", fleteComprob: "Gasto con comprobante", fleteEfectivo: "Gasto sin comprobante", devuelve: "Devolvió a caja" };
+  const tipoLabelCaja = { gasto: "Gasto con comprobante", gastoSinComprob: "Gasto sin comprobante", reposicion: "Reposición (entra dinero)", fondo: "Fondo inicial", aChofer: "Entrega a chofer", reintegroChofer: "Reintegro de chofer", comprobChofer: "Comprobantes del chofer" };
+  const tipoLabelChofer = { recibe: "Recibió efectivo", fleteComprob: "Gasto con comprobante", fleteEfectivo: "Gasto sin comprobante", devuelve: "Devolvió a caja", corteComprob: "Entregó comprobantes (corte)" };
 
   const movMes = movVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
   const movChMes = movChoferVivos.filter(m => (m.fecha || "").slice(0, 7) === mesActual).sort((a, b) => (b.creadoEl || b.fecha).localeCompare(a.creadoEl || a.fecha));
@@ -3964,6 +4053,9 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
           <div style={{ fontSize: 12, color: C.muted }}>Chofer — efectivo</div>
           <div style={{ fontSize: 26, fontWeight: 800, color: C.text }}>${fmtMoney(chofer.efectivo)}</div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Comprobantes: ${fmtMoney(chofer.comprob)}</div>
+          {puedeCapturar && (chofer.efectivo > 0 || chofer.comprob > 0) && (
+            <button disabled={corteando} onClick={hacerCorteChofer} style={{ marginTop: 8, border: "1px solid " + C.accent, borderRadius: 8, background: C.surface, color: C.accent, padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: corteando ? "default" : "pointer", fontFamily: "inherit", opacity: corteando ? 0.6 : 1 }}>{corteando ? "Procesando…" : "Corte del viernes"}</button>
+          )}
         </div>
       </div>
 
@@ -4021,13 +4113,16 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
         <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimientos de caja — {nombreMesCaja(mesActual)}</div>
         {movMes.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>Sin movimientos este mes.</div> :
           movMes.map(m => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border, opacity: m.ajuste ? 0.7 : 1 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: C.text }}>{m.concepto}</div>
+                <div style={{ fontSize: 13, color: C.text }}>{m.ajuste ? "↩ " : ""}{m.concepto}</div>
                 <div style={{ fontSize: 11, color: C.muted }}>{fmtFechaCaja(m.fecha)} · {tipoLabelCaja[m.tipo] || m.tipo}{m.nota ? " · " + m.nota : ""}</div>
               </div>
-              <div style={{ fontWeight: 800, fontSize: 14, color: (m.tipo === "reposicion" || m.tipo === "reintegroChofer" || m.tipo === "fondo") ? C.success : "#c0392b" }}>
-                {(m.tipo === "reposicion" || m.tipo === "reintegroChofer" || m.tipo === "fondo") ? "+" : "−"}${fmtMoney(m.importe)}
+              {puedeCapturar && !m.ajuste && (Number(m.importe) || 0) >= 0 && (
+                <button disabled={ajustando === m.id} onClick={() => ajustarMovCaja(m)} title="Anular con un ajuste" style={{ border: "1px solid " + C.border, borderRadius: 7, background: C.surface, color: C.muted, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{ajustando === m.id ? "…" : "Ajustar"}</button>
+              )}
+              <div style={{ fontWeight: 800, fontSize: 14, color: (Number(m.importe) || 0) < 0 ? "#c0392b" : ((m.tipo === "reposicion" || m.tipo === "reintegroChofer" || m.tipo === "fondo" || m.tipo === "comprobChofer") ? C.success : "#c0392b") }}>
+                {(Number(m.importe) || 0) < 0 ? "" : ((m.tipo === "reposicion" || m.tipo === "reintegroChofer" || m.tipo === "fondo" || m.tipo === "comprobChofer") ? "+" : "−")}${fmtMoney(m.importe)}
               </div>
             </div>
           ))}
@@ -4054,13 +4149,16 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
         })()}
         {movChMes.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>Sin movimientos este mes.</div> :
           movChMes.map(m => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
+            <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border, opacity: m.ajuste ? 0.7 : 1 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: C.text }}>{m.concepto}</div>
+                <div style={{ fontSize: 13, color: C.text }}>{m.ajuste ? "↩ " : ""}{m.concepto}</div>
                 <div style={{ fontSize: 11, color: C.muted }}>{fmtFechaCaja(m.fecha)} · {tipoLabelChofer[m.tipo] || m.tipo}{m.categoria ? " · " + ({flete:"Flete",insumos:"Insumos",otro:"Otro"}[m.categoria] || m.categoria) : ""}{m.nota ? " · " + m.nota : ""}</div>
               </div>
-              <div style={{ fontWeight: 800, fontSize: 14, color: m.tipo === "recibe" ? C.success : "#c0392b" }}>
-                {m.tipo === "recibe" ? "+" : "−"}${fmtMoney(m.importe)}
+              {puedeCapturar && !m.ajuste && (Number(m.importe) || 0) >= 0 && (
+                <button disabled={ajustando === m.id} onClick={() => ajustarMovChofer(m)} title="Anular con un ajuste" style={{ border: "1px solid " + C.border, borderRadius: 7, background: C.surface, color: C.muted, padding: "4px 9px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{ajustando === m.id ? "…" : "Ajustar"}</button>
+              )}
+              <div style={{ fontWeight: 800, fontSize: 14, color: (Number(m.importe) || 0) < 0 ? "#c0392b" : (m.tipo === "recibe" ? C.success : "#c0392b") }}>
+                {(Number(m.importe) || 0) < 0 ? "" : (m.tipo === "recibe" ? "+" : "−")}${fmtMoney(m.importe)}
               </div>
             </div>
           ))}
@@ -4072,6 +4170,21 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
           <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 6 }}>Cierre mensual</div>
           <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>Archiva los movimientos de {nombreMesCaja(mesActual)}. El saldo actual pasa como inicial del mes siguiente. No se pueden borrar movimientos: un error se corrige con un movimiento de ajuste.</div>
           <button onClick={cerrarMes} style={{ border: "1px solid " + C.accent, borderRadius: 9, background: C.surface, color: C.accent, padding: "9px 16px", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>Cerrar {nombreMesCaja(mesActual)}</button>
+        </div>
+      )}
+
+      {/* Historial de cortes del chofer */}
+      {(cortesChofer || []).length > 0 && (
+        <div style={card}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Cortes del chofer</div>
+          {[...cortesChofer].sort((a, b) => (b.creadoEl || b.fecha || "").localeCompare(a.creadoEl || a.fecha || "")).slice(0, 12).map(c => (
+            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, color: C.text }}>{fmtFechaCaja(c.fecha)}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>Comprobantes entregados ${fmtMoney(c.comprobantesEntregados)} · Efectivo devuelto ${fmtMoney(c.efectivoDevuelto)}</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -6461,6 +6574,7 @@ function AppInner() {
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);
   const [cajaCortes, setCajaCortes] = useState([]);
+  const [cajaCortesChofer, setCajaCortesChofer] = useState([]);
   const [pagoPdf, setPagoPdf] = useState(null);
   const [bonos, setBonos] = useState([]);
   const [bonoPdf, setBonoPdf] = useState(null);
@@ -6959,7 +7073,8 @@ if (usuario) {
     const u1 = onSnapshot(collection(db, "cajaChica"), snap => setCajaMov(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u2 = onSnapshot(collection(db, "cajaChicaChofer"), snap => setCajaMovChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u3 = onSnapshot(collection(db, "cajaChicaCortes"), snap => setCajaCortes(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    return () => { u1(); u2(); u3(); };
+    const u4 = onSnapshot(collection(db, "cajaChicaCortesChofer"), snap => setCajaCortesChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
+    return () => { u1(); u2(); u3(); u4(); };
   }, [usuario, rol]);
   const agregarCajaMov = async (m) => {
     await addDoc(collection(db, "cajaChica"), { ...m, creadoPor: usuario.email, creadoEl: new Date().toISOString() });
@@ -6969,6 +7084,9 @@ if (usuario) {
   };
   const cerrarMesCaja = async (corte) => {
     await setDoc(doc(db, "cajaChicaCortes", corte.mes), corte, { merge: true });
+  };
+  const registrarCorteChofer = async (corte) => {
+    await addDoc(collection(db, "cajaChicaCortesChofer"), { ...corte, registradoPor: usuario.email });
   };
   // Avisa por la campanita a los administradores cuando el efectivo de la caja cruza
   // por debajo del mínimo. Un doc marcador evita repetir el aviso hasta que se reponga.
@@ -7910,7 +8028,8 @@ const cancelar = async (id) => {
             usuario={usuario} rol={rol}
             movimientos={cajaMov} movChofer={cajaMovChofer} cortes={cajaCortes}
             onAgregarMov={agregarCajaMov} onAgregarMovChofer={agregarCajaMovChofer}
-            onCerrarMes={cerrarMesCaja} onImprimir={imprimirBono} onAvisarBajo={avisarCajaBaja} />
+            cortesChofer={cajaCortesChofer}
+            onCerrarMes={cerrarMesCaja} onRegistrarCorteChofer={registrarCorteChofer} onImprimir={imprimirBono} onAvisarBajo={avisarCajaBaja} />
         </div>
       )}
 

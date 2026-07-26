@@ -4600,23 +4600,37 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 
 function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asignables, miEmail }) {
   const [texto, setTexto] = useState("");
-  const [para, setPara] = useState(asignables[0].email);
+  const [vence, setVence] = useState("");
+  const [para, setPara] = useState((asignables[0] && asignables[0].email) || "");
   const [verDe, setVerDe] = useState("mios"); // "mios" | "todos" | email
   const [completando, setCompletando] = useState([]);
   const [confirm, setConfirm] = useState("");
+  const [verHechas, setVerHechas] = useState(false);
   const [deshacer, setDeshacer] = useState(null); // {id, texto} de la última completada
   const timerDeshacer = useRef(null);
   const etiquetaDe = (email) => { const a = asignables.find(x => x.email === email); return a ? (a.label === "Yo" ? "Yo" : a.label.split(" · ")[0]) : (email||"").split("@")[0]; };
-  const activas = tareas.filter(t => !t.completada);
-  const visibles = !esAdmin ? activas
-    : verDe === "mios" ? activas.filter(t => t.para === miEmail)
-    : verDe === "todos" ? activas
-    : activas.filter(t => t.para === verDe);
+  const hoyISO = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
+  const fmtVence = (iso) => { if (!iso) return ""; const p = iso.split("-").map(Number); return new Date(p[0], p[1]-1, p[2]).toLocaleDateString("es-MX", { weekday:"short", day:"numeric", month:"short" }); };
+  const fmtHecha = (iso) => { if (!iso) return ""; const dt = new Date(iso); return dt.toLocaleDateString("es-MX",{day:"numeric",month:"short"}) + " " + dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}); };
+
+  const hoy = hoyISO();
+  const filtro = (t) => !esAdmin ? true : verDe === "mios" ? t.para === miEmail : verDe === "todos" ? true : t.para === verDe;
+  const visibles = tareas.filter(t => !t.completada && filtro(t));
+  const hechas = tareas.filter(t => t.completada && filtro(t)).sort((a,b) => (b.completadaEl||"").localeCompare(a.completadaEl||"")).slice(0, 25);
+
+  // Agrupación por vencimiento: vencidas primero, luego hoy, próximas y sin fecha.
+  const grupos = [
+    { key:"venc", label:"Vencidas",  color:"#e5484d", items: visibles.filter(t => t.vence && t.vence < hoy).sort((a,b)=>a.vence.localeCompare(b.vence)) },
+    { key:"hoy",  label:"Hoy",       color:"#f5a623", items: visibles.filter(t => t.vence === hoy) },
+    { key:"prox", label:"Próximas",  color:C.accent,  items: visibles.filter(t => t.vence && t.vence > hoy).sort((a,b)=>a.vence.localeCompare(b.vence)) },
+    { key:"sin",  label:"Sin fecha", color:C.muted,   items: visibles.filter(t => !t.vence) },
+  ].filter(g => g.items.length);
+
   const agregar = async () => {
     const t = texto.trim(); if (!t) return;
-    await onAgregar(t, esAdmin ? para : null);
-    setTexto("");
-    if (esAdmin && para !== asignables[0].email) {
+    await onAgregar(t, esAdmin ? para : null, vence);
+    setTexto(""); setVence("");
+    if (esAdmin && para !== ((asignables[0] && asignables[0].email) || "")) {
       const lbl = (asignables.find(a => a.email === para) || {}).label || "usuario";
       setConfirm("✓ Tarea asignada a " + lbl);
       setTimeout(() => setConfirm(""), 2500);
@@ -4633,19 +4647,41 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
       timerDeshacer.current = setTimeout(() => setDeshacer(null), 6000);
     }, 650);
   };
-  const revivir = () => {
-    if (!deshacer) return;
-    onDeshacer(deshacer.id);
-    setCompletando(c => c.filter(x => x !== deshacer.id));
+  const revivir = (id) => {
+    const objetivo = id || (deshacer && deshacer.id);
+    if (!objetivo) return;
+    onDeshacer(objetivo);
+    setCompletando(c => c.filter(x => x !== objetivo));
     if (timerDeshacer.current) clearTimeout(timerDeshacer.current);
-    setDeshacer(null);
+    if (deshacer && deshacer.id === objetivo) setDeshacer(null);
   };
+
+  const inputBase = { background:C.bg, border:"1px solid "+C.border, borderRadius:9, color:C.text, outline:"none", fontFamily:"inherit" };
+  const filaTarea = (t) => {
+    const done = completando.includes(t.id);
+    const ajena = esAdmin && verDe !== "mios" && t.para !== miEmail;
+    const venc = t.vence && t.vence < hoy;
+    const esHoy = t.vence === hoy;
+    const bc = venc ? "#e5484d" : esHoy ? "#f5a623" : C.muted;
+    return (
+      <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid "+C.border,opacity:done?0.4:1,transition:"opacity 0.35s"}}>
+        <button onClick={()=>!done && marcar(t.id)} role="checkbox" aria-checked={done} aria-label={"Completar tarea: " + t.texto}
+          style={{padding:"8px",margin:"-4px 0",cursor:done?"default":"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:"none",border:"none"}}>
+          <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
+        </button>
+        <div style={{flex:1,minWidth:0,color:C.text,fontSize:14,textDecoration:done?"line-through":"none",padding:"4px 0"}}>{t.texto}</div>
+        {t.vence && <span title={venc?"Vencida":esHoy?"Vence hoy":"Programada"} style={{fontSize:11,fontWeight:700,color:bc,background:bc+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{venc?"⚠ ":""}{fmtVence(t.vence)}</span>}
+        {ajena && <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{etiquetaDe(t.para)}</span>}
+      </div>
+    );
+  };
+
   return (
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"20px 18px",marginTop:24}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:17,fontWeight:800,color:C.text}}>📋 Pendientes</div>
         {esAdmin && (
-          <select value={verDe} onChange={e=>setVerDe(e.target.value)} title="Ver pendientes de" style={{background:C.bg,border:"1px solid "+(verDe==="mios"?C.border:C.accent),borderRadius:9,color:verDe==="mios"?C.text:C.accent,padding:"8px 10px",fontSize:12.5,fontWeight:700,outline:"none"}}>
+          <select value={verDe} onChange={e=>setVerDe(e.target.value)} aria-label="Ver pendientes de" title="Ver pendientes de" style={{...inputBase,border:"1px solid "+(verDe==="mios"?C.border:C.accent),color:verDe==="mios"?C.text:C.accent,padding:"8px 10px",fontSize:12.5,fontWeight:700}}>
             <option value="mios">👤 Mis pendientes</option>
             {asignables.filter(a => a.email !== miEmail).map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
             <option value="todos">👥 Todos</option>
@@ -4653,36 +4689,50 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
         )}
       </div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") agregar(); }} placeholder="Escribe una tarea..." style={{flex:"1 1 180px",minWidth:0,background:C.bg,border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"11px 14px",fontSize:14,outline:"none"}}/>
+        <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") agregar(); }} aria-label="Nueva tarea" placeholder="Escribe una tarea..." style={{...inputBase,flex:"1 1 180px",minWidth:0,padding:"11px 14px",fontSize:14}}/>
+        <input type="date" value={vence} onChange={e=>setVence(e.target.value)} aria-label="Fecha de vencimiento (opcional)" title="Fecha de vencimiento (opcional)" style={{...inputBase,padding:"10px 12px",fontSize:13,colorScheme:"dark"}}/>
         {esAdmin && (
-          <select value={para} onChange={e=>setPara(e.target.value)} title="Asignar a" style={{background:C.bg,border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"11px 12px",fontSize:13,outline:"none"}}>
+          <select value={para} onChange={e=>setPara(e.target.value)} aria-label="Asignar a" title="Asignar a" style={{...inputBase,padding:"11px 12px",fontSize:13}}>
             {asignables.map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
           </select>
         )}
         <button onClick={agregar} style={{border:"none",borderRadius:9,cursor:"pointer",background:C.accent,color:"#1a1d27",padding:"11px 18px",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>Agregar</button>
       </div>
       {confirm && <div style={{color:"#4caf7d",fontSize:13,fontWeight:700,marginBottom:10}}>{confirm}</div>}
-      {visibles.length === 0 && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>{(!esAdmin || verDe==="mios") ? "No tienes pendientes 🎉" : "Sin pendientes aquí 🎉"}</div>}
       {deshacer && (
         <div style={{display:"flex",alignItems:"center",gap:10,background:"#13351f",border:"1px solid #4caf7d",borderRadius:10,padding:"10px 14px",marginBottom:10}}>
           <div style={{flex:1,fontSize:13,color:"#cdeed9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✓ Completada: {deshacer.texto}</div>
-          <button onClick={revivir} style={{border:"none",borderRadius:8,background:"#4caf7d",color:"#fff",padding:"8px 14px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ Deshacer</button>
+          <button onClick={()=>revivir()} style={{border:"none",borderRadius:8,background:"#4caf7d",color:"#fff",padding:"8px 14px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ Deshacer</button>
         </div>
       )}
-      {visibles.map(t => {
-        const done = completando.includes(t.id);
-        const ajena = esAdmin && verDe !== "mios" && t.para !== miEmail;
-        return (
-          <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid "+C.border,opacity:done?0.4:1,transition:"opacity 0.35s"}}>
-            <div onClick={()=>!done && marcar(t.id)} title="Marcar como completada"
-              style={{padding:"8px", margin:"-4px 0", cursor:"pointer", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center"}}>
-              <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
-            </div>
-            <div style={{flex:1,color:C.text,fontSize:14,textDecoration:done?"line-through":"none",padding:"4px 0"}}>{t.texto}</div>
-            {ajena && <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{etiquetaDe(t.para)}</span>}
+      {!visibles.length && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>{(!esAdmin || verDe==="mios") ? "No tienes pendientes 🎉" : "Sin pendientes aquí 🎉"}</div>}
+      {grupos.map(g => (
+        <div key={g.key} style={{marginBottom:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:7,margin:"12px 0 4px"}}>
+            <span style={{width:8,height:8,borderRadius:"50%",background:g.color,flexShrink:0}}/>
+            <span style={{fontSize:11.5,fontWeight:800,color:g.color,textTransform:"uppercase",letterSpacing:0.4}}>{g.label}</span>
+            <span style={{fontSize:11,color:C.muted}}>({g.items.length})</span>
           </div>
-        );
-      })}
+          {g.items.map(filaTarea)}
+        </div>
+      ))}
+      {hechas.length > 0 && (
+        <div style={{marginTop:14,borderTop:"1px solid "+C.border,paddingTop:8}}>
+          <button onClick={()=>setVerHechas(v=>!v)} aria-expanded={verHechas} style={{background:"none",border:"none",color:C.muted,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:"4px 0",display:"flex",alignItems:"center",gap:6}}>
+            {verHechas ? "▾" : "▸"} Completadas recientes ({hechas.length})
+          </button>
+          {verHechas && hechas.map(t => (
+            <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+C.border}}>
+              <span style={{color:"#4caf7d",fontSize:14,flexShrink:0}}>✓</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{color:C.muted,fontSize:13.5,textDecoration:"line-through",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.texto}</div>
+                <div style={{color:C.muted,fontSize:11,opacity:0.8}}>{etiquetaDe(t.completadaPor)} · {fmtHecha(t.completadaEl)}</div>
+              </div>
+              <button onClick={()=>revivir(t.id)} title="Reactivar" aria-label={"Reactivar tarea: " + t.texto} style={{border:"1px solid "+C.border,borderRadius:8,background:C.bg,color:C.muted,padding:"5px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -6792,33 +6842,44 @@ if (usuario) {
       const arr = snap.docs.map(d => ({ ...d.data(), id: d.id }));
       arr.sort((a, b) => (a.fecha?.seconds || 0) - (b.fecha?.seconds || 0));
       setTareas(arr);
-      // Depurar completadas con más de 15 días (fuego y olvido; las reglas ya limitan quién puede)
-      if (!window.__tareasDepuradas) {
-        window.__tareasDepuradas = true;
-        const corte = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
-        snap.docs.forEach(d => {
-          const t = d.data();
-          if (t.completada && t.completadaEl && t.completadaEl < corte) { deleteDoc(doc(db, "tareas", d.id)).catch(()=>{}); }
-        });
-      }
+      // La limpieza de completadas viejas la hace Firestore por TTL sobre el campo
+      // `expiraEl` (que se fija al completar). Determinista y del lado del servidor;
+      // ya no se borra desde el cliente.
     });
     return unsub;
   }, [usuario, rol]);
-  const agregarTarea = async (texto, paraEmail) => {
+  const agregarTarea = async (texto, paraEmail, vence) => {
     const target = (rol === "admin" && paraEmail) ? paraEmail : usuario.email;
     await addDoc(collection(db, "tareas"), {
-      texto, para: target, creadoPor: usuario.email,
+      texto, para: target, vence: vence || "", creadoPor: usuario.email,
       creadoPorNombre: usuario.displayName || usuario.email, fecha: serverTimestamp(),
     });
+    // Si se le asigna a alguien más, avisarle por la campanita (sin este aviso,
+    // la persona solo se enteraría si abre Pendientes).
+    if (target !== usuario.email) {
+      try {
+        await addDoc(collection(db, "notificaciones"), {
+          para: target,
+          titulo: "📋 Nueva tarea asignada",
+          cuerpo: (usuario.displayName || usuario.email) + " te asignó: " + texto + (vence ? " · vence " + vence : ""),
+          tipo: "tarea", ordenId: "", leida: false, fecha: serverTimestamp(),
+        });
+      } catch (e) {}
+    }
   };
-  // Completar NO borra: marca la tarea como completada (con quién y cuándo) para
-  // poder deshacer un toque accidental. Las completadas con más de 15 días se
-  // depuran solas al cargar, para que la colección no crezca sin límite.
+  // Completar NO borra: marca la tarea (con quién y cuándo) para poder deshacer un
+  // toque accidental. Fija `expiraEl` a 15 días para que Firestore la elimine por TTL.
   const completarTarea = async (id) => {
-    try { await updateDoc(doc(db, "tareas", id), { completada: true, completadaEl: new Date().toISOString(), completadaPor: usuario.email }); } catch (e) {}
+    try {
+      await updateDoc(doc(db, "tareas", id), {
+        completada: true, completadaEl: new Date().toISOString(), completadaPor: usuario.email,
+        expiraEl: Timestamp.fromDate(new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)),
+      });
+    } catch (e) {}
   };
   const deshacerTarea = async (id) => {
-    try { await updateDoc(doc(db, "tareas", id), { completada: false, completadaEl: "", completadaPor: "" }); } catch (e) {}
+    // Al reactivar, se limpia expiraEl para que el TTL no la borre.
+    try { await updateDoc(doc(db, "tareas", id), { completada: false, completadaEl: "", completadaPor: "", expiraEl: null }); } catch (e) {}
   };
 
   // ── Rutas (hoja de ruta diaria + cierre) ──────────────────────────────────

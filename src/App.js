@@ -6687,18 +6687,26 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     setRol(usuario ? (rolesActivos[(usuario.email||"").toLowerCase()] || rolesActivos[usuario.email] || null) : null);
   }, [usuario, usuariosDoc]);
 
-  // ── Firestore listener — only when logged in ──────────────────────────────
+  // ── Notificaciones no leídas — listener propio ────────────────────────────
+  // Vive aparte del listener de órdenes para que NO se reconecte cada vez que
+  // cambia el rol o config/usuarios. Query ya filtrado (para == yo, no leídas).
   useEffect(() => {
-    if (!usuario) return;
-// Cargar notificaciones no leídas
-let unsubNotifs = () => {};
-if (usuario) {
-  unsubNotifs = onSnapshot(
-    query(collection(db, "notificaciones"), where("para", "==", usuario.email), where("leida", "==", false)),
-    snap => setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-  );
-}
-    const rolActual = rolesActivos[(usuario.email||"").toLowerCase()] || rolesActivos[usuario.email];
+    if (!usuario) { setNotifs([]); return; }
+    const unsubNotifs = onSnapshot(
+      query(collection(db, "notificaciones"), where("para", "==", usuario.email), where("leida", "==", false)),
+      snap => setNotifs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    );
+    return unsubNotifs;
+  }, [usuario]);
+
+  // ── Órdenes — un solo enganche por rol ────────────────────────────────────
+  // Antes dependía de `usuariosDoc` (un objeto que llega/cambia por snapshot), así
+  // que el listener se reconectaba y releía TODA la colección en cada cambio y por
+  // duplicado en cada carga. Ahora depende del `rol` (string): se engancha una vez,
+  // cuando el rol resuelve, y solo se reconecta si el rol del propio usuario cambia.
+  useEffect(() => {
+    if (!usuario || !rol) return;
+    const rolActual = rol;
     const esPriv = rolActual === "admin" || rolActual === "seguimiento";
     const qOrdenes = esPriv
       ? collection(db, "ordenes")
@@ -6751,8 +6759,8 @@ if (usuario) {
         }).catch(() => {});
       }
     });
-    return () => { unsub(); unsubNotifs(); };
-  }, [usuario, usuariosDoc]);
+    return () => unsub();
+  }, [usuario, rol]);
 
   // ── Semáforo de carga de trabajo ──────────────────────────────────────────
   useEffect(() => {

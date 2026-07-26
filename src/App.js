@@ -3723,16 +3723,20 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
     .filter(m => m.tipo === "gastoSinComprob" && (m.fecha || "").slice(0, 7) === new Date().toISOString().slice(0, 7))
     .reduce((s, m) => s + (Number(m.importe) || 0), 0);
 
-  // ── Estado del CHOFER (su propio fondo: efectivo vs comprobantes) ──
-  // Recibe efectivo de la caja (aChofer). Gasta en fletes con comprobante (fleteComprob)
-  // o sin comprobante (fleteEfectivo). Devuelve cambio a la caja (reintegroChofer en la caja).
+  // ── Estado del CHOFER (su fondo de EFECTIVO) ──
+  // Recibe efectivo de la caja (aChofer). Gasta con comprobante (fleteComprob) o sin
+  // comprobante (fleteEfectivo). Devuelve cambio a la caja (reintegroChofer en la caja).
+  // La factura (comprobante) ya NO se estaciona en el chofer: al registrar el gasto con
+  // comprobante entra directo a "por reponer" de la caja (movimientos nuevos con aCaja:true).
+  // Se conserva la lógica de comprobantes SOLO para la data histórica anterior al cambio
+  // (fleteComprob sin flag + su corteComprob), de modo que los saldos viejos sigan cuadrando.
   const chofer = movChoferVivos.reduce((a, m) => {
     const imp = Number(m.importe) || 0;
     if (m.tipo === "recibe") a.efectivo += imp;                 // recibió efectivo de Seguimiento
-    else if (m.tipo === "fleteComprob") { a.efectivo -= imp; a.comprob += imp; }  // pagó flete, tiene nota
+    else if (m.tipo === "fleteComprob") { a.efectivo -= imp; if (!m.aCaja) a.comprob += imp; }  // nuevo: la factura va a caja; legacy: se acumulaba aquí
     else if (m.tipo === "fleteEfectivo") a.efectivo -= imp;     // pagó sin comprobante
     else if (m.tipo === "devuelve") a.efectivo -= imp;          // devolvió cambio a la caja
-    else if (m.tipo === "corteComprob") a.comprob -= imp;       // entregó comprobantes en el corte (se archivan)
+    else if (m.tipo === "corteComprob") a.comprob -= imp;       // (legacy) entregó comprobantes en el corte
     return a;
   }, { efectivo: 0, comprob: 0 });
 
@@ -3761,6 +3765,12 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
     const imp = Number(String(importe).replace(/[^0-9.]/g, ""));
     if (!imp || imp <= 0) { alert("Escribe un importe válido."); return; }
     if (!concepto.trim()) { alert("Escribe el concepto."); return; }
+    // Estos tipos los genera SOLO el sistema (entrega/devolución de efectivo y corte
+    // del chofer). Capturarlos a mano duplicaría el dinero o descuadraría los libros.
+    if (tipo === "aChofer" || tipo === "reintegroChofer" || tipo === "comprobChofer") {
+      alert("Ese movimiento se genera automáticamente desde el módulo del chofer, no se captura a mano.");
+      return;
+    }
     if ((tipo === "gasto" || tipo === "gastoSinComprob") && imp > efectivoCaja) { alert("No hay suficiente efectivo en la caja ($" + fmtMoney(efectivoCaja) + ")."); return; }
     if (tipo === "aChofer" && imp > efectivoCaja) { alert("No hay suficiente efectivo para entregar al chofer ($" + fmtMoney(efectivoCaja) + ")."); return; }
     if ((tipo === "reposicion" || tipo === "fondo") && (efectivoCaja + imp) > CAJA_FONDO_MAX) {
@@ -3790,6 +3800,9 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
     const imp = Number(String(cimporte).replace(/[^0-9.]/g, ""));
     if (!imp || imp <= 0) { alert("Escribe un importe válido."); return; }
     if (!cconcepto.trim()) { alert("Escribe el concepto (ej. destino del gasto)."); return; }
+    // La entrega de comprobantes ya no es un movimiento manual: la factura entra a la caja
+    // al registrar el gasto con comprobante. Se conserva el tipo solo para la data histórica.
+    if (ctipo === "corteComprob") { alert("Ese movimiento ya no se captura: el comprobante entra a la caja al registrar el gasto con comprobante."); return; }
     const esGasto = (ctipo === "fleteComprob" || ctipo === "fleteEfectivo");
     setCguardando(true);
     try {
@@ -3801,10 +3814,17 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
       if (ctipo === "devuelve") {
         await onAgregarMov({ fecha: new Date().toISOString().slice(0, 10), tipo: "reintegroChofer", importe: imp, concepto: "Devolución de chofer: " + cconcepto.trim(), nota: cnota.trim() });
       }
+      // Gasto CON comprobante: la factura es dinero que la caja debe reponer, así que entra
+      // de una vez a "por reponer" de la caja. El chofer solo baja su efectivo (no acumula
+      // comprobantes: por eso el movimiento del chofer se marca con aCaja:true).
+      if (ctipo === "fleteComprob") {
+        await onAgregarMov({ fecha: new Date().toISOString().slice(0, 10), tipo: "comprobChofer", importe: imp, concepto: "Comprobante del chofer: " + cconcepto.trim(), nota: cnota.trim() });
+      }
       await onAgregarMovChofer({
         fecha: new Date().toISOString().slice(0, 10),
         tipo: ctipo, importe: imp, concepto: cconcepto.trim(), nota: cnota.trim(),
         categoria: esGasto ? ccategoria : null,
+        ...(ctipo === "fleteComprob" ? { aCaja: true } : {}),
       });
       setCimporte(""); setCconcepto(""); setCnota("");
     } catch (e) { alert("No se pudo registrar: " + (e.message || e)); }
@@ -3853,8 +3873,13 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
       const XLSX = await cargarXLSX();
       const signo = (m, esChofer) => {
         if (esChofer) return m.tipo === "recibe" ? 1 : -1;
+        if (m.tipo === "comprobChofer") return 0;   // documental: la factura no mueve efectivo (ya salió al entregar dinero al chofer)
         return (m.tipo === "reposicion" || m.tipo === "fondo" || m.tipo === "reintegroChofer") ? 1 : -1;
       };
+      // Monto que va a "por reponer" (columna Comprobante): gasto de caja con factura y
+      // comprobantes del chofer. Solo del lado de la CAJA; en el chofer la factura ya se
+      // refleja en su comprobChofer pareado, así que su columna Comprobante va vacía.
+      const compCaja = (m) => (m.tipo === "gasto" || m.tipo === "comprobChofer") ? (Number(m.importe) || 0) : "";
       // ── Hoja 1: Movimientos (caja + chofer, marcados) ──
       const filas = [];
       [...caja].sort((a,b)=>(a.creadoEl||a.fecha||"").localeCompare(b.creadoEl||b.fecha||"")).forEach(m => {
@@ -3862,6 +3887,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
           "Origen": "Caja", "Fecha": fmtFechaCaja(m.fecha), "Tipo": tipoLabelCaja[m.tipo] || m.tipo,
           "Categoría": "", "Concepto": m.concepto || "", "No. factura/nota": m.nota || "",
           "Entra": signo(m,false) > 0 ? Number(m.importe)||0 : "", "Sale": signo(m,false) < 0 ? Number(m.importe)||0 : "",
+          "Comprobante": compCaja(m),
         });
       });
       [...chofer].sort((a,b)=>(a.creadoEl||a.fecha||"").localeCompare(b.creadoEl||b.fecha||"")).forEach(m => {
@@ -3870,10 +3896,11 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
           "Origen": "Chofer", "Fecha": fmtFechaCaja(m.fecha), "Tipo": tipoLabelChofer[m.tipo] || m.tipo,
           "Categoría": m.categoria ? (catL[m.categoria] || m.categoria) : "", "Concepto": m.concepto || "", "No. factura/nota": m.nota || "",
           "Entra": signo(m,true) > 0 ? Number(m.importe)||0 : "", "Sale": signo(m,true) < 0 ? Number(m.importe)||0 : "",
+          "Comprobante": "",
         });
       });
-      const ws1 = XLSX.utils.json_to_sheet(filas, { header: ["Origen","Fecha","Tipo","Categoría","Concepto","No. factura/nota","Entra","Sale"] });
-      ws1["!cols"] = [{wch:8},{wch:11},{wch:22},{wch:10},{wch:30},{wch:16},{wch:10},{wch:10}];
+      const ws1 = XLSX.utils.json_to_sheet(filas, { header: ["Origen","Fecha","Tipo","Categoría","Concepto","No. factura/nota","Entra","Sale","Comprobante"] });
+      ws1["!cols"] = [{wch:8},{wch:11},{wch:22},{wch:10},{wch:30},{wch:16},{wch:10},{wch:10},{wch:12}];
 
       // ── Hoja 2: Resumen del rango ──
       const sum = (arr, f) => arr.reduce((a,m)=>a + (f(m)?(Number(m.importe)||0):0), 0);
@@ -3973,43 +4000,9 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
     setAjustando(null);
   };
 
-  // Corte semanal del chofer (viernes): entrega comprobantes y devuelve el efectivo
-  // sobrante. Lo puede hacer Seguimiento. Deja al chofer en ceros y suma sus
-  // comprobantes a los "por reponer" de la caja (el gasto fue de la caja).
-  const [corteando, setCorteando] = useState(false);
-  const hacerCorteChofer = async () => {
-    if (chofer.efectivo <= 0 && chofer.comprob <= 0) { alert("El chofer no tiene efectivo ni comprobantes pendientes."); return; }
-    const hoy = new Date().toISOString().slice(0, 10);
-    const msg = "Corte del chofer:\n\n" +
-      "• Entrega comprobantes: $" + fmtMoney(chofer.comprob) + " (pasan a la caja para reponer)\n" +
-      "• Devuelve efectivo: $" + fmtMoney(chofer.efectivo) + " (regresa a la caja)\n\n" +
-      "El chofer queda en ceros. ¿Confirmar?";
-    if (!window.confirm(msg)) return;
-    setCorteando(true);
-    try {
-      // a) Comprobantes: se archivan del lado del chofer y entran a la caja como "por reponer".
-      if (chofer.comprob > 0) {
-        await onAgregarMovChofer({ fecha: hoy, tipo: "corteComprob", importe: chofer.comprob, concepto: "Corte semanal: entrega de comprobantes", nota: "" });
-        await onAgregarMov({ fecha: hoy, tipo: "comprobChofer", importe: chofer.comprob, concepto: "Comprobantes entregados por el chofer (corte)", nota: "" });
-      }
-      // b) Efectivo sobrante: el chofer lo devuelve y regresa a la caja.
-      if (chofer.efectivo > 0) {
-        await onAgregarMovChofer({ fecha: hoy, tipo: "devuelve", importe: chofer.efectivo, concepto: "Corte semanal: devolución de efectivo", nota: "" });
-        await onAgregarMov({ fecha: hoy, tipo: "reintegroChofer", importe: chofer.efectivo, concepto: "Efectivo devuelto por el chofer (corte)", nota: "" });
-      }
-      // Registrar el corte como evento (histórico semanal).
-      if (onRegistrarCorteChofer) {
-        await onRegistrarCorteChofer({
-          fecha: hoy,
-          comprobantesEntregados: chofer.comprob,
-          efectivoDevuelto: chofer.efectivo,
-          creadoEl: new Date().toISOString(),
-        });
-      }
-      alert("Corte realizado. El chofer quedó en ceros.");
-    } catch (e) { alert("No se pudo hacer el corte: " + (e.message || e)); }
-    setCorteando(false);
-  };
+  // El corte semanal del chofer se retiró: los comprobantes ya no se acumulan en el chofer
+  // (cada factura entra a la caja al registrar el gasto con comprobante), y el efectivo
+  // sobrante lo regresa el chofer con la opción "Devolvió a caja".
 
   const wrap = { maxWidth: 900, margin: "0 auto", padding: "0 4px 40px" };
   const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
@@ -4052,10 +4045,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
         <div style={{ ...card, marginBottom: 0 }}>
           <div style={{ fontSize: 12, color: C.muted }}>Chofer — efectivo</div>
           <div style={{ fontSize: 26, fontWeight: 800, color: C.text }}>${fmtMoney(chofer.efectivo)}</div>
-          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Comprobantes: ${fmtMoney(chofer.comprob)}</div>
-          {puedeCapturar && (chofer.efectivo > 0 || chofer.comprob > 0) && (
-            <button disabled={corteando} onClick={hacerCorteChofer} style={{ marginTop: 8, border: "1px solid " + C.accent, borderRadius: 8, background: C.surface, color: C.accent, padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: corteando ? "default" : "pointer", fontFamily: "inherit", opacity: corteando ? 0.6 : 1 }}>{corteando ? "Procesando…" : "Corte del viernes"}</button>
-          )}
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>Efectivo en su poder</div>
         </div>
       </div>
 
@@ -4071,7 +4061,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
           <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Registrar movimiento de caja</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <select value={tipo} onChange={e => setTipo(e.target.value)} style={iS}>
-              {Object.entries(tipoLabelCaja).filter(([k]) => k !== "aChofer" && k !== "reintegroChofer").map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(tipoLabelCaja).filter(([k]) => k !== "aChofer" && k !== "reintegroChofer" && k !== "comprobChofer").map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <input value={importe} onChange={e => setImporte(e.target.value)} placeholder="Importe $" inputMode="decimal" style={{ ...iS, flex: 1, minWidth: 110 }} />
@@ -4089,7 +4079,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
           <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Movimiento del chofer</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <select value={ctipo} onChange={e => setCtipo(e.target.value)} style={iS}>
-              {Object.entries(tipoLabelChofer).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              {Object.entries(tipoLabelChofer).filter(([k]) => k !== "corteComprob").map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
             {(ctipo === "fleteComprob" || ctipo === "fleteEfectivo") && (
               <select value={ccategoria} onChange={e => setCcategoria(e.target.value)} style={iS}>

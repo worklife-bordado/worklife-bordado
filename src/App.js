@@ -6720,31 +6720,40 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
         ? all.filter(o => !(o.etapa === "nueva" && !o.liberada))
         : all;
       setOrdenes(data);
-      // Backfill del espejo de calendario del bordador — SOLO una vez, y solo admin.
-      // Puebla calendarioBordador con las órdenes ya existentes (que nacieron antes de
-      // esta función) para que el calendario del bordador arranque completo, sin esperar
-      // a que cada orden se vuelva a guardar. Escribe solo campos NO comerciales.
+      // Backfill del espejo de calendario del bordador — migración de UNA sola vez.
+      // Puebla calendarioBordador con las órdenes que ya existían antes de que existiera
+      // syncCalendarioBordador. De ahí en adelante, cada guardado de orden mantiene el
+      // espejo al día (syncCalendarioBordador), así que esto NO necesita repetirse.
+      // Antes corría en cada sesión de admin (reescribiendo todos los espejos); ahora se
+      // ejecuta una sola vez en la vida del proyecto, controlado por un flag persistido.
       if (rolActual === "admin" && all.length && !window.__calBordadorBackfill) {
-        window.__calBordadorBackfill = true;
+        window.__calBordadorBackfill = true; // evita relanzarlo dentro de esta misma sesión
         (async () => {
-          for (const o of all) {
-            try {
-              const bord = (o.bordador || "").trim();
-              const ref = doc(db, "calendarioBordador", String(o.id));
-              // Solo "Nueva" y "En Bordado" (lo que el bordador debe trabajar).
-              if (!bord || (o.etapa !== "nueva" && o.etapa !== "bordado")) { try { await deleteDoc(ref); } catch(e){} continue; }
-              const piezas = (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
-              await setDoc(ref, {
-                bordador: bord,
-                numero: o.numero || "",
-                piezas: piezas,
-                etapa: o.etapa || "nueva",
-                fechaRequerida: o.fechaRequerida || "",
-                fechaReprogramada: o.fechaReprogramada || "",
-                actualizado: serverTimestamp(),
-              }, { merge: true });
-            } catch(e) {}
-          }
+          try {
+            const flagRef = doc(db, "config", "flags");
+            const flagSnap = await getDoc(flagRef);
+            if (flagSnap.exists() && flagSnap.data().calBordadorBackfill) return; // ya se hizo: no repetir nunca más
+            for (const o of all) {
+              try {
+                const bord = (o.bordador || "").trim();
+                const ref = doc(db, "calendarioBordador", String(o.id));
+                // Solo "Nueva" y "En Bordado" (lo que el bordador debe trabajar).
+                if (!bord || (o.etapa !== "nueva" && o.etapa !== "bordado")) { try { await deleteDoc(ref); } catch(e){} continue; }
+                const piezas = (o.prendas||[]).reduce((s,p)=>s+TALLAS.reduce((ts,t)=>ts+(parseInt(p.tallas?.[t])||0),0),0);
+                await setDoc(ref, {
+                  bordador: bord,
+                  numero: o.numero || "",
+                  piezas: piezas,
+                  etapa: o.etapa || "nueva",
+                  fechaRequerida: o.fechaRequerida || "",
+                  fechaReprogramada: o.fechaReprogramada || "",
+                  actualizado: serverTimestamp(),
+                }, { merge: true });
+              } catch(e) {}
+            }
+            // Marcar la migración como hecha para que no vuelva a correr en futuras sesiones.
+            await setDoc(flagRef, { calBordadorBackfill: true, calBordadorBackfillEl: new Date().toISOString() }, { merge: true });
+          } catch(e) { window.__calBordadorBackfill = false; } // si falló, permitir reintento en otra carga
         })();
       }
       // Mantener el contador global al día — SOLO una vez por sesión (no en cada cambio).
@@ -7126,15 +7135,19 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     return unsub;
   }, [usuario, rol, vista]);
 
-  // Caja chica: la ven admin y seguimiento.
+  // Caja chica: la ven admin y seguimiento. Se cargan las 4 colecciones SOLO al abrir
+  // la pantalla (no en cada sesión), porque crecen con cada movimiento y solo el
+  // componente CajaChica las consume. La alerta de caja baja ya vive dentro de ese
+  // componente, así que solo se evalúa cuando la pantalla está abierta (sin cambio).
   useEffect(() => {
     if (rol !== "admin" && rol !== "seguimiento") return;
+    if (vista !== "caja") return;
     const u1 = onSnapshot(collection(db, "cajaChica"), snap => setCajaMov(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u2 = onSnapshot(collection(db, "cajaChicaChofer"), snap => setCajaMovChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u3 = onSnapshot(collection(db, "cajaChicaCortes"), snap => setCajaCortes(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u4 = onSnapshot(collection(db, "cajaChicaCortesChofer"), snap => setCajaCortesChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     return () => { u1(); u2(); u3(); u4(); };
-  }, [usuario, rol]);
+  }, [usuario, rol, vista]);
   const agregarCajaMov = async (m) => {
     await addDoc(collection(db, "cajaChica"), { ...m, creadoPor: usuario.email, creadoEl: new Date().toISOString() });
   };

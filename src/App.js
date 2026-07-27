@@ -1373,7 +1373,7 @@ function PdfModal({ html, onClose, titulo = "Autorización de Trabajo", archivo 
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "OrdenBordado.html";
+    a.download = archivo || "Documento.html";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1385,7 +1385,7 @@ function PdfModal({ html, onClose, titulo = "Autorización de Trabajo", archivo 
       <div style={{width:"100%",maxWidth:900,height:"calc(100vh - 32px)",background:"#fff",borderRadius:12,overflow:"hidden",display:"flex",flexDirection:"column"}}>
         {/* Toolbar */}
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 16px",borderBottom:"1px solid #ddd",background:"#f5f5f5",flexShrink:0}}>
-          <div style={{flex:1,fontWeight:700,color:"#111",fontSize:13}}>Vista previa — Autorización de Trabajo</div>
+          <div style={{flex:1,fontWeight:700,color:"#111",fontSize:13}}>Vista previa — {titulo}</div>
           <button onClick={handleDownload}
             style={{background:"#1a7a4a",color:"#fff",border:"none",borderRadius:7,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
             ⬇ Descargar para imprimir
@@ -1399,7 +1399,7 @@ function PdfModal({ html, onClose, titulo = "Autorización de Trabajo", archivo 
         <iframe
           srcDoc={html}
           style={{flex:1,width:"100%",border:"none",background:"#fff"}}
-          title="Autorización de Trabajo"
+          title={titulo}
           sandbox="allow-same-origin"
         />
         {/* Footer */}
@@ -3690,13 +3690,13 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
 const CAJA_FONDO_MAX = 5000;   // fondo objetivo de la caja
 const CAJA_MIN = 2000;         // por debajo de esto: solicitar reposición
 
-function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer, onAgregarMov, onAgregarMovChofer, onCerrarMes, onRegistrarCorteChofer, onImprimir, onAvisarBajo }) {
+function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov, onAgregarMovChofer, onCerrarMes, onImprimir, onAvisarBajo }) {
   const esAdmin = rol === "admin";
   const puedeCapturar = rol === "admin" || rol === "seguimiento";
   const mesActual = new Date().toISOString().slice(0, 7);
 
   // Solo movimientos NO cerrados (de meses ya cortados quedan archivados en 'cortes').
-  const mesesCerrados = new Set((cortes || []).map(c => c.mes));
+  const mesesCerrados = new Set((cortes || []).filter(c => c.mes).map(c => c.mes));
   const movVivos = (movimientos || []).filter(m => !mesesCerrados.has((m.fecha || "").slice(0, 7)));
   const movChoferVivos = (movChofer || []).filter(m => !mesesCerrados.has((m.fecha || "").slice(0, 7)));
 
@@ -4163,31 +4163,18 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, cortesChofer,
         </div>
       )}
 
-      {/* Historial de cortes del chofer */}
-      {(cortesChofer || []).length > 0 && (
-        <div style={card}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Cortes del chofer</div>
-          {[...cortesChofer].sort((a, b) => (b.creadoEl || b.fecha || "").localeCompare(a.creadoEl || a.fecha || "")).slice(0, 12).map(c => (
-            <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, color: C.text }}>{fmtFechaCaja(c.fecha)}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>Comprobantes entregados ${fmtMoney(c.comprobantesEntregados)} · Efectivo devuelto ${fmtMoney(c.efectivoDevuelto)}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Historial de cierres */}
       {(cortes || []).length > 0 && (
         <div style={card}>
           <div style={{ fontSize: 14, fontWeight: 800, color: C.text, marginBottom: 10 }}>Cierres anteriores</div>
-          {[...cortes].sort((a, b) => b.mes.localeCompare(a.mes)).map(c => (
+          {[...cortes].filter(c => c.mes && c.id !== "_avisoBajo").sort((a, b) => b.mes.localeCompare(a.mes)).map(c => (
             <div key={c.mes} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid " + C.border }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, color: C.text }}>{nombreMesCaja(c.mes)}</div>
                 <div style={{ fontSize: 11, color: C.muted }}>Efectivo final ${fmtMoney(c.efectivoFinal)} · Comprob. ${fmtMoney(c.comprobPendientes)} · Chofer ${fmtMoney(c.choferEfectivo)}</div>
               </div>
+              <button onClick={() => onImprimir(buildReciboCierreCajaHtml(c), "Recibo cierre " + nombreMesCaja(c.mes))} title="Imprimir recibo del cierre"
+                style={{ border: "1px solid " + C.border, borderRadius: 8, background: C.bg, color: C.accent, padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>🖨 PDF</button>
             </div>
           ))}
         </div>
@@ -4959,6 +4946,39 @@ function buildReciboBonoHtml(clave, capturas, sal, periodo, kpiCfg, snap){
       </table>
       ${snap && snap.filas ? '<div class="nota">Resultados congelados al cierre del período. Cambios posteriores a los objetivos de KPIs no modifican este recibo.</div>' : ""}
   <div class="firmas"><div class="firma">Entrega — WorkLife Uniformes</div><div class="firma">Recibí de conformidad — ${escHtml(def.nombre)}</div></div>
+    </div>
+  </div></body></html>`;
+}
+
+// ── Recibos imprimibles de Caja Chica (mismo patrón que buildReciboBonoHtml) ──
+// Fecha+hora legible para los campos ISO (cerradoEl / creadoEl).
+function fmtFechaHoraCaja(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return escHtml(String(iso));
+  return d.toLocaleDateString("es-MX",{day:"2-digit",month:"2-digit",year:"numeric"}) + " " + d.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
+}
+// Recibo del cierre mensual de la caja.
+function buildReciboCierreCajaHtml(c){
+  const m = (n)=>"$"+fmtMoney(n);
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><h1>RECIBO DE CIERRE MENSUAL · CAJA CHICA</h1></div>
+    <div class="body">
+      <div class="sec">PERÍODO</div>
+      <table>
+        <tr><th>Mes cerrado</th><th>Cerrado por</th><th>Fecha y hora del cierre</th></tr>
+        <tr><td>${escHtml(nombreMesCaja(c.mes))}</td><td>${escHtml(c.cerradoPor||"—")}</td><td>${fmtFechaHoraCaja(c.cerradoEl)}</td></tr>
+      </table>
+      <div class="sec">SALDOS AL CIERRE</div>
+      <table>
+        <tr><th style="text-align:left">Efectivo final en caja</th><th style="text-align:right">${m(c.efectivoFinal)}</th></tr>
+        <tr><td>Comprobantes por reponer</td><td style="text-align:right">${m(c.comprobPendientes)}</td></tr>
+        <tr><td>Efectivo en poder del chofer</td><td style="text-align:right">${m(c.choferEfectivo)}</td></tr>
+        <tr><td>Comprobantes del chofer</td><td style="text-align:right">${m(c.choferComprob)}</td></tr>
+      </table>
+      <div class="nota">El efectivo final se reinyecta como saldo inicial del mes siguiente. Recibo generado a partir del cierre archivado; no se recalcula.</div>
+      <div class="firmas"><div class="firma">Cerró — ${escHtml(c.cerradoPor||"")}</div><div class="firma">Revisó — WorkLife Uniformes</div></div>
     </div>
   </div></body></html>`;
 }
@@ -6614,7 +6634,6 @@ function AppInner() {
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);
   const [cajaCortes, setCajaCortes] = useState([]);
-  const [cajaCortesChofer, setCajaCortesChofer] = useState([]);
   const [pagoPdf, setPagoPdf] = useState(null);
   const [bonos, setBonos] = useState([]);
   const [bonoPdf, setBonoPdf] = useState(null);
@@ -7145,8 +7164,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     const u1 = onSnapshot(collection(db, "cajaChica"), snap => setCajaMov(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u2 = onSnapshot(collection(db, "cajaChicaChofer"), snap => setCajaMovChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
     const u3 = onSnapshot(collection(db, "cajaChicaCortes"), snap => setCajaCortes(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    const u4 = onSnapshot(collection(db, "cajaChicaCortesChofer"), snap => setCajaCortesChofer(snap.docs.map(d => ({ ...d.data(), id: d.id }))));
-    return () => { u1(); u2(); u3(); u4(); };
+    return () => { u1(); u2(); u3(); };
   }, [usuario, rol, vista]);
   const agregarCajaMov = async (m) => {
     await addDoc(collection(db, "cajaChica"), { ...m, creadoPor: usuario.email, creadoEl: new Date().toISOString() });
@@ -7156,9 +7174,6 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   };
   const cerrarMesCaja = async (corte) => {
     await setDoc(doc(db, "cajaChicaCortes", corte.mes), corte, { merge: true });
-  };
-  const registrarCorteChofer = async (corte) => {
-    await addDoc(collection(db, "cajaChicaCortesChofer"), { ...corte, registradoPor: usuario.email });
   };
   // Avisa por la campanita a los administradores cuando el efectivo de la caja cruza
   // por debajo del mínimo. Un doc marcador evita repetir el aviso hasta que se reponga.
@@ -8100,8 +8115,7 @@ const cancelar = async (id) => {
             usuario={usuario} rol={rol}
             movimientos={cajaMov} movChofer={cajaMovChofer} cortes={cajaCortes}
             onAgregarMov={agregarCajaMov} onAgregarMovChofer={agregarCajaMovChofer}
-            cortesChofer={cajaCortesChofer}
-            onCerrarMes={cerrarMesCaja} onRegistrarCorteChofer={registrarCorteChofer} onImprimir={imprimirBono} onAvisarBajo={avisarCajaBaja} />
+            onCerrarMes={cerrarMesCaja} onImprimir={imprimirBono} onAvisarBajo={avisarCajaBaja} />
         </div>
       )}
 

@@ -3740,15 +3740,25 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
     return a;
   }, { efectivo: 0, comprob: 0 });
 
-  const bajoMinimo = efectivoCaja < CAJA_MIN;
+  // Mientras la suscripción no ha traído los movimientos (o la caja es nueva y no tiene
+  // ninguno), efectivoCaja es 0 momentáneamente. No hay que confundir "aún no carga" con
+  // "caja realmente baja": sin movimientos no se evalúa el mínimo ni se avisa.
+  const cajaSinCargar = !(movimientos || []).length;
+  const bajoMinimo = !cajaSinCargar && efectivoCaja < CAJA_MIN;
   const sugerido = Math.max(0, CAJA_FONDO_MAX - efectivoCaja);
 
   // Cuando el efectivo cruza el mínimo, avisa a los administradores por la campanita
   // (una sola vez, controlado en el padre). Solo lo dispara quien captura.
+  // IMPORTANTE: el caché local persistente puede entregar un estado VIEJO (efectivo
+  // bajo) antes del estado real del servidor. Sin esperar, el aviso se dispararía con
+  // ese valor transitorio cada vez que se abre la pantalla. Por eso se espera a que el
+  // saldo se estabilice: si cambia antes de 1.5 s (llega el dato del servidor), el
+  // temporizador se cancela y solo el valor final llega a evaluarse.
   useEffect(() => {
-    if (!onAvisarBajo) return;
-    onAvisarBajo(efectivoCaja, CAJA_MIN, sugerido);
-  }, [efectivoCaja]);
+    if (!onAvisarBajo || cajaSinCargar) return;   // no evaluar hasta que carguen los movimientos
+    const t = setTimeout(() => onAvisarBajo(efectivoCaja, CAJA_MIN, sugerido), 1500);
+    return () => clearTimeout(t);
+  }, [efectivoCaja, cajaSinCargar]);
 
   // ── Captura de movimiento de caja ──
   const hoyISO = new Date().toISOString().slice(0, 10);

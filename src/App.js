@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, Component } from "react";
 // INSTRUCCIONES: reemplaza estos valores con los de tu proyecto Firebase
 // (los obtienes en Firebase Console > Configuración del proyecto > Tu app web)
 import { initializeApp } from "firebase/app";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDoc, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDoc, getDocs, query, where, addDoc, orderBy, deleteDoc, runTransaction, Timestamp, limit } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 
@@ -1440,7 +1440,7 @@ function DropdownBordador({ value, opciones, onSelect, onAgregar, disabled, pued
   );
 }
 
-function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [], usuariosRoles = {} }) {
+function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [], usuariosRoles = {}, onGenerarEnvio }) {
   const [pdfHtml, setPdfHtml] = useState(null);
   const [form, setForm] = useState(() => {
   const o = JSON.parse(JSON.stringify(orden));
@@ -1715,6 +1715,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
           window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
         }} variant="ghost" size="sm">📲 Seguimiento</Btn>
         <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } onDuplicar(form); }} variant="ghost" size="sm">⧉ Duplicar</Btn>
+        {onGenerarEnvio && <Btn onClick={() => onGenerarEnvio(form)} variant="ghost" size="sm">📦 Generar Envío</Btn>}
         <Btn onClick={() => validarYGuardar(() => onSave(form))} size="sm">💾 Guardar</Btn>
         <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } onDelete(form.id); }} variant="danger" size="sm">🗑</Btn>
       </div>
@@ -4993,6 +4994,226 @@ function buildReciboCierreCajaHtml(c){
   </div></body></html>`;
 }
 
+// ── Etiquetas de paquetería para Brother QL-800, rollo DK-1202 (62 × 100 mm) ──
+// Remitente fijo de la empresa (quien envía).
+const REMITENTE_WL = {
+  nombre: "Work-Life Uniformes",
+  direccion: "Cuauhtémoc 850 Int. A, Col. Burócrata, CP 78270, San Luis Potosí, SLP.",
+};
+// Resumen legible de las prendas de una orden, para auto-armar el contenido del paquete.
+// Ej.: "30 Playera, 15 Chamarra". Suma todas las tallas de cada renglón con descripción.
+function resumenPrendasOrden(orden) {
+  const items = ((orden && orden.prendas) || [])
+    .filter(p => p && p.descripcion && p.descripcion.trim())
+    .map(p => {
+      const tot = TALLAS.reduce((s, t) => s + (parseInt(p.tallas && p.tallas[t]) || 0), 0);
+      return (tot ? tot + " " : "") + p.descripcion.trim();
+    });
+  return items.join(", ");
+}
+// CSS de la etiqueta térmica: 62×100 mm vertical, monocromática (sin color/fondos:
+// la QL-800 es térmica en blanco y negro). Una etiqueta por página.
+const ETIQUETA_PDF_CSS = `
+@page { size: 62mm 100mm; margin: 0; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+html, body { margin: 0; padding: 0; background: #fff; color: #000;
+  font-family: Arial, Helvetica, sans-serif; }
+.etq { width: 62mm; height: 100mm; padding: 3mm 3.5mm; display: flex; flex-direction: column;
+  page-break-after: always; overflow: hidden; }
+.etq:last-child { page-break-after: auto; }
+.remite { font-size: 7pt; line-height: 1.15; border-bottom: 0.4mm solid #000; padding-bottom: 1.5mm; }
+.remite b { font-size: 7.5pt; }
+.paq { text-align: center; font-size: 15pt; font-weight: 800; margin: 1.5mm 0; letter-spacing: .3px; }
+.lbl { font-size: 6.5pt; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; margin-top: 1.5mm; }
+.dest { font-size: 9pt; line-height: 1.2; }
+.dest .nom { font-weight: 800; font-size: 10pt; }
+.destaca { border: 0.5mm solid #000; border-radius: 1.5mm; padding: 1.8mm 2mm; margin-top: 1.5mm; }
+.pedido { font-size: 13pt; font-weight: 800; }
+.contenido { font-size: 10pt; font-weight: 700; line-height: 1.2; margin-top: .5mm; }
+.pie { margin-top: auto; border-top: 0.4mm solid #000; padding-top: 1.5mm; font-size: 6.5pt; line-height: 1.35; }
+.pie .row { display: flex; justify-content: space-between; gap: 2mm; }
+.pie b { font-weight: 800; }
+`;
+// Genera UNA etiqueta por paquete. `envio` trae destinatario, folios, fletera/guía y
+// el arreglo `paquetes` (cada uno con su `contenido`). N etiquetas = paquetes.length.
+function buildEtiquetasEnvioHtml(envio) {
+  const e = envio || {};
+  const d = e.destinatario || {};
+  const paquetes = (e.paquetes && e.paquetes.length) ? e.paquetes : [{ contenido: "" }];
+  const total = paquetes.length;
+  const destLineas = [d.nombre, d.direccion, [d.contacto, d.telefono].filter(Boolean).join(" · ")]
+    .filter(x => x && String(x).trim());
+  const etiquetas = paquetes.map((p, i) => `
+    <div class="etq">
+      <div class="remite"><b>REMITE:</b> ${escHtml(REMITENTE_WL.nombre)}<br>${escHtml(REMITENTE_WL.direccion)}</div>
+      <div class="paq">PAQUETE ${i + 1} DE ${total}</div>
+      <div class="lbl">Destinatario</div>
+      <div class="dest">
+        <div class="nom">${escHtml(d.nombre || e.cliente || "—")}</div>
+        ${destLineas.slice(1).map(l => `<div>${escHtml(l)}</div>`).join("")}
+      </div>
+      <div class="destaca">
+        <div class="lbl" style="margin-top:0">No. pedido del cliente</div>
+        <div class="pedido">${escHtml(e.noPedidoCliente || "—")}</div>
+        <div class="lbl">Contenido del paquete</div>
+        <div class="contenido">${escHtml((p && p.contenido && p.contenido.trim()) || "—")}</div>
+      </div>
+      <div class="pie">
+        <div class="row"><span>Folio envío: <b>${escHtml(e.folio || "—")}</b></span><span>No. interno: <b>${escHtml(e.numeroInterno || "—")}</b></span></div>
+        <div class="row"><span>Fletera: <b>${escHtml(e.fletera || "—")}</b></span><span>Guía: <b>${escHtml(e.guia || "—")}</b></span></div>
+      </div>
+    </div>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${ETIQUETA_PDF_CSS}</style></head><body>${etiquetas}</body></html>`;
+}
+
+function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, envioInicial, onConsumidoInicial }) {
+  const [campo, setCampo] = useState("folio");
+  const [valor, setValor] = useState("");
+  const [resultados, setResultados] = useState(null); // null = aún sin buscar
+  const [buscando, setBuscando] = useState(false);
+  const [envio, setEnvio] = useState(null);            // envío abierto en edición
+  const [guardando, setGuardando] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  // Envío precargado desde una orden ("Generar Envío"): abre la ficha directo.
+  useEffect(() => {
+    if (envioInicial) {
+      setEnvio(envioInicial);
+      setResultados(null);
+      setValor("");
+      if (onConsumidoInicial) onConsumidoInicial();
+    }
+  }, [envioInicial]);
+
+  const campos = [
+    ["folio", "Folio de envío"],
+    ["numeroInterno", "No. orden interna"],
+    ["noPedidoCliente", "No. pedido cliente"],
+    ["guia", "No. de guía"],
+    ["cliente", "Nombre del cliente"],
+  ];
+  const wrap = { maxWidth: 900, margin: "0 auto", padding: "0 4px 40px" };
+  const card = { background: C.card, border: "1px solid " + C.border, borderRadius: 14, padding: "16px 18px", marginBottom: 14 };
+  const inputBase = { background: C.bg, border: "1px solid " + C.border, borderRadius: 9, color: C.text, outline: "none", fontFamily: "inherit", padding: "10px 12px", fontSize: 14 };
+  const btn = (bg, col) => ({ border: "none", borderRadius: 9, cursor: "pointer", background: bg, color: col, padding: "10px 16px", fontSize: 14, fontWeight: 800, fontFamily: "inherit" });
+
+  const buscar = async () => {
+    const v = valor.trim(); if (!v) return;
+    setBuscando(true); setEnvio(null); setMsg("");
+    try { setResultados(await onBuscar(campo, v)); }
+    catch (e) { setMsg("No se pudo buscar: " + (e.message || e)); }
+    setBuscando(false);
+  };
+  const nuevoEnvio = () => {
+    setResultados(null); setValor(""); setMsg("");
+    setEnvio({ folio: "", ordenId: "", numeroInterno: "", noPedidoCliente: "", cliente: "",
+      fletera: "", guia: "", destinatario: { nombre: "", direccion: "", contacto: "", telefono: "" },
+      paquetes: [{ contenido: "" }] });
+  };
+  const upd = (k, v) => setEnvio(e => ({ ...e, [k]: v }));
+  const updDest = (k, v) => setEnvio(e => ({ ...e, destinatario: { ...(e.destinatario || {}), [k]: v } }));
+  const updPaq = (i, v) => setEnvio(e => ({ ...e, paquetes: e.paquetes.map((p, idx) => idx === i ? { ...p, contenido: v } : p) }));
+  const addPaq = () => setEnvio(e => ({ ...e, paquetes: [...(e.paquetes || []), { contenido: "" }] }));
+  const delPaq = (i) => setEnvio(e => ({ ...e, paquetes: e.paquetes.filter((_, idx) => idx !== i) }));
+
+  const guardar = async () => {
+    const d = envio.destinatario || {};
+    if (!(d.nombre || "").trim() && !(envio.cliente || "").trim()) { alert("Captura al menos el nombre del destinatario o del cliente."); return; }
+    if (!(envio.paquetes || []).length) { alert("Agrega al menos un paquete."); return; }
+    setGuardando(true);
+    try { const g = await onGuardar(envio); setEnvio(g); setMsg("✓ Envío guardado: " + g.folio); setTimeout(() => setMsg(""), 3500); }
+    catch (e) { alert("No se pudo guardar: " + (e.message || e)); }
+    setGuardando(false);
+  };
+  const imprimir = () => {
+    if (!envio) return;
+    if (!envio.folio) { alert("Guarda el envío primero para asignarle folio, luego imprime las etiquetas."); return; }
+    onImprimir(buildEtiquetasEnvioHtml(envio), "Etiquetas " + envio.folio);
+  };
+
+  return (
+    <div style={wrap}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+        <div style={{ fontSize: 20, fontWeight: 800, color: C.text }}>📦 Paquetería</div>
+        <button onClick={nuevoEnvio} style={btn(C.accent, "#1a1d27")}>+ Nuevo envío</button>
+      </div>
+
+      {/* Buscador universal */}
+      <div style={card}>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Buscar envío (coincidencia exacta)</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <select value={campo} onChange={e => setCampo(e.target.value)} aria-label="Campo de búsqueda" style={{ ...inputBase, flex: "0 0 auto" }}>
+            {campos.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <input value={valor} onChange={e => setValor(e.target.value)} onKeyDown={e => { if (e.key === "Enter") buscar(); }}
+            aria-label="Valor a buscar" placeholder="Escribe el valor exacto…" style={{ ...inputBase, flex: "1 1 160px", minWidth: 0 }} />
+          <button onClick={buscar} disabled={buscando} style={{ ...btn(C.surface, C.accent), border: "1px solid " + C.accent, opacity: buscando ? 0.6 : 1 }}>{buscando ? "Buscando…" : "Buscar"}</button>
+        </div>
+        {msg && <div style={{ color: msg.startsWith("✓") ? "#4caf7d" : C.danger, fontSize: 13, fontWeight: 700, marginTop: 10 }}>{msg}</div>}
+      </div>
+
+      {/* Resultados de búsqueda */}
+      {resultados && !envio && (
+        <div style={card}>
+          {!resultados.length && <div style={{ color: C.muted, fontSize: 14, textAlign: "center", padding: "10px 0" }}>Sin coincidencias.</div>}
+          {resultados.map(r => (
+            <div key={r.id} onClick={() => setEnvio(r)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid " + C.border, cursor: "pointer" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{r.folio} · {r.cliente || r.destinatario?.nombre || "—"}</div>
+                <div style={{ fontSize: 11.5, color: C.muted }}>Interno {r.numeroInterno || "—"} · Pedido cliente {r.noPedidoCliente || "—"} · Guía {r.guia || "—"} · {(r.paquetes || []).length} paq.</div>
+              </div>
+              <span style={{ color: C.accent, fontSize: 13, fontWeight: 800 }}>Abrir →</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Ficha del envío */}
+      {envio && (
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: C.text }}>{envio.folio ? "Envío " + envio.folio : "Nuevo envío"}{envio.ordenId ? <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>  · desde orden</span> : null}</div>
+            <button onClick={() => setEnvio(null)} style={{ border: "none", background: "transparent", color: C.muted, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>✕ Cerrar</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Inp label="Fletera" value={envio.fletera} onChange={v => upd("fletera", v)} />
+            <Inp label="No. de guía" value={envio.guia} onChange={v => upd("guia", v)} />
+            <Inp label="No. pedido del cliente" value={envio.noPedidoCliente} onChange={v => upd("noPedidoCliente", v)} />
+            <Inp label="No. orden interna" value={envio.numeroInterno} onChange={v => upd("numeroInterno", v)} readOnly={!!envio.ordenId} />
+          </div>
+
+          <div style={{ fontSize: 12, color: C.muted, textTransform: "uppercase", letterSpacing: 1, margin: "16px 0 6px" }}>Destinatario</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Inp label="Nombre / empresa" value={envio.destinatario?.nombre} onChange={v => updDest("nombre", v)} />
+            <Inp label="Contacto" value={envio.destinatario?.contacto} onChange={v => updDest("contacto", v)} />
+            <Inp label="Teléfono" value={envio.destinatario?.telefono} onChange={v => updDest("telefono", v)} />
+            <Inp label="Cliente (nombre para buscar)" value={envio.cliente} onChange={v => upd("cliente", v)} />
+            <div style={{ gridColumn: "1/-1" }}><Textarea label="Dirección" value={envio.destinatario?.direccion} onChange={v => updDest("direccion", v)} rows={2} /></div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "16px 0 6px" }}>
+            <div style={{ fontSize: 12, color: C.muted, textTransform: "uppercase", letterSpacing: 1 }}>Paquetes ({(envio.paquetes || []).length})</div>
+            <button onClick={addPaq} style={{ border: "1px solid " + C.accent, borderRadius: 8, background: C.surface, color: C.accent, padding: "6px 12px", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>+ Agregar paquete</button>
+          </div>
+          {(envio.paquetes || []).map((p, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 }}>
+              <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 8, background: C.bg, border: "1px solid " + C.border, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, color: C.accent, fontSize: 13 }}>{i + 1}</div>
+              <textarea value={p.contenido} onChange={e => updPaq(i, e.target.value)} placeholder={"Contenido del paquete " + (i + 1)} rows={2} style={{ ...inputBase, flex: 1, resize: "vertical" }} />
+              {(envio.paquetes.length > 1) && <button onClick={() => delPaq(i)} title="Quitar paquete" style={{ border: "none", background: "transparent", color: C.danger, fontSize: 18, cursor: "pointer", padding: "4px 6px" }}>✕</button>}
+            </div>
+          ))}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            <button onClick={guardar} disabled={guardando} style={{ ...btn(C.accent, "#1a1d27"), opacity: guardando ? 0.6 : 1 }}>{guardando ? "Guardando…" : "Guardar envío"}</button>
+            <button onClick={imprimir} style={{ ...btn(C.surface, C.accent), border: "1px solid " + C.accent }}>🖨 Imprimir etiquetas ({(envio.paquetes || []).length})</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onImprimir, onGuardarSalarios, kpiCfg, onGuardarKpiCfg }){
   // Definición vigente (con objetivos editados). Con kpiCfg vacío = reglas de siempre.
   const defDe = (cl) => bonosDefEfectiva(cl, kpiCfg);
@@ -7185,6 +7406,63 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   const cerrarMesCaja = async (corte) => {
     await setDoc(doc(db, "cajaChicaCortes", corte.mes), corte, { merge: true });
   };
+
+  // ── Paquetería (colección `envios`) ───────────────────────────────────────
+  // Sin listener en vivo: se lee SOLO bajo demanda. El folio es un contador propio.
+  const obtenerSiguienteFolioEnvio = async () => {
+    const ref = doc(db, "config", "contadorEnvios");
+    const n = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const actual = snap.exists() ? (snap.data().valor || 0) : 0;
+      const sig = actual + 1;
+      tx.set(ref, { valor: sig }, { merge: true });
+      return sig;
+    });
+    return "E-" + String(n).padStart(4, "0");
+  };
+  // Búsqueda EXACTA por un solo campo (equality => índice automático, sin índices manuales).
+  // Trae a lo más 10 coincidencias; el costo típico es 1 lectura.
+  const buscarEnvios = async (campo, valor) => {
+    const v = String(valor == null ? "" : valor).trim();
+    if (!v) return [];
+    const validos = ["folio", "numeroInterno", "noPedidoCliente", "guia", "cliente"];
+    if (!validos.includes(campo)) return [];
+    const snap = await getDocs(query(collection(db, "envios"), where(campo, "==", v), limit(10)));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }));
+  };
+  const guardarEnvio = async (envio) => {
+    const e = { ...envio };
+    if (!e.id) e.id = "env" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    if (!e.folio) { e.folio = await obtenerSiguienteFolioEnvio(); e.creadoPor = usuario.email; e.creadoEl = new Date().toISOString(); }
+    e.actualizadoEl = new Date().toISOString();
+    await setDoc(doc(db, "envios", e.id), e, { merge: true });
+    return e;
+  };
+  // "Generar Envío" desde una orden: precarga la ficha y salta a Paquetería. Hace UNA
+  // lectura puntual para no duplicar: si la orden ya tiene envío, abre ese; si no, arma
+  // uno nuevo con los datos de la orden (número interno, cliente y contenido auto-armado).
+  const [envioPreparado, setEnvioPreparado] = useState(null);
+  const prepararEnvioDesdeOrden = async (orden) => {
+    if (!orden || !orden.id) { alert("Guarda la orden antes de generar su envío."); return; }
+    try {
+      const snap = await getDocs(query(collection(db, "envios"), where("ordenId", "==", orden.id), limit(1)));
+      if (!snap.empty) {
+        const ex = snap.docs[0];
+        setEnvioPreparado({ ...ex.data(), id: ex.id });
+      } else {
+        setEnvioPreparado({
+          folio: "", ordenId: orden.id,
+          numeroInterno: String(orden.numero || ""),
+          noPedidoCliente: "",
+          cliente: orden.cliente || "",
+          fletera: "", guia: "",
+          destinatario: { nombre: orden.cliente || "", direccion: "", contacto: "", telefono: "" },
+          paquetes: [{ contenido: resumenPrendasOrden(orden) }],
+        });
+      }
+      setVista("paqueteria");
+    } catch (e) { alert("No se pudo preparar el envío: " + (e.message || e)); }
+  };
   // Avisa por la campanita a los administradores cuando el efectivo de la caja cruza
   // por debajo del mínimo. Un doc marcador evita repetir el aviso hasta que se reponga.
   const avisarCajaBaja = async (efectivo, minimo, sugerido) => {
@@ -7886,6 +8164,22 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {(rol === "admin" || puedeEditarSeguimiento) && (
+            <ModTile onClick={() => setVista("paqueteria")} label="Paquetería"
+              stat={<span style={{color:C.muted}}>Etiquetas de envío</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gPaq" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#f0a35e"/><stop offset="1" stopColor="#d97706"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gPaq)"/>
+                <g stroke="#fff" strokeWidth="3.4" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <path d="M44 24 L64 34 L64 56 L44 66 L24 56 L24 34 Z"/>
+                  <path d="M24 34 L44 44 L64 34"/>
+                  <path d="M44 44 L44 66"/>
+                  <path d="M34 29 L54 39"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
             {rol === "admin" && (
             <ModTile onClick={() => setVista("pagos")} label="Pago bordadores"
               stat={<span style={{color:C.muted}}>{(() => { const sp = logosCatalogo.filter(l => l.precio===null||l.precio===undefined||l.precio==="").length; return sp>0 ? sp+" sin precio" : "Liquidación mensual"; })()}</span>}>
@@ -8143,6 +8437,19 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "paqueteria" && (rol === "admin" || rol === "seguimiento") && (
+        <div style={{padding:"20px 16px"}}>
+          <button onClick={() => setVista("home")} style={{border:"none", background:"transparent", color:C.accent, fontSize:14, cursor:"pointer", marginBottom:12, fontFamily:"inherit"}}>← Volver</button>
+          <Paqueteria
+            rol={rol}
+            onBuscar={buscarEnvios}
+            onGuardar={guardarEnvio}
+            onImprimir={imprimirBono}
+            envioInicial={envioPreparado}
+            onConsumidoInicial={() => setEnvioPreparado(null)} />
+        </div>
+      )}
+
       {vista === "bonos" && puedeEditarSeguimiento && (
         <BonosModule
           bonos={bonos}
@@ -8191,6 +8498,7 @@ const cancelar = async (id) => {
           onAgregarBordador={agregarBordador}
           catalogoLogos={logosCatalogo}
           usuariosRoles={rolesActivos}
+          onGenerarEnvio={(rol === "admin" || rol === "seguimiento") ? prepararEnvioDesdeOrden : null}
         />
       )}
 

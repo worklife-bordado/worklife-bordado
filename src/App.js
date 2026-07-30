@@ -5066,7 +5066,7 @@ function buildEtiquetasEnvioHtml(envio) {
   return `<!doctype html><html><head><meta charset="utf-8"><style>${ETIQUETA_PDF_CSS}</style></head><body>${etiquetas}</body></html>`;
 }
 
-function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, envioInicial, onConsumidoInicial }) {
+function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, onUltimos, envioInicial, onConsumidoInicial }) {
   const [campo, setCampo] = useState("folio");
   const [valor, setValor] = useState("");
   const [resultados, setResultados] = useState(null); // null = aún sin buscar
@@ -5074,6 +5074,13 @@ function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, envioInicial, onCons
   const [envio, setEnvio] = useState(null);            // envío abierto en edición
   const [guardando, setGuardando] = useState(false);
   const [msg, setMsg] = useState("");
+  const [recientes, setRecientes] = useState(null);    // últimos 5; null = cargando
+
+  const cargarRecientes = async () => {
+    if (!onUltimos) return;
+    try { setRecientes(await onUltimos()); } catch (e) { setRecientes([]); }
+  };
+  useEffect(() => { cargarRecientes(); }, []); // 5 lecturas al entrar (una sola vez)
 
   // Envío precargado desde una orden ("Generar Envío"): abre la ficha directo.
   useEffect(() => {
@@ -5121,7 +5128,7 @@ function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, envioInicial, onCons
     if (!(d.nombre || "").trim() && !(envio.cliente || "").trim()) { alert("Captura al menos el nombre del destinatario o del cliente."); return; }
     if (!(envio.paquetes || []).length) { alert("Agrega al menos un paquete."); return; }
     setGuardando(true);
-    try { const g = await onGuardar(envio); setEnvio(g); setMsg("✓ Envío guardado: " + g.folio); setTimeout(() => setMsg(""), 3500); }
+    try { const g = await onGuardar(envio); setEnvio(g); setMsg("✓ Envío guardado: " + g.folio); setTimeout(() => setMsg(""), 3500); cargarRecientes(); }
     catch (e) { alert("No se pudo guardar: " + (e.message || e)); }
     setGuardando(false);
   };
@@ -5145,12 +5152,32 @@ function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, envioInicial, onCons
           <select value={campo} onChange={e => setCampo(e.target.value)} aria-label="Campo de búsqueda" style={{ ...inputBase, flex: "0 0 auto" }}>
             {campos.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
-          <input value={valor} onChange={e => setValor(e.target.value)} onKeyDown={e => { if (e.key === "Enter") buscar(); }}
+          <input value={valor} onChange={e => { setValor(e.target.value); if (!e.target.value.trim()) setResultados(null); }} onKeyDown={e => { if (e.key === "Enter") buscar(); }}
             aria-label="Valor a buscar" placeholder="Escribe el valor exacto…" style={{ ...inputBase, flex: "1 1 160px", minWidth: 0 }} />
           <button onClick={buscar} disabled={buscando} style={{ ...btn(C.surface, C.accent), border: "1px solid " + C.accent, opacity: buscando ? 0.6 : 1 }}>{buscando ? "Buscando…" : "Buscar"}</button>
         </div>
         {msg && <div style={{ color: msg.startsWith("✓") ? "#4caf7d" : C.danger, fontSize: 13, fontWeight: 700, marginTop: 10 }}>{msg}</div>}
       </div>
+
+      {/* Últimos 5 envíos (solo en el estado inicial: sin buscar ni editar) */}
+      {!envio && !resultados && (
+        <div style={card}>
+          <div style={{ background: C.surface, border: "1px solid " + C.border, borderRadius: 9, padding: "8px 12px", marginBottom: 12, fontSize: 12.5, color: C.muted }}>
+            ⚠️ Mostrando solo los <b style={{ color: C.text }}>últimos 5 envíos</b>. Usa el buscador de arriba para encontrar cualquier otro.
+          </div>
+          {recientes === null && <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: "10px 0" }}>Cargando…</div>}
+          {recientes && !recientes.length && <div style={{ color: C.muted, fontSize: 14, textAlign: "center", padding: "10px 0" }}>Aún no hay envíos registrados.</div>}
+          {recientes && recientes.map(r => (
+            <div key={r.id} onClick={() => setEnvio(r)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderTop: "1px solid " + C.border, cursor: "pointer" }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: C.text }}>{r.folio} · {r.cliente || r.destinatario?.nombre || "—"}</div>
+                <div style={{ fontSize: 11.5, color: C.muted }}>Interno {r.numeroInterno || "—"} · Pedido cliente {r.noPedidoCliente || "—"} · Guía {r.guia || "—"} · {(r.paquetes || []).length} paq.</div>
+              </div>
+              <span style={{ color: C.accent, fontSize: 13, fontWeight: 800 }}>Abrir →</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Resultados de búsqueda */}
       {resultados && !envio && (
@@ -7468,6 +7495,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     await setDoc(doc(db, "envios", e.id), e, { merge: true });
     return e;
   };
+  // Los 5 envíos más recientes (por fecha de creación). orderBy + limit usa índice
+  // automático de campo único: 5 lecturas por entrada, sin índice manual.
+  const ultimosEnvios = async () => {
+    const snap = await getDocs(query(collection(db, "envios"), orderBy("creadoEl", "desc"), limit(5)));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id }));
+  };
   // "Generar Envío" desde una orden: precarga la ficha y salta a Paquetería. Hace UNA
   // lectura puntual para no duplicar: si la orden ya tiene envío, abre ese; si no, arma
   // uno nuevo con los datos de la orden (número interno, cliente y contenido auto-armado).
@@ -8476,6 +8509,7 @@ const cancelar = async (id) => {
             onBuscar={buscarEnvios}
             onGuardar={guardarEnvio}
             onImprimir={imprimirBono}
+            onUltimos={ultimosEnvios}
             envioInicial={envioPreparado}
             onConsumidoInicial={() => setEnvioPreparado(null)} />
         </div>

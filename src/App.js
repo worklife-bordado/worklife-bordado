@@ -6891,6 +6891,15 @@ function AppInner() {
     } catch (e) {}
   }, []);
   const [notifs, setNotifs] = useState([ ]);
+  // Suspende las escuchas PESADAS cuando la pestaña está en segundo plano (nadie la está
+  // viendo: minimizada, otra pestaña, o equipo en reposo/noche). Corta el consumo de
+  // lecturas ocioso. Se reactivan solas al volver a ver la app. La campana NO se suspende.
+  const [appVisible, setAppVisible] = useState(typeof document === "undefined" ? true : document.visibilityState === "visible");
+  useEffect(() => {
+    const onVis = () => setAppVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
   const [semaforo, setSemaforo] = useState("verde");
@@ -6956,6 +6965,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   // cuando el rol resuelve, y solo se reconecta si el rol del propio usuario cambia.
   useEffect(() => {
     if (!usuario || !rol) return;
+    if (!appVisible) return;   // suspender en segundo plano
     const rolActual = rol;
     const esPriv = rolActual === "admin" || rolActual === "seguimiento";
     const qOrdenes = esPriv
@@ -7019,7 +7029,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       }
     });
     return () => unsub();
-  }, [usuario, rol]);
+  }, [usuario, rol, appVisible]);
 
   // ── Semáforo de carga de trabajo ──────────────────────────────────────────
   useEffect(() => {
@@ -7153,11 +7163,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   useEffect(() => {
     if (!usuario?.email) return;
     if (!(rol === "admin" || rol === "seguimiento")) return;
+    if (!appVisible) return;
     const unsub = onSnapshot(collection(db, "rutas"), snap => {
       setRutas(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     return unsub;
-  }, [usuario, rol]);
+  }, [usuario, rol, appVisible]);
   const guardarRuta = async (ruta) => {
     const id = String(ruta.id);
     // Regla de negocio: un chofer solo puede tener UNA ruta por día.
@@ -7274,11 +7285,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   useEffect(() => {
     if (!usuario?.email) return;
     if (!(rol === "admin" || rol === "seguimiento")) return;
+    if (!appVisible) return;
     const unsub = onSnapshot(collection(db, "remisiones"), snap => {
       setRemisiones(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     return unsub;
-  }, [usuario, rol]);
+  }, [usuario, rol, appVisible]);
   const obtenerSiguienteNumeroRemision = async () => {
     const ref = doc(db, "config", "contadorRemisiones");
     const nuevo = await runTransaction(db, async (tx) => {
@@ -7305,11 +7317,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   useEffect(() => {
     if (!usuario?.email) return;
     if (!(rol === "admin" || rol === "seguimiento")) return;
+    if (!appVisible) return;
     const unsub = onSnapshot(collection(db, "bonos"), snap => {
       setBonos(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     return unsub;
-  }, [usuario, rol]);
+  }, [usuario, rol, appVisible]);
   useEffect(() => {
     // Sueldos y topes de bono: SOLO administración los descarga.
     if (!usuario?.email || rol !== "admin") { setSalariosBonos(null); return; }
@@ -7668,11 +7681,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   // Catálogo de logos (para autocompletado en la orden y precios en Pago a bordadores)
   useEffect(() => {
     if (!usuario?.email) return;
+    if (!appVisible) return;
     const unsub = onSnapshot(collection(db, "logos"), snap => {
       setLogosCatalogo(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     return unsub;
-  }, [usuario]);
+  }, [usuario, appVisible]);
   const logoSlug = (nombre) => (nombre||"").trim().toLowerCase().replace(/[^a-z0-9áéíóúüñ]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120);
   // Da de alta (sin precio) los logos nuevos que aparezcan en una orden, sin tocar precios existentes
   const upsertLogosDeOrden = async (orden) => {

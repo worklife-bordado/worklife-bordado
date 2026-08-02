@@ -6848,6 +6848,410 @@ function RutaMovil(){
 }
 
 export default function App(){ return (<ErrorBoundary><AppInner /></ErrorBoundary>); }
+// ── Módulo: Clasificación de clientes (A/B/C) con histórico ───────────────
+// ── Criterios y pesos (los que ya aprobaste) ───────────────────────────────
+const CLASIF_CFG = {
+  actual: {
+    label: "Cliente que ya te compra — el margen manda",
+    max: 14, aMin: 12, bMin: 7,
+    crits: [
+      { q: "Margen y recurrencia",
+        gate: "El margen pesa más que el volumen: sin buen margen no se llega a A.",
+        opts: [
+          { t: "Buen margen y compra recurrente", p: 5 },
+          { t: "Margen apretado pero recurrente, o buen margen esporádico", p: 3 },
+          { t: "Margen malo y compra suelta", p: 1 },
+        ] },
+      { q: "Volumen anual (prendas compradas)",
+        opts: [
+          { t: "Grande — 500 o más prendas", p: 4 },
+          { t: "Mayoreo — 100 a 499 prendas", p: 3 },
+          { t: "Medio mayoreo — 51 a 99 prendas", p: 2 },
+          { t: "Menudeo / chico — hasta 50 prendas", p: 1 },
+        ] },
+      { q: "Puntualidad de pago",
+        gate: "Un cliente moroso no puede ser A, por mucho que compre.",
+        opts: [
+          { t: "Paga en tiempo o antes", p: 3 },
+          { t: "Se atrasa poco, dentro de tolerancia", p: 2 },
+          { t: "Moroso o problemático", p: 0 },
+        ] },
+      { q: "Potencial de crecimiento",
+        opts: [
+          { t: "Va a crecer — plantilla o proyectos en aumento", p: 2 },
+          { t: "Estable", p: 1 },
+          { t: "A la baja", p: 0 },
+        ] },
+    ],
+  },
+  prospecto: {
+    label: "Aún sin historial — mides encaje y potencial",
+    max: 12, aMin: 10, bMin: 6,
+    crits: [
+      { q: "Tamaño (prendas potenciales)",
+        opts: [
+          { t: "Grande — 500 o más prendas", p: 4 },
+          { t: "Mayoreo — 100 a 499 prendas", p: 3 },
+          { t: "Medio mayoreo — 51 a 99 prendas", p: 2 },
+          { t: "Menudeo / chico — hasta 50 prendas", p: 1 },
+        ] },
+      { q: "Encaje con tu perfil",
+        gate: "Un prospecto fuera de perfil no es A aunque sea grande.",
+        opts: [
+          { t: "Automotriz / industrial — tu zona de fuerza", p: 3 },
+          { t: "Adyacente — surtible pero no ideal", p: 2 },
+          { t: "Fuera de perfil", p: 0 },
+        ] },
+      { q: "Accesibilidad",
+        opts: [
+          { t: "Contacto directo / puerta abierta", p: 3 },
+          { t: "Referido o contacto indirecto", p: 2 },
+          { t: "En frío total", p: 1 },
+        ] },
+      { q: "Urgencia / timing",
+        opts: [
+          { t: "Necesidad activa ahora", p: 2 },
+          { t: "En los próximos meses", p: 1 },
+          { t: "\u201CAlgún día\u201D, sin urgencia", p: 0 },
+        ] },
+    ],
+  },
+};
+
+function clasifLetra(modo, total) {
+  const c = CLASIF_CFG[modo];
+  if (total >= c.aMin) return "A";
+  if (total >= c.bMin) return "B";
+  return "C";
+}
+const LETRA_COLOR = {
+  A: { bg: "#f5a623", fg: "#1a1200", desc: "Prioridad alta" },
+  B: { bg: "#5c8fe0", fg: "#ffffff", desc: "Prioridad media" },
+  C: { bg: "#8b90a7", fg: "#12141c", desc: "Prioridad baja" },
+};
+
+
+function Clasificacion({ usuario, rol, onBack }) {
+  const [sub, setSub]           = useState("clasificar"); // "clasificar" | "historial"
+  const [modo, setModo]         = useState("actual");
+  const [clientesDir, setClientesDir] = useState([]);
+  const [historial, setHistorial]     = useState([]);
+  const [clienteSel, setClienteSel]   = useState(null);   // {id, nombre} en modo actual
+  const [prospNombre, setProspNombre] = useState("");     // texto libre en modo prospecto
+  const [busca, setBusca]       = useState("");
+  const [resp, setResp]         = useState({});           // { indiceCriterio: puntos }
+  const [guardando, setGuardando] = useState(false);
+  const [msg, setMsg]           = useState("");
+  const [fLetra, setFLetra]     = useState("");           // filtros del historial
+  const [fTexto, setFTexto]     = useState("");
+  const [dirCargado, setDirCargado]   = useState(false);  // el directorio se lee 1 sola vez
+  const [dirCargando, setDirCargando] = useState(false);
+  const [histCargado, setHistCargado]   = useState(false);// el historial se lee 1 sola vez
+  const [histCargando, setHistCargando] = useState(false);
+
+  // AHORRO DE CUOTA: nada se lee al abrir. El directorio se carga UNA vez y solo
+  // cuando de verdad se necesita (modo "cliente actual"). getDocs = lectura puntual,
+  // no un listener en vivo que se queda leyendo.
+  const cargarDirectorio = async (forzar) => {
+    if (dirCargando || (dirCargado && !forzar)) return;
+    setDirCargando(true);
+    try {
+      const snap = await getDocs(collection(db, "directorioClientes"));
+      setClientesDir(snap.docs.map(d => ({ ...d.data(), id: d.id }))
+        .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")));
+      setDirCargado(true);
+    } catch (e) { setMsg("No se pudo cargar el directorio: " + (e.message || e)); }
+    setDirCargando(false);
+  };
+  useEffect(() => {
+    if (sub === "clasificar" && modo === "actual" && !dirCargado) cargarDirectorio(false);
+  }, [sub, modo, dirCargado]); // eslint-disable-line
+
+  // El historial se carga UNA vez, solo al abrir su pestaña. Botón ↻ para refrescar.
+  const cargarHistorial = async (forzar) => {
+    if (histCargando || (histCargado && !forzar)) return;
+    setHistCargando(true);
+    try {
+      const qh = query(collection(db, "clasificaciones"), orderBy("fechaISO", "desc"), limit(300));
+      const snap = await getDocs(qh);
+      setHistorial(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      setHistCargado(true);
+    } catch (e) { setMsg("No se pudo cargar el historial: " + (e.message || e)); }
+    setHistCargando(false);
+  };
+  useEffect(() => {
+    if (sub === "historial" && !histCargado) cargarHistorial(false);
+  }, [sub, histCargado]); // eslint-disable-line
+
+  const cfg = CLASIF_CFG[modo];
+  const contestadas = cfg.crits.filter((_, i) => resp[i] !== undefined).length;
+  const completo = contestadas === cfg.crits.length;
+  const total = cfg.crits.reduce((s, _, i) => s + (resp[i] || 0), 0);
+  const L = completo ? clasifLetra(modo, total) : null;
+  const nombreCliente = modo === "actual" ? (clienteSel?.nombre || "") : prospNombre.trim();
+  const puedeGuardar = completo && nombreCliente && !guardando;
+
+  const cambiarModo = (m) => {
+    setModo(m); setResp({}); setClienteSel(null); setProspNombre(""); setBusca(""); setMsg("");
+  };
+
+  const guardar = async () => {
+    if (!puedeGuardar) return;
+    setGuardando(true); setMsg("");
+    try {
+      const respuestas = cfg.crits.map((c, i) => ({
+        criterio: c.q,
+        texto: c.opts.find(o => o.p === resp[i])?.t ?? "",
+        puntos: resp[i],
+      }));
+      const ref = await addDoc(collection(db, "clasificaciones"), {
+        modo, cliente: nombreCliente,
+        clienteId: modo === "actual" ? (clienteSel?.id || null) : null,
+        letra: L, puntaje: total, max: cfg.max,
+        respuestas,
+        creadoPor: usuario.email,
+        creadoPorNombre: usuario.displayName || usuario.email,
+        fecha: serverTimestamp(),
+        fechaISO: new Date().toISOString(),
+      });
+      // Refleja la letra vigente en la ficha del cliente (solo actual y si existe).
+      if (modo === "actual" && clienteSel?.id) {
+        await setDoc(doc(db, "directorioClientes", clienteSel.id),
+          { clasificacion: L, clasificadoEl: new Date().toISOString(), clasificadoPor: usuario.email },
+          { merge: true });
+      }
+      // AHORRO DE CUOTA: metemos el registro a la pantalla con el dato que ya tenemos,
+      // sin volver a leer de Firebase. Igual actualizamos la letra vigente en memoria.
+      const nuevoLocal = {
+        id: ref.id, modo, cliente: nombreCliente,
+        clienteId: modo === "actual" ? (clienteSel?.id || null) : null,
+        letra: L, puntaje: total, max: cfg.max, respuestas,
+        creadoPor: usuario.email, creadoPorNombre: usuario.displayName || usuario.email,
+        fechaISO: new Date().toISOString(),
+      };
+      setHistorial(prev => [nuevoLocal, ...prev]);
+      if (modo === "actual" && clienteSel?.id) {
+        setClientesDir(prev => prev.map(c => c.id === clienteSel.id ? { ...c, clasificacion: L } : c));
+      }
+      setMsg(`✓ Guardado: ${nombreCliente} → ${L}`);
+      setResp({}); setClienteSel(null); setProspNombre(""); setBusca("");
+    } catch (e) {
+      setMsg("Error al guardar: " + (e.message || e));
+    }
+    setGuardando(false);
+  };
+
+  // Lista filtrada de clientes para el buscador (modo actual)
+  const clientesFiltrados = busca.trim()
+    ? clientesDir.filter(c => (c.nombre || "").toLowerCase().includes(busca.trim().toLowerCase())).slice(0, 8)
+    : [];
+
+  // Historial filtrado
+  const histFiltrado = historial.filter(h => {
+    if (fLetra && h.letra !== fLetra) return false;
+    if (fTexto) {
+      const q = fTexto.toLowerCase();
+      if (!((h.cliente || "").toLowerCase().includes(q) ||
+            (h.creadoPorNombre || "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
+  const S = {
+    wrap:  { maxWidth: 760, margin: "0 auto", padding: "0 16px 48px" },
+    tab:   (on) => ({ flex: 1, padding: "11px 8px", border: "none", borderRadius: 9,
+                      background: on ? C.accent : "transparent", color: on ? "#1a1200" : C.muted,
+                      fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }),
+    card:  { background: C.card, border: "1px solid " + C.border, borderRadius: 12, padding: 14, marginBottom: 12 },
+    q:     { fontWeight: 800, color: C.text, fontSize: 15, marginBottom: 10 },
+    opt:   (on) => ({ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 10px",
+                      borderRadius: 9, cursor: "pointer", marginBottom: 4,
+                      border: "1.5px solid " + (on ? C.accent : "transparent"),
+                      background: on ? C.accentGlow : "transparent" }),
+    dot:   (on) => ({ width: 18, height: 18, borderRadius: "50%", flex: "none", marginTop: 1,
+                      border: "2px solid " + (on ? C.accent : C.muted),
+                      background: on ? C.accent : "transparent" }),
+    gate:  { fontSize: 12, color: C.accent, background: C.accentGlow, borderLeft: "3px solid " + C.accent,
+             padding: "7px 10px", borderRadius: "0 6px 6px 0", margin: "0 0 10px" },
+  };
+
+  const badge = (l, size = 30) => {
+    const c = LETRA_COLOR[l] || LETRA_COLOR.C;
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: size, height: size, borderRadius: 8, background: c.bg, color: c.fg,
+        fontWeight: 800, fontSize: size * 0.5, flex: "none" }}>{l}</span>
+    );
+  };
+
+  return (
+    <div style={S.wrap}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0 16px" }}>
+        <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
+        <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>Clasificación de clientes</div>
+      </div>
+
+      {/* Sub-pestañas */}
+      <div style={{ display: "flex", gap: 4, background: C.surface, border: "1px solid " + C.border,
+        borderRadius: 12, padding: 4, marginBottom: 18 }}>
+        <button style={S.tab(sub === "clasificar")} onClick={() => setSub("clasificar")}>Clasificar</button>
+        <button style={S.tab(sub === "historial")} onClick={() => setSub("historial")}>
+          Historial
+        </button>
+      </div>
+
+      {/* ─────────────── CLASIFICAR ─────────────── */}
+      {sub === "clasificar" && (<>
+        {/* selector de modo */}
+        <div style={{ display: "flex", gap: 4, background: C.surface, border: "1px solid " + C.border,
+          borderRadius: 12, padding: 4, marginBottom: 16 }}>
+          <button style={S.tab(modo === "actual")}   onClick={() => cambiarModo("actual")}>Cliente actual</button>
+          <button style={S.tab(modo === "prospecto")} onClick={() => cambiarModo("prospecto")}>Prospecto</button>
+        </div>
+
+        {/* elegir cliente */}
+        <div style={S.card}>
+          {modo === "actual" ? (
+            clienteSel ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ color: C.text, fontWeight: 700 }}>{clienteSel.nombre}
+                  {clienteSel.clasificacion &&
+                    <span style={{ color: C.muted, fontWeight: 600, fontSize: 13 }}> · vigente: {clienteSel.clasificacion}</span>}
+                </div>
+                <Btn variant="ghost" size="sm" onClick={() => { setClienteSel(null); setBusca(""); }}>Cambiar</Btn>
+              </div>
+            ) : (<>
+              <div style={S.q}>¿Qué cliente clasificas?</div>
+              <input value={busca} onChange={e => setBusca(e.target.value)} placeholder={dirCargando ? "Cargando directorio…" : "Escribe para buscar…"}
+                style={{ width: "100%", background: C.surface, border: "1px solid " + C.border, borderRadius: 8,
+                  color: C.text, padding: "11px 12px", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+              {clientesFiltrados.map(c => (
+                <div key={c.id} onClick={() => { setClienteSel(c); setBusca(""); }}
+                  style={{ padding: "10px 12px", marginTop: 6, borderRadius: 8, cursor: "pointer",
+                    background: C.surface, border: "1px solid " + C.border, color: C.text, fontSize: 14 }}>
+                  {c.nombre}{c.clasificacion && <span style={{ color: C.muted }}> · {c.clasificacion}</span>}
+                </div>
+              ))}
+              {busca.trim() && clientesFiltrados.length === 0 &&
+                <div style={{ color: C.muted, fontSize: 13, marginTop: 8 }}>
+                  No aparece en el directorio. Si es cliente nuevo, clasifícalo como Prospecto.
+                </div>}
+            </>)
+          ) : (<>
+            <div style={S.q}>Nombre del prospecto</div>
+            <input value={prospNombre} onChange={e => setProspNombre(e.target.value)} placeholder="Ej. Planta XYZ, S.A."
+              style={{ width: "100%", background: C.surface, border: "1px solid " + C.border, borderRadius: 8,
+                color: C.text, padding: "11px 12px", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+          </>)}
+        </div>
+
+        {/* criterios */}
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".1em",
+          color: C.info, fontWeight: 700, margin: "4px 2px 10px" }}>{cfg.label}</div>
+
+        {cfg.crits.map((c, ci) => (
+          <div key={ci}>
+            <div style={S.card}>
+              <div style={S.q}>
+                <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  width: 22, height: 22, background: C.accent, color: "#1a1200", borderRadius: 6,
+                  fontSize: 12, marginRight: 8, verticalAlign: 1 }}>{ci + 1}</span>{c.q}
+              </div>
+              {c.opts.map((o, oi) => {
+                const on = resp[ci] === o.p;
+                return (
+                  <div key={oi} style={S.opt(on)} onClick={() => setResp(p => ({ ...p, [ci]: o.p }))}>
+                    <span style={S.dot(on)} />
+                    <span style={{ color: C.text, fontSize: 14 }}>{o.t}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {c.gate && <div style={S.gate}>{c.gate}</div>}
+          </div>
+        ))}
+
+        {/* veredicto */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, background: C.card,
+          border: "1px solid " + C.border, borderRadius: 14, padding: 16, marginTop: 6 }}>
+          {L ? badge(L, 52) : (
+            <span style={{ width: 52, height: 52, borderRadius: 10, background: C.surface,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              color: C.muted, fontSize: 26, fontWeight: 800, flex: "none" }}>—</span>
+          )}
+          <div style={{ flex: 1 }}>
+            <div style={{ color: C.text, fontWeight: 800, fontSize: 15 }}>
+              {L ? LETRA_COLOR[L].desc : `Faltan ${cfg.crits.length - contestadas} criterios`}
+            </div>
+            <div style={{ color: C.muted, fontSize: 13, marginTop: 2 }}>
+              {completo ? `Puntaje: ${total} de ${cfg.max}` : "Marca una opción por criterio."}
+            </div>
+          </div>
+        </div>
+
+        <button onClick={guardar} disabled={!puedeGuardar}
+          style={{ width: "100%", marginTop: 14, padding: 14, border: "none", borderRadius: 12,
+            background: puedeGuardar ? "linear-gradient(135deg,#fbb040,#f57c00)" : C.surface,
+            color: puedeGuardar ? "#fff" : C.muted, fontWeight: 800, fontSize: 16,
+            cursor: puedeGuardar ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+          {guardando ? "Guardando…" : "Guardar clasificación"}
+        </button>
+        {msg && <div style={{ textAlign: "center", marginTop: 10, color: msg[0] === "✓" ? C.success : C.danger,
+          fontWeight: 700, fontSize: 14 }}>{msg}</div>}
+      </>)}
+
+      {/* ─────────────── HISTORIAL ─────────────── */}
+      {sub === "historial" && (<>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          <input value={fTexto} onChange={e => setFTexto(e.target.value)} placeholder="Buscar cliente o vendedor…"
+            style={{ flex: 1, minWidth: 180, background: C.surface, border: "1px solid " + C.border,
+              borderRadius: 8, color: C.text, padding: "10px 12px", fontSize: 14, outline: "none" }} />
+          {["", "A", "B", "C"].map(l => (
+            <button key={l || "todas"} onClick={() => setFLetra(l)}
+              style={{ padding: "10px 14px", borderRadius: 8, fontWeight: 800, fontSize: 13, cursor: "pointer",
+                border: "1px solid " + C.border, fontFamily: "inherit",
+                background: fLetra === l ? C.accent : C.surface, color: fLetra === l ? "#1a1200" : C.muted }}>
+              {l || "Todas"}
+            </button>
+          ))}
+          <button onClick={() => cargarHistorial(true)} disabled={histCargando} title="Volver a leer de Firebase"
+            style={{ padding: "10px 14px", borderRadius: 8, fontWeight: 800, fontSize: 13,
+              cursor: histCargando ? "wait" : "pointer", border: "1px solid " + C.border, fontFamily: "inherit",
+              background: C.surface, color: C.muted }}>
+            {histCargando ? "…" : "↻"}
+          </button>
+        </div>
+
+        {histCargando && histFiltrado.length === 0 &&
+          <div style={{ color: C.muted, textAlign: "center", padding: "30px 0" }}>Cargando…</div>}
+        {!histCargando && histFiltrado.length === 0 &&
+          <div style={{ color: C.muted, textAlign: "center", padding: "30px 0" }}>Sin clasificaciones aún.</div>}
+
+        {histFiltrado.map(h => (
+          <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 12, background: C.card,
+            border: "1px solid " + C.border, borderRadius: 12, padding: "12px 14px", marginBottom: 8 }}>
+            {badge(h.letra, 34)}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: C.text, fontWeight: 700, fontSize: 15 }}>
+                {h.cliente}
+                <span style={{ color: C.muted, fontWeight: 600, fontSize: 12 }}>
+                  {" "}· {h.modo === "actual" ? "Cliente" : "Prospecto"} · {h.puntaje}/{h.max}
+                </span>
+              </div>
+              <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>
+                {(h.creadoPorNombre || h.creadoPor || "").split("@")[0]}
+                {h.fechaISO ? " · " + new Date(h.fechaISO).toLocaleDateString("es-MX",
+                  { day: "2-digit", month: "short", year: "numeric" }) : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+      </>)}
+    </div>
+  );
+}
+
+
 function AppInner() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
@@ -8272,6 +8676,21 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {(rol === "admin" || rol === "ventas") && (
+            <ModTile onClick={() => setVista("clasificacion")} label="Clasificación"
+              stat={<span style={{color:C.muted}}>Clientes A / B / C</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gClasif" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#fbb040"/><stop offset="1" stopColor="#f57c00"/>
+                </linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gClasif)"/>
+                <rect x="22" y="46" width="12" height="20" rx="2" fill="#fff"/>
+                <rect x="38" y="34" width="12" height="32" rx="2" fill="#fff" fillOpacity="0.85"/>
+                <rect x="54" y="24" width="12" height="42" rx="2" fill="#fff" fillOpacity="0.7"/>
+              </svg>
+            </ModTile>
+            )}
+
             {rol === "admin" && (
             <ModTile onClick={() => setVista("checador")} label="Checador"
               stat={<span style={{color:C.muted}}>{checadorRoster.length>0 ? checadorRoster.length+" empleado"+(checadorRoster.length===1?"":"s") : "Configurar"}</span>}>
@@ -8536,6 +8955,14 @@ const cancelar = async (id) => {
           onGuardarRoster={guardarChecadorRoster}
           publicUrl={window.location.origin + "/?checador=1"}
           usuario={usuario}
+        />
+      )}
+
+      {vista === "clasificacion" && (rol === "admin" || rol === "ventas") && (
+        <Clasificacion
+          usuario={usuario}
+          rol={rol}
+          onBack={() => setVista("home")}
         />
       )}
 

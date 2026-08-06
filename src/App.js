@@ -961,7 +961,76 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
 }
 
 // ── Lista ─────────────────────────────────────────────────────────────────────
-function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
+// ── Semáforo automático de carga de trabajo ───────────────────────────────
+// Escala: color -> días HÁBILES de entrega prometidos (del más rápido al más lento).
+const SEMAFORO_ESCALA = [
+  { id: "verde",    dias: 10 },
+  { id: "amarillo", dias: 15 },
+  { id: "naranja",  dias: 20 },
+  { id: "rojo",     dias: 25 },
+  { id: "guinda",   dias: 30 },
+];
+const CAP_LV = 300;   // capacidad lunes a viernes (piezas/día)
+const CAP_SAB = 150;  // capacidad sábado (medio día)
+// Capacidad de bordado en los próximos nDias días HÁBILES desde `inicio`:
+// L-V = 300, Sábado = 150, Domingo = 0 (no cuenta como día hábil).
+function capacidadHabil(inicio, nDias) {
+  let total = 0, contados = 0;
+  const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
+  while (contados < nDias) {
+    const dow = d.getDay(); // 0=Dom, 6=Sáb
+    if (dow !== 0) { total += (dow === 6) ? CAP_SAB : CAP_LV; contados++; }
+    d.setDate(d.getDate() + 1);
+  }
+  return total;
+}
+// Piezas de una orden: se usa la función canónica piezasOrden(o) definida más abajo
+// (misma que emplean bonos/KPIs), para contar igual que el resto del sistema.
+// ¿La orden está comprometida a producción? liberada===true cuenta; ===false no;
+// órdenes viejas sin el flag cuentan si ya salieron de "nueva".
+function comprometidaProduccion(o) {
+  if (o.liberada === true) return true;
+  if (o.liberada === false) return false;
+  return o.etapa !== "nueva";
+}
+// Cola comprometida = piezas de las órdenes en NUEVA o EN BORDADO ya liberadas a producción.
+function colaProduccion(ordenes) {
+  return (ordenes || [])
+    .filter(o => (o.etapa === "nueva" || o.etapa === "bordado") && comprometidaProduccion(o))
+    .reduce((s, o) => s + piezasOrden(o), 0);
+}
+// Semáforo sugerido: el color más rápido cuya capacidad alcance a cubrir la cola.
+// Si ni el más lento (guinda) alcanza, devuelve guinda marcado como saturado.
+function semaforoAuto(cola, hoy) {
+  const inicio = hoy || new Date();
+  for (const c of SEMAFORO_ESCALA) {
+    const cap = capacidadHabil(inicio, c.dias);
+    if (cap >= cola) return { id: c.id, dias: c.dias, cola, capacidad: cap, saturado: false };
+  }
+  const ult = SEMAFORO_ESCALA[SEMAFORO_ESCALA.length - 1];
+  return { id: ult.id, dias: ult.dias, cola, capacidad: capacidadHabil(inicio, ult.dias), saturado: true };
+}
+
+// Suma n días HÁBILES (lun-sáb, salta domingo) a una fecha; devuelve la fecha resultante.
+function sumarDiasHabiles(fecha, n) {
+  const d = new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate());
+  let c = 0;
+  while (c < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0) c++; }
+  return d;
+}
+function isoLocalFecha(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function diasSemaforo(semaforoId) {
+  const esc = SEMAFORO_ESCALA.find(c => c.id === semaforoId) || SEMAFORO_ESCALA[0];
+  return esc.dias;
+}
+// Fecha mínima de entrega realista según el semáforo actual (hoy + días hábiles del color).
+function fechaMinimaEntregaISO(semaforoId, hoy) {
+  return isoLocalFecha(sumarDiasHabiles(hoy || new Date(), diasSemaforo(semaforoId)));
+}
+
+function Semaforo({ semaforo, onSemaforo, puedeEditar, info }) {
   const SEMAFOROS = [
     { id:"verde",    label:"10 días",  sub:"Tiempo de entrega",  color:"#4caf7d", bg:"#4caf7d22" },
     { id:"amarillo", label:"15 días",  sub:"Tiempo de entrega",  color:"#f5c623", bg:"#f5c62322" },
@@ -970,13 +1039,18 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
     { id:"guinda",   label:"30 días",  sub:"Tiempo de entrega",  color:"#7b0d1e", bg:"#7b0d1e22" },
   ];
   const actual = SEMAFOROS.find(s => s.id === semaforo) || SEMAFOROS[0];
+  const sub = (info && info.auto === false)
+    ? "✋ Ajustado manualmente"
+    : ((info && info.cola != null)
+        ? "🔄 Automático · cola " + info.cola + " pzas · capacidad " + info.capacidad + " en " + info.dias + " días hábiles"
+        : "Tiempo de entrega");
   return (
     <div style={{background:actual.bg,border:"2px solid "+actual.color,borderRadius:12,padding:"14px 20px",marginBottom:20}}>
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{width:20,height:20,borderRadius:"50%",background:actual.color,flexShrink:0}}></div>
         <div style={{flex:1}}>
-          <div style={{fontSize:15,fontWeight:800,color:actual.color}}>Tiempo de entrega estimado: {actual.label} naturales</div>
-          <div style={{fontSize:12,color:"#888"}}>{actual.sub}</div>
+          <div style={{fontSize:15,fontWeight:800,color:actual.color}}>Tiempo de entrega estimado: {actual.label} hábiles</div>
+          <div style={{fontSize:12,color:"#888"}}>{sub}</div>
         </div>
         {puedeEditar && (
           <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -989,20 +1063,15 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar }) {
           </div>
         )}
       </div>
+      {info && info.saturado && (
+        <div style={{marginTop:10,background:"#7b0d1e22",border:"1px solid #7b0d1e",borderRadius:8,padding:"8px 12px",fontSize:12.5,fontWeight:700,color:"#e5484d"}}>
+          ⚠️ Taller saturado: la carga comprometida ({info.cola} pzas) excede lo que el bordador puede en 30 días hábiles. Considera reprogramar o avisar al cliente.
+        </div>
+      )}
     </div>
   );
 }
-function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filtro, setFiltro, soloMias, setSoloMias, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, onSemaforo, puedeEditarSeguimiento, onBack }) {
-  const [recordatorioSemaforo, setRecordatorioSemaforo] = useState(false);
-
-  useEffect(() => {
-    if (rol !== "seguimiento") return;
-    const hoy = new Date();
-    if (hoy.getDay() === 1) {
-      setRecordatorioSemaforo(true);
-    }
-  }, [rol]);
-
+function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filtro, setFiltro, soloMias, setSoloMias, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, semaforoInfo, onSemaforo, puedeEditarSeguimiento, onBack }) {
   const filtradas = ordenes.filter(o => {
     if (soloMias && rol === "admin" && o.creadoPor !== usuario.email) return false;
     const q = search.toLowerCase().trim();
@@ -1125,26 +1194,7 @@ function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filt
           );
         })()}
       </div>
-      <Semaforo semaforo={semaforo} onSemaforo={onSemaforo} puedeEditar={puedeEditarSeguimiento} />
-{recordatorioSemaforo && (
-  <div style={{
-    background: "#f5c62322",
-    border: "2px solid #f5c623",
-    borderRadius: 10,
-    padding: "12px 16px",
-    marginBottom: 14,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12
-  }}>
-    <div style={{fontSize: 13, color: C.text}}>
-      🗓️ <strong>Recordatorio:</strong> Es lunes — recuerda actualizar el semáforo de carga de trabajo.
-    </div>
-    <div onClick={() => setRecordatorioSemaforo(false)}
-      style={{cursor: "pointer", color: C.muted, fontSize: 18, lineHeight: 1}}>✕</div>
-  </div>
-)}
+      <Semaforo semaforo={semaforo} info={semaforoInfo} onSemaforo={onSemaforo} puedeEditar={puedeEditarSeguimiento} />
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <select value={campo} onChange={e => setCampo(e.target.value)}
           style={{background:C.card,border:"1px solid "+C.border,borderRadius:8,color:C.muted,padding:"10px 12px",fontSize:12,outline:"none",cursor:"pointer",flexShrink:0}}>
@@ -1440,7 +1490,7 @@ function DropdownBordador({ value, opciones, onSelect, onAgregar, disabled, pued
   );
 }
 
-function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [], usuariosRoles = {}, onGenerarEnvio }) {
+function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [], usuariosRoles = {}, onGenerarEnvio, onLiberar, semaforo }) {
   const [pdfHtml, setPdfHtml] = useState(null);
   const [form, setForm] = useState(() => {
   const o = JSON.parse(JSON.stringify(orden));
@@ -1627,12 +1677,22 @@ if (id === "entregada" && form.etapa === "bordado") {
     {id:"pos",l:"Posiciones"},{id:"prendas",l:"Prendas"},{id:"seg",l:"Seguimiento"},
     {id:"chat",l:"💬 Chat"},{id:"historial",l:"Historial"},
   ];
+  // Guardarraíl de fecha: fecha mínima realista = hoy + días hábiles del semáforo actual.
+  const diasEntregaTaller = diasSemaforo(semaforo || "verde");
+  const fechaMinEntregaISO = fechaMinimaEntregaISO(semaforo || "verde");
+  const fechaMuyPronto = !!(form.fechaRequerida && form.fechaRequerida < fechaMinEntregaISO);
+  const fmtFechaMin = (() => { const p = fechaMinEntregaISO.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; })();
+  const fmtFechaReq = () => { if (!form.fechaRequerida) return ""; const p = form.fechaRequerida.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; };
 const validarYGuardar = async (cb) => {
     if (!form.fechaRequerida || !form.noCotizacion) {
       alert("Por favor llena los campos obligatorios:\n" + 
         (!form.fechaRequerida ? "• Fecha Requerida\n" : "") +
         (!form.noCotizacion ? "• No. Cotización\n" : ""));
       return;
+    }
+    // Aviso (no bloqueante) si la fecha prometida es antes de lo que el taller puede hoy.
+    if (fechaMuyPronto) {
+      if (!window.confirm("⚠️ La fecha requerida que pusiste (" + fmtFechaReq() + ") es ANTES del tiempo de entrega actual del taller.\n\nEl semáforo está en " + diasEntregaTaller + " días hábiles, así que la fecha mínima realista es " + fmtFechaMin + ".\n\n¿Guardar de todos modos?")) return;
     }
     try {
       await cb();
@@ -1729,7 +1789,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         ) : (
           <div style={{background:C.accentGlow,border:"1px solid "+C.accent,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:13,color:C.accent,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
             <span>⏳ <b>Pendiente de liberar</b> — Seguimiento NO ve esta orden todavía. Cuando esté completa y autorizada por el cliente, márcala lista.</span>
-            <Btn onClick={async () => { const f = { ...form, liberada:true, fechaLiberada: new Date().toISOString(), historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberada para producción"}] }; setForm(f); await onSave(f); }} size="sm">✅ Marcar lista para trabajar</Btn>
+            <Btn onClick={async () => { if (fechaMuyPronto && !window.confirm("⚠️ Esta orden promete entrega el " + fmtFechaReq() + ", ANTES de lo que el taller puede hoy (semáforo en " + diasEntregaTaller + " días hábiles; mínimo " + fmtFechaMin + ").\n\nAl liberarla entra a producción con esa fecha. ¿Liberar de todos modos?")) return; const f = { ...form, liberada:true, fechaLiberada: new Date().toISOString(), historial:[...(form.historial||[]),{etapa:form.etapa,fecha:new Date().toISOString(),nota:"Liberada para producción"}] }; setForm(f); await onSave(f); if (onLiberar) await onLiberar(f); }} size="sm">✅ Marcar lista para trabajar</Btn>
           </div>
         )
       )}
@@ -1767,6 +1827,10 @@ await setDoc(doc(db, "solicitudesFirma", token), {
             </div>
           </div>
           <Inp label="No. Cotización" value={form.noCotizacion} onChange={v => upd("noCotizacion", v)}/>
+          <div style={{gridColumn:"1/-1", background: fechaMuyPronto ? "#e5484d18" : C.surface, border:"1px solid "+(fechaMuyPronto ? "#e5484d" : C.border), borderRadius:8, padding:"9px 12px", fontSize:12.5, color: fechaMuyPronto ? "#e5484d" : C.muted, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+            <span>⏱️ Entrega actual del taller: <b style={{color: fechaMuyPronto ? "#e5484d" : C.text}}>{diasEntregaTaller} días hábiles</b> · fecha mínima sugerida: <b style={{color: fechaMuyPronto ? "#e5484d" : C.text}}>{fmtFechaMin}</b>.</span>
+            {fechaMuyPronto && <span style={{fontWeight:800}}>⚠ La fecha que pusiste es antes de eso — el taller podría no cumplirla.</span>}
+          </div>
           <div style={{gridColumn:"1/-1"}}><Textarea label="Comentarios variaciones autorizadas del logotipo" value={form.comentariosLogo} onChange={v => upd("comentariosLogo", v)} rows={2}/></div>
           <div style={{gridColumn:"1/-1"}}><Textarea label="Comentarios generales" value={form.comentarios} onChange={v => upd("comentarios", v)} rows={3}/></div>
         </div>
@@ -6949,6 +7013,7 @@ function AppInner() {
   const [vista,    setVista]    = useState("home");
   const [activa,   setActiva]   = useState(null);
   const [semaforo, setSemaforo] = useState("verde");
+  const [semaforoInfo, setSemaforoInfo] = useState({ valor: "verde" });
   const importRef = useRef(null);
 
   // ── Auth listener ─────────────────────────────────────────────────────────
@@ -7080,10 +7145,30 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   // ── Semáforo de carga de trabajo ──────────────────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "config", "semaforo"), snap => {
-      if (snap.exists()) setSemaforo(snap.data().valor || "verde");
+      const d = snap.exists() ? snap.data() : {};
+      setSemaforo(d.valor || "verde");
+      setSemaforoInfo(d.valor ? d : { valor: "verde" });
     });
     return unsub;
   }, []);
+  // Recalcula el semáforo automáticamente (al liberar una orden a producción).
+  // Elige el color más rápido cuya capacidad hábil cubra la cola comprometida.
+  // `ordenActualizada` evita depender del snapshot async: se refleja de inmediato.
+  const recalcularSemaforo = async (ordenActualizada) => {
+    let lista = ordenes;
+    if (ordenActualizada && ordenActualizada.id) {
+      lista = ordenes.some(o => o.id === ordenActualizada.id)
+        ? ordenes.map(o => o.id === ordenActualizada.id ? ordenActualizada : o)
+        : [...ordenes, ordenActualizada];
+    }
+    const s = semaforoAuto(colaProduccion(lista), new Date());
+    try {
+      await setDoc(doc(db, "config", "semaforo"), {
+        valor: s.id, auto: true, cola: s.cola, dias: s.dias, capacidad: s.capacidad,
+        saturado: s.saturado, actualizado: new Date().toISOString(), actualizadoPor: usuario.email,
+      }, { merge: true });
+    } catch (e) {}
+  };
 
   // ── Lista de bordadores (config) ──────────────────────────────────────────
   useEffect(() => {
@@ -8087,7 +8172,7 @@ const cancelar = async (id) => {
         <div style={{maxWidth:1140,margin:"0 auto",padding:"0 16px 40px"}}>
           <div style={{display:"flex", gap:14, flexDirection: window.innerWidth < 760 ? "column" : "row", alignItems:"stretch"}}>
             <div style={{flex: window.innerWidth < 760 ? "none" : 1, minWidth:0}}>
-              <Semaforo semaforo={semaforo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }} puedeEditar={puedeEditarSeguimiento} />
+              <Semaforo semaforo={semaforo} info={semaforoInfo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val, auto: false, actualizado: new Date().toISOString() }); }} puedeEditar={puedeEditarSeguimiento} />
             </div>
             {puedeCrear && (
               <button onClick={crear} disabled={creando} style={{width: window.innerWidth < 760 ? "100%" : 260, flexShrink:0, border:"none",borderRadius:14,cursor:creando?"wait":"pointer",background: creando?"#7a5a1e":"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",marginBottom:20,fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit",opacity:creando?0.85:1}}>
@@ -8354,7 +8439,8 @@ const cancelar = async (id) => {
     onCalendario={() => setVista("calendario")}
     onDashboard={() => setVista("dashboard")}
     semaforo={semaforo}
-    onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val }); }}
+    semaforoInfo={semaforoInfo}
+    onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val, auto: false, actualizado: new Date().toISOString() }); }}
     puedeEditarSeguimiento={puedeEditarSeguimiento}
     onBack={() => setVista("home")}
   />
@@ -8566,6 +8652,8 @@ const cancelar = async (id) => {
           catalogoLogos={logosCatalogo}
           usuariosRoles={rolesActivos}
           onGenerarEnvio={(rol === "admin" || rol === "seguimiento") ? prepararEnvioDesdeOrden : null}
+          onLiberar={recalcularSemaforo}
+          semaforo={semaforo}
         />
       )}
 

@@ -970,16 +970,18 @@ const SEMAFORO_ESCALA = [
   { id: "rojo",     dias: 25 },
   { id: "guinda",   dias: 30 },
 ];
-const CAP_LV = 400;   // capacidad lunes a viernes (piezas/día)
-const CAP_SAB = 200;  // capacidad sábado (medio día)
+const CAP_LV = 400;   // capacidad lunes a viernes (piezas/día) — respaldo si no hay config
+const CAP_SAB = 200;  // capacidad sábado (medio día) — respaldo si no hay config
 // Capacidad de bordado en los próximos nDias días HÁBILES desde `inicio`:
-// L-V = 300, Sábado = 150, Domingo = 0 (no cuenta como día hábil).
-function capacidadHabil(inicio, nDias) {
+// L-V = capLV, Sábado = capSab, Domingo = 0. capLV/capSab configurables (respaldo a las constantes).
+function capacidadHabil(inicio, nDias, capLV, capSab) {
+  const cLV = (capLV != null) ? capLV : CAP_LV;
+  const cSab = (capSab != null) ? capSab : CAP_SAB;
   let total = 0, contados = 0;
   const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
   while (contados < nDias) {
     const dow = d.getDay(); // 0=Dom, 6=Sáb
-    if (dow !== 0) { total += (dow === 6) ? CAP_SAB : CAP_LV; contados++; }
+    if (dow !== 0) { total += (dow === 6) ? cSab : cLV; contados++; }
     d.setDate(d.getDate() + 1);
   }
   return total;
@@ -1000,15 +1002,16 @@ function colaProduccion(ordenes) {
     .reduce((s, o) => s + piezasOrden(o), 0);
 }
 // Semáforo sugerido: el color más rápido cuya capacidad alcance a cubrir la cola.
-// Si ni el más lento (guinda) alcanza, devuelve guinda marcado como saturado.
-function semaforoAuto(cola, hoy) {
+// `cfg` = { capLV, capSab } (opcional; respaldo a las constantes). Si ni guinda alcanza -> saturado.
+function semaforoAuto(cola, hoy, cfg) {
   const inicio = hoy || new Date();
+  const capLV = cfg && cfg.capLV, capSab = cfg && cfg.capSab;
   for (const c of SEMAFORO_ESCALA) {
-    const cap = capacidadHabil(inicio, c.dias);
+    const cap = capacidadHabil(inicio, c.dias, capLV, capSab);
     if (cap >= cola) return { id: c.id, dias: c.dias, cola, capacidad: cap, saturado: false };
   }
   const ult = SEMAFORO_ESCALA[SEMAFORO_ESCALA.length - 1];
-  return { id: ult.id, dias: ult.dias, cola, capacidad: capacidadHabil(inicio, ult.dias), saturado: true };
+  return { id: ult.id, dias: ult.dias, cola, capacidad: capacidadHabil(inicio, ult.dias, capLV, capSab), saturado: true };
 }
 
 // Suma n días HÁBILES (lun-sáb, salta domingo) a una fecha; devuelve la fecha resultante.
@@ -7187,7 +7190,16 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
         ? ordenes.map(o => o.id === ordenActualizada.id ? ordenActualizada : o)
         : [...ordenes, ordenActualizada];
     }
-    const s = semaforoAuto(colaProduccion(lista), new Date());
+    // Capacidad configurable (Administración). Lectura puntual, sin listener; respaldo a las constantes.
+    let cfg = { capLV: CAP_LV, capSab: CAP_SAB };
+    try {
+      const cfgSnap = await getDoc(doc(db, "config", "semaforoCfg"));
+      if (cfgSnap.exists()) {
+        const d = cfgSnap.data();
+        cfg = { capLV: Number(d.capLV) || CAP_LV, capSab: Number(d.capSab) || CAP_SAB };
+      }
+    } catch (e) {}
+    const s = semaforoAuto(colaProduccion(lista), new Date(), cfg);
     try {
       await setDoc(doc(db, "config", "semaforo"), {
         valor: s.id, auto: true, cola: s.cola, dias: s.dias, capacidad: s.capacidad,
@@ -7757,7 +7769,10 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       historial: [...(orden.historial||[]), { etapa: nuevaEtapa, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(nuevaEtapa).label}" desde el tablero` }],
     };
     await guardarOrden(actualizada);
-    // Registrar el cambio de etapa en el historial (igual que al guardar desde el detalle)
+    // Al salir de la cola de producción (bordado -> calidad) el semáforo puede mejorar: recalcular.
+    if (orden.etapa === "bordado" && nuevaEtapa === "calidad") {
+      try { await recalcularSemaforo(actualizada); } catch (e) {}
+    }
     try {
       await addDoc(collection(db, "historial"), {
         ordenId: String(orden.id),
@@ -7933,8 +7948,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       form = { ...form, historial: [...(form.historial||[]), { etapa: form.etapa, fecha: new Date().toISOString(), nota }] };
     }
     await guardarOrden(form);
-// Registrar cambios en historial
-if (anterior) {
+    // Al salir de la cola de producción (bordado -> calidad) el semáforo puede mejorar: recalcular.
+    if (anterior && anterior.etapa === "bordado" && form.etapa === "calidad") {
+      try { await recalcularSemaforo(form); } catch (e) {}
+    }
+    // Registrar cambios en historial
+    if (anterior) {
   const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre', 'prendas', 'seguimientoToken'];
   const cambios = [];
   const camposLegibles = {

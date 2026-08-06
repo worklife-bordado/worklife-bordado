@@ -63,7 +63,7 @@ function serializarRuta(ruta) {
       tipo: p.tipo, horario: p.horario || '', cliente: p.cliente || '',
       direccion: p.direccion || '', contacto: p.contacto || '',
       noPedido: p.noPedido || '', estatus: p.estatus || '', obs: p.obs || '',
-      horaReal: p.horaReal || '',
+      horaLlegada: p.horaLlegada || '', horaReal: p.horaReal || '',
     })),
   };
 }
@@ -229,6 +229,28 @@ export default async function handler(req, res) {
 
       paradas[i] = { ...paradas[i], estatus, horaReal: paradas[i].horaReal || horaMX() };
       if (typeof obs === 'string') paradas[i].obs = obs;
+
+      await ref.update({ paradas, actualizadoMovil: firma() });
+      return res.status(200).json({ ok: true, parada: paradas[i] });
+    }
+
+    // 2.c1) Registrar LLEGADA a una parada (hora de llegada) — requiere ruta iniciada.
+    // Solo se fija una vez (la primera llegada); no cambia el estatus.
+    if (accion === 'llegar') {
+      const { rutaId, idx } = body;
+      if (!rutaId) return res.status(400).json({ error: 'Datos inválidos' });
+
+      const { ref, ruta, error } = await cargarRuta(rutaId);
+      if (error) return res.status(error.code).json({ error: error.msg });
+      if (ruta.estado !== 'en_ruta') {
+        return res.status(409).json({ error: 'Primero debes iniciar la ruta' });
+      }
+
+      const paradas = (ruta.paradas || []).map(p => ({ ...p }));
+      const i = Number(idx);
+      if (!(i >= 0 && i < paradas.length)) return res.status(400).json({ error: 'Parada inválida' });
+
+      paradas[i] = { ...paradas[i], horaLlegada: paradas[i].horaLlegada || horaMX() };
 
       await ref.update({ paradas, actualizadoMovil: firma() });
       return res.status(200).json({ ok: true, parada: paradas[i] });

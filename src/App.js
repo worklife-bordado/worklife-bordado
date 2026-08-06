@@ -970,8 +970,8 @@ const SEMAFORO_ESCALA = [
   { id: "rojo",     dias: 25 },
   { id: "guinda",   dias: 30 },
 ];
-const CAP_LV = 300;   // capacidad lunes a viernes (piezas/día)
-const CAP_SAB = 150;  // capacidad sábado (medio día)
+const CAP_LV = 400;   // capacidad lunes a viernes (piezas/día)
+const CAP_SAB = 200;  // capacidad sábado (medio día)
 // Capacidad de bordado en los próximos nDias días HÁBILES desde `inicio`:
 // L-V = 300, Sábado = 150, Domingo = 0 (no cuenta como día hábil).
 function capacidadHabil(inicio, nDias) {
@@ -1028,6 +1028,16 @@ function diasSemaforo(semaforoId) {
 // Fecha mínima de entrega realista según el semáforo actual (hoy + días hábiles del color).
 function fechaMinimaEntregaISO(semaforoId, hoy) {
   return isoLocalFecha(sumarDiasHabiles(hoy || new Date(), diasSemaforo(semaforoId)));
+}
+// Duración entre dos horas "HH:MM" (fin - llegada). Devuelve "" si falta alguna.
+function duracionEntreHoras(inicio, fin) {
+  const aMin = (s) => { const x = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim()); return x ? (+x[1]) * 60 + (+x[2]) : null; };
+  const a = aMin(inicio), b = aMin(fin);
+  if (a == null || b == null) return "";
+  let d = b - a;
+  if (d < 0) d += 24 * 60;   // por si cruza la medianoche
+  const h = Math.floor(d / 60), m = d % 60;
+  return h ? (h + " h" + (m ? " " + m + " min" : "")) : (m + " min");
 }
 
 function Semaforo({ semaforo, onSemaforo, puedeEditar, info }) {
@@ -1359,12 +1369,12 @@ function buildCierreRutaHtml(ruta){
   const r = resumenRuta(ruta);
   const estTxt = (e) => e === "ok" ? "✓" : e === "x" ? "✗" : e === "inc" ? "Inc" : "—";
   const filasEnt = entregas.length ? entregas.map((p,i) =>
-    `<tr><td style="text-align:center">${i+1}</td><td>${escHtml(p.cliente)}</td><td>${escHtml(p.noPedido)}</td><td>${escHtml(p.horaReal)}</td><td style="text-align:center">${estTxt(p.estatus)}</td><td style="text-align:center">${p.docs?"Sí":"No"}</td><td>${escHtml(p.obs)}</td></tr>`
-  ).join("") : `<tr><td colspan="7" style="text-align:center;color:#888">Sin entregas registradas</td></tr>`;
+    `<tr><td style="text-align:center">${i+1}</td><td>${escHtml(p.cliente)}</td><td>${escHtml(p.noPedido)}</td><td style="text-align:center">${escHtml(p.horaLlegada)||"—"}</td><td style="text-align:center">${escHtml(p.horaReal)||"—"}</td><td style="text-align:center">${escHtml(duracionEntreHoras(p.horaLlegada,p.horaReal))||"—"}</td><td style="text-align:center">${estTxt(p.estatus)}</td><td style="text-align:center">${p.docs?"Sí":"No"}</td><td>${escHtml(p.obs)}</td></tr>`
+  ).join("") : `<tr><td colspan="9" style="text-align:center;color:#888">Sin entregas registradas</td></tr>`;
   const tipoExt = { B:"Entrega", R:"Recogida", D:"Devolución" };
   const filasExt = externos.length ? externos.map((p,i) =>
-    `<tr><td style="text-align:center">${i+1}</td><td>${escHtml(p.cliente)}</td><td style="text-align:center">${tipoExt[p.tipo]||escHtml(p.tipo)}</td><td>${escHtml(p.noPedido)}</td><td>${escHtml(p.obs)}</td></tr>`
-  ).join("") : `<tr><td colspan="5" style="text-align:center;color:#888">Sin movimientos con externos</td></tr>`;
+    `<tr><td style="text-align:center">${i+1}</td><td>${escHtml(p.cliente)}</td><td style="text-align:center">${tipoExt[p.tipo]||escHtml(p.tipo)}</td><td>${escHtml(p.noPedido)}</td><td style="text-align:center">${escHtml(p.horaLlegada)||"—"}</td><td style="text-align:center">${escHtml(p.horaReal)||"—"}</td><td style="text-align:center">${escHtml(duracionEntreHoras(p.horaLlegada,p.horaReal))||"—"}</td><td>${escHtml(p.obs)}</td></tr>`
+  ).join("") : `<tr><td colspan="8" style="text-align:center;color:#888">Sin movimientos con externos</td></tr>`;
   const d = ruta.docsEntregados || {};
   const chk = (v) => v ? "&#9745;" : "&#9744;";
   const docsRows = [
@@ -1385,12 +1395,12 @@ function buildCierreRutaHtml(ruta){
       </table>
       <div class="sec">RESUMEN DE ENTREGAS A CLIENTES</div>
       <table>
-        <tr><th style="width:24px">#</th><th>Cliente</th><th style="width:70px">No. Pedido</th><th style="width:70px">Hora entrega</th><th style="width:50px">Estatus</th><th style="width:60px">Docs firm.</th><th>Observaciones</th></tr>
+        <tr><th style="width:24px">#</th><th>Cliente</th><th style="width:60px">No. Pedido</th><th style="width:52px">Llegada</th><th style="width:42px">Fin</th><th style="width:58px">Duración</th><th style="width:46px">Estatus</th><th style="width:52px">Docs firm.</th><th>Observaciones</th></tr>
         ${filasEnt}
       </table>
       <div class="sec">RESUMEN DE MOVIMIENTOS CON EXTERNOS</div>
       <table>
-        <tr><th style="width:24px">#</th><th>Proveedor externo</th><th style="width:90px">Tipo</th><th style="width:80px">No. Orden</th><th>Observaciones</th></tr>
+        <tr><th style="width:24px">#</th><th>Proveedor externo</th><th style="width:80px">Tipo</th><th style="width:70px">No. Orden</th><th style="width:52px">Llegada</th><th style="width:42px">Fin</th><th style="width:58px">Duración</th><th>Observaciones</th></tr>
         ${filasExt}
       </table>
       <div class="sec">DOCUMENTOS QUE ENTREGA ANDRÉS A KRISIA</div>
@@ -3148,7 +3158,7 @@ const RUTA_TIPOS = [
 ];
 function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
-  return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaReal:"", docs:false, obs:"" };
+  return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaLlegada:"", horaReal:"", docs:false, obs:"" };
 }
 function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente, onEditarDireccion }) {
   const [r, setR] = useState(null);
@@ -3470,7 +3480,9 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
                 {[["ok","✓","#4caf7d"],["x","✗","#c0392b"],["inc","Inc","#f5a623"]].map(([v,t,c]) => (
                   <button key={v} onClick={()=>setP(i,"estatus", p.estatus===v?"":v)} style={{border:"1px solid "+c, borderRadius:18, cursor:"pointer", background: p.estatus===v?c:C.surface, color: p.estatus===v?"#fff":c, padding:"6px 14px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>{t}</button>
                 ))}
-                <input value={p.horaReal} onChange={e=>setP(i,"horaReal",e.target.value)} placeholder="Hora real" style={{...iS, width:90}}/>
+                <input value={p.horaLlegada} onChange={e=>setP(i,"horaLlegada",e.target.value)} placeholder="Llegada" style={{...iS, width:80}}/>
+                <input value={p.horaReal} onChange={e=>setP(i,"horaReal",e.target.value)} placeholder="Fin" style={{...iS, width:80}}/>
+                {duracionEntreHoras(p.horaLlegada, p.horaReal) && <span style={{fontSize:11.5, color:C.accent, fontWeight:800, whiteSpace:"nowrap"}}>⏱ {duracionEntreHoras(p.horaLlegada, p.horaReal)}</span>}
                 {esEntrega && (
                   <span style={{display:"flex", alignItems:"center", gap:6, marginLeft:4}}>
                     <span style={{fontSize:12, color:C.muted}}>Docs:</span>
@@ -6455,6 +6467,13 @@ function RutaMovil(){
       abrirObs(idx, r.parada.obs); // el campo de observación queda listo, pero es opcional
     } catch (e) { alert(e.message); }
   };
+  // Registra la hora de LLEGADA a la parada (una sola vez). No cambia el estatus.
+  const llegar = async (idx) => {
+    try {
+      const r = await llamar("llegar", { rutaId: ruta.id, idx });
+      setRuta(p => ({ ...p, paradas: p.paradas.map(x => x.idx === idx ? { ...x, ...r.parada } : x) }));
+    } catch (e) { alert(e.message); }
+  };
   const guardarObs = async (idx) => {
     const txt = String(borrador[idx] || "").trim();
     if (pendInc === idx && !txt) { alert("Para marcar incidencia debes escribir el motivo."); return; }
@@ -6812,6 +6831,7 @@ function RutaMovil(){
               {p.orden ? <span style={{minWidth:24, height:24, borderRadius:"50%", background:C2.accent, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:900}}>{p.orden}</span> : null}
               <span style={{fontSize:11, fontWeight:800, color:"#fff", background:t.col, padding:"3px 10px", borderRadius:12}}>{t.lbl}</span>
               {p.horario && <span style={{fontSize:12, color:C2.muted}}>🕐 {p.horario}</span>}
+              {p.horaLlegada && <span style={{fontSize:12, color:C2.accent, fontWeight:700}}>🕐→ {p.horaLlegada}</span>}
               {p.horaReal && <span style={{fontSize:12, color:C2.success, fontWeight:700}}>✓ {p.horaReal}</span>}
             </div>
             <div style={{fontSize:15.5, fontWeight:800, marginTop:8}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
@@ -6826,6 +6846,12 @@ function RutaMovil(){
             )}
             {p.obs && abierto !== p.idx && (
               <div onClick={()=>{ if(!cerrada) abrirObs(p.idx, p.obs); }} style={{fontSize:12, color:C2.accent, marginTop:6, cursor:cerrada?"default":"pointer"}}>📝 {p.obs}{!cerrada && <span style={{color:C2.muted}}> · editar</span>}</div>
+            )}
+            {!cerrada && !p.horaLlegada && (
+              <button onClick={()=>llegar(p.idx)} style={{width:"100%", marginTop:10, border:"none", borderRadius:10, background:C2.accent, color:"#fff", padding:"12px", fontSize:13.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>🕐 Llegué</button>
+            )}
+            {p.horaLlegada && (
+              <div style={{fontSize:12.5, color:C2.accent, fontWeight:700, marginTop:10}}>🕐 Llegó a las {p.horaLlegada}{p.horaReal && <span style={{color:C2.muted, fontWeight:600}}> · terminó {p.horaReal}</span>}</div>
             )}
             <div style={{display:"flex", gap:8, marginTop:10}}>
               {btn("ok", "✓ Listo", "#4caf7d")}

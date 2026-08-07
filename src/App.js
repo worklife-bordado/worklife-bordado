@@ -970,18 +970,23 @@ const SEMAFORO_ESCALA = [
   { id: "rojo",     dias: 25 },
   { id: "guinda",   dias: 30 },
 ];
-const CAP_LV = 400;   // capacidad lunes a viernes (piezas/día) — respaldo si no hay config
-const CAP_SAB = 200;  // capacidad sábado (medio día) — respaldo si no hay config
-// Capacidad de bordado en los próximos nDias días HÁBILES desde `inicio`:
-// L-V = capLV, Sábado = capSab, Domingo = 0. capLV/capSab configurables (respaldo a las constantes).
-function capacidadHabil(inicio, nDias, capLV, capSab) {
-  const cLV = (capLV != null) ? capLV : CAP_LV;
-  const cSab = (capSab != null) ? capSab : CAP_SAB;
+const CAP_LV = 400;   // capacidad L-V por defecto (si no hay config en Firestore)
+const CAP_SAB = 200;  // capacidad sábado por defecto (medio día)
+// Normaliza la capacidad recibida (de config) usando los valores por defecto como respaldo.
+function capsDe(cap) {
+  const lv = cap && Number(cap.lv) > 0 ? Number(cap.lv) : CAP_LV;
+  const sab = cap && Number(cap.sab) >= 0 ? Number(cap.sab) : CAP_SAB;
+  return { lv, sab };
+}
+// Capacidad de bordado en los próximos nDias días HÁBILES desde `inicio`.
+// `cap` = { lv, sab } (opcional; si falta, usa los valores por defecto). Domingo = 0.
+function capacidadHabil(inicio, nDias, cap) {
+  const { lv, sab } = capsDe(cap);
   let total = 0, contados = 0;
   const d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
   while (contados < nDias) {
     const dow = d.getDay(); // 0=Dom, 6=Sáb
-    if (dow !== 0) { total += (dow === 6) ? cSab : cLV; contados++; }
+    if (dow !== 0) { total += (dow === 6) ? sab : lv; contados++; }
     d.setDate(d.getDate() + 1);
   }
   return total;
@@ -1002,16 +1007,15 @@ function colaProduccion(ordenes) {
     .reduce((s, o) => s + piezasOrden(o), 0);
 }
 // Semáforo sugerido: el color más rápido cuya capacidad alcance a cubrir la cola.
-// `cfg` = { capLV, capSab } (opcional; respaldo a las constantes). Si ni guinda alcanza -> saturado.
-function semaforoAuto(cola, hoy, cfg) {
+// Si ni el más lento (guinda) alcanza, devuelve guinda marcado como saturado.
+function semaforoAuto(cola, hoy, cap) {
   const inicio = hoy || new Date();
-  const capLV = cfg && cfg.capLV, capSab = cfg && cfg.capSab;
   for (const c of SEMAFORO_ESCALA) {
-    const cap = capacidadHabil(inicio, c.dias, capLV, capSab);
-    if (cap >= cola) return { id: c.id, dias: c.dias, cola, capacidad: cap, saturado: false };
+    const capac = capacidadHabil(inicio, c.dias, cap);
+    if (capac >= cola) return { id: c.id, dias: c.dias, cola, capacidad: capac, saturado: false };
   }
   const ult = SEMAFORO_ESCALA[SEMAFORO_ESCALA.length - 1];
-  return { id: ult.id, dias: ult.dias, cola, capacidad: capacidadHabil(inicio, ult.dias, capLV, capSab), saturado: true };
+  return { id: ult.id, dias: ult.dias, cola, capacidad: capacidadHabil(inicio, ult.dias, cap), saturado: true };
 }
 
 // Suma n días HÁBILES (lun-sáb, salta domingo) a una fecha; devuelve la fecha resultante.
@@ -1043,7 +1047,7 @@ function duracionEntreHoras(inicio, fin) {
   return h ? (h + " h" + (m ? " " + m + " min" : "")) : (m + " min");
 }
 
-function Semaforo({ semaforo, onSemaforo, puedeEditar, info }) {
+function Semaforo({ semaforo, info }) {
   const SEMAFOROS = [
     { id:"verde",    label:"10 días",  sub:"Tiempo de entrega",  color:"#4caf7d", bg:"#4caf7d22" },
     { id:"amarillo", label:"15 días",  sub:"Tiempo de entrega",  color:"#f5c623", bg:"#f5c62322" },
@@ -1052,11 +1056,9 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar, info }) {
     { id:"guinda",   label:"30 días",  sub:"Tiempo de entrega",  color:"#7b0d1e", bg:"#7b0d1e22" },
   ];
   const actual = SEMAFOROS.find(s => s.id === semaforo) || SEMAFOROS[0];
-  const sub = (info && info.auto === false)
-    ? "✋ Ajustado manualmente"
-    : ((info && info.cola != null)
-        ? "🔄 Automático · cola " + info.cola + " pzas · capacidad " + info.capacidad + " en " + info.dias + " días hábiles"
-        : "Tiempo de entrega");
+  const sub = (info && info.cola != null)
+    ? "🔄 Automático · cola " + info.cola + " pzas · capacidad " + info.capacidad + " en " + info.dias + " días hábiles"
+    : "Automático · se calcula con la carga de trabajo";
   return (
     <div style={{background:actual.bg,border:"2px solid "+actual.color,borderRadius:12,padding:"14px 20px",marginBottom:20}}>
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -1065,16 +1067,6 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar, info }) {
           <div style={{fontSize:15,fontWeight:800,color:actual.color}}>Tiempo de entrega estimado: {actual.label} hábiles</div>
           <div style={{fontSize:12,color:"#888"}}>{sub}</div>
         </div>
-        {puedeEditar && (
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {SEMAFOROS.map(s => (
-              <div key={s.id} onClick={() => onSemaforo(s.id)}
-                style={{width:22,height:22,borderRadius:"50%",background:s.color,cursor:"pointer",border:semaforo===s.id?"3px solid #fff":"3px solid transparent",transition:"all .2s"}}
-                title={s.label+" — "+s.sub}
-              ></div>
-            ))}
-          </div>
-        )}
       </div>
       {info && info.saturado && (
         <div style={{marginTop:10,background:"#7b0d1e22",border:"1px solid #7b0d1e",borderRadius:8,padding:"8px 12px",fontSize:12.5,fontWeight:700,color:"#e5484d"}}>
@@ -1084,7 +1076,65 @@ function Semaforo({ semaforo, onSemaforo, puedeEditar, info }) {
     </div>
   );
 }
-function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filtro, setFiltro, soloMias, setSoloMias, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, semaforoInfo, onSemaforo, puedeEditarSeguimiento, onBack }) {
+// Consola de Administración: ajustar la capacidad diaria de bordado (piezas L-V y sábado).
+// El semáforo es 100% automático; esto solo cambia los "datos duros" con los que calcula.
+function ConfigSemaforo({ onCargar, onGuardar, onBack }) {
+  const [lv, setLv] = useState(String(CAP_LV));
+  const [sab, setSab] = useState(String(CAP_SAB));
+  const [cargando, setCargando] = useState(true);
+  const [guardando, setGuardando] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    (async () => {
+      const cfg = await onCargar();
+      if (cfg && Number(cfg.lv) > 0) setLv(String(cfg.lv));
+      if (cfg && Number(cfg.sab) >= 0) setSab(String(cfg.sab));
+      setCargando(false);
+    })();
+  }, []);
+  const guardar = async () => {
+    const nLv = parseInt(lv, 10), nSab = parseInt(sab, 10);
+    if (!(nLv > 0)) { alert("La capacidad de lunes a viernes debe ser un número mayor a 0."); return; }
+    if (!(nSab >= 0)) { alert("La capacidad del sábado no puede ser negativa."); return; }
+    setGuardando(true);
+    try { await onGuardar({ lv: nLv, sab: nSab }); setMsg("✓ Capacidad guardada y semáforo recalculado con los nuevos valores."); setTimeout(() => setMsg(""), 5000); }
+    catch (e) { alert("No se pudo guardar: " + (e.message || e)); }
+    setGuardando(false);
+  };
+  const campo = (etiqueta, valor, set, hint) => (
+    <div style={{marginBottom:16}}>
+      <label style={{fontSize:11, fontWeight:800, color:C.muted, textTransform:"uppercase", letterSpacing:1, display:"block", marginBottom:6}}>{etiqueta}</label>
+      <input type="number" min="0" value={valor} onChange={e => set(e.target.value)} disabled={cargando}
+        style={{width:160, boxSizing:"border-box", border:"1px solid "+C.border, borderRadius:10, background:C.surface, color:C.text, padding:"12px 14px", fontSize:18, fontWeight:800, fontFamily:"inherit"}}/>
+      <span style={{fontSize:12.5, color:C.muted, marginLeft:10}}>piezas/día</span>
+      {hint && <div style={{fontSize:12, color:C.muted, marginTop:5}}>{hint}</div>}
+    </div>
+  );
+  return (
+    <div style={{maxWidth:640, margin:"0 auto", padding:"0 4px"}}>
+      <button onClick={onBack} style={{border:"none", background:"transparent", color:C.accent, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", padding:"6px 0", marginBottom:8}}>← Volver</button>
+      <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:14, padding:"22px 24px"}}>
+        <div style={{fontSize:18, fontWeight:800, color:C.text, marginBottom:4}}>⚙️ Configuración del semáforo</div>
+        <div style={{fontSize:13, color:C.muted, marginBottom:20, lineHeight:1.5}}>
+          Capacidad de producción del bordador. El semáforo se calcula solo con estos datos; ajústalos si aumenta o disminuye la producción diaria. El domingo no cuenta (no se trabaja).
+        </div>
+        {campo("Lunes a viernes", lv, setLv, "Piezas que el bordador deja listas en un día normal.")}
+        {campo("Sábado", sab, setSab, "Normalmente medio día, así que menos que un día entre semana.")}
+        <div style={{display:"flex", alignItems:"center", gap:14, marginTop:8}}>
+          <button disabled={guardando || cargando} onClick={guardar}
+            style={{border:"none", borderRadius:10, cursor:(guardando||cargando)?"default":"pointer", background:C.accent, color:"#fff", padding:"12px 20px", fontSize:14, fontWeight:800, fontFamily:"inherit", opacity:(guardando||cargando)?0.6:1}}>
+            {guardando ? "Guardando…" : "Guardar y recalcular"}
+          </button>
+          {msg && <span style={{fontSize:13, fontWeight:700, color:"#4caf7d"}}>{msg}</span>}
+        </div>
+        <div style={{marginTop:18, paddingTop:16, borderTop:"1px solid "+C.border, fontSize:12, color:C.muted, lineHeight:1.5}}>
+          Al guardar, el semáforo se recalcula al instante con la carga de trabajo actual y esta capacidad nueva. Si dejas los campos como estaban, no cambia nada.
+        </div>
+      </div>
+    </div>
+  );
+}
+function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filtro, setFiltro, soloMias, setSoloMias, onSelect, onCreate, creando, onDuplicar, onCancelarReactivar, puedeCancelar, onCalendario, onDashboard, semaforo, semaforoInfo, puedeEditarSeguimiento, onBack }) {
   const filtradas = ordenes.filter(o => {
     if (soloMias && rol === "admin" && o.creadoPor !== usuario.email) return false;
     const q = search.toLowerCase().trim();
@@ -1207,7 +1257,7 @@ function Lista({ ordenes, usuario, rol, search, setSearch, campo, setCampo, filt
           );
         })()}
       </div>
-      <Semaforo semaforo={semaforo} info={semaforoInfo} onSemaforo={onSemaforo} puedeEditar={puedeEditarSeguimiento} />
+      <Semaforo semaforo={semaforo} info={semaforoInfo} />
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <select value={campo} onChange={e => setCampo(e.target.value)}
           style={{background:C.card,border:"1px solid "+C.border,borderRadius:8,color:C.muted,padding:"10px 12px",fontSize:12,outline:"none",cursor:"pointer",flexShrink:0}}>
@@ -6943,6 +6993,410 @@ function RutaMovil(){
 }
 
 export default function App(){ return (<ErrorBoundary><AppInner /></ErrorBoundary>); }
+// ── Módulo: Clasificación de clientes (A/B/C) con histórico ───────────────
+// ── Criterios y pesos (los que ya aprobaste) ───────────────────────────────
+const CLASIF_CFG = {
+  actual: {
+    label: "Cliente que ya te compra — el margen manda",
+    max: 14, aMin: 12, bMin: 7,
+    crits: [
+      { q: "Margen y recurrencia",
+        gate: "El margen pesa más que el volumen: sin buen margen no se llega a A.",
+        opts: [
+          { t: "Buen margen y compra recurrente", p: 5 },
+          { t: "Margen apretado pero recurrente, o buen margen esporádico", p: 3 },
+          { t: "Margen malo y compra suelta", p: 1 },
+        ] },
+      { q: "Volumen anual (prendas compradas)",
+        opts: [
+          { t: "Grande — 500 o más prendas", p: 4 },
+          { t: "Mayoreo — 100 a 499 prendas", p: 3 },
+          { t: "Medio mayoreo — 51 a 99 prendas", p: 2 },
+          { t: "Menudeo / chico — hasta 50 prendas", p: 1 },
+        ] },
+      { q: "Puntualidad de pago",
+        gate: "Un cliente moroso no puede ser A, por mucho que compre.",
+        opts: [
+          { t: "Paga en tiempo o antes", p: 3 },
+          { t: "Se atrasa poco, dentro de tolerancia", p: 2 },
+          { t: "Moroso o problemático", p: 0 },
+        ] },
+      { q: "Potencial de crecimiento",
+        opts: [
+          { t: "Va a crecer — plantilla o proyectos en aumento", p: 2 },
+          { t: "Estable", p: 1 },
+          { t: "A la baja", p: 0 },
+        ] },
+    ],
+  },
+  prospecto: {
+    label: "Aún sin historial — mides encaje y potencial",
+    max: 12, aMin: 10, bMin: 6,
+    crits: [
+      { q: "Tamaño (prendas potenciales)",
+        opts: [
+          { t: "Grande — 500 o más prendas", p: 4 },
+          { t: "Mayoreo — 100 a 499 prendas", p: 3 },
+          { t: "Medio mayoreo — 51 a 99 prendas", p: 2 },
+          { t: "Menudeo / chico — hasta 50 prendas", p: 1 },
+        ] },
+      { q: "Encaje con tu perfil",
+        gate: "Un prospecto fuera de perfil no es A aunque sea grande.",
+        opts: [
+          { t: "Automotriz / industrial — tu zona de fuerza", p: 3 },
+          { t: "Adyacente — surtible pero no ideal", p: 2 },
+          { t: "Fuera de perfil", p: 0 },
+        ] },
+      { q: "Accesibilidad",
+        opts: [
+          { t: "Contacto directo / puerta abierta", p: 3 },
+          { t: "Referido o contacto indirecto", p: 2 },
+          { t: "En frío total", p: 1 },
+        ] },
+      { q: "Urgencia / timing",
+        opts: [
+          { t: "Necesidad activa ahora", p: 2 },
+          { t: "En los próximos meses", p: 1 },
+          { t: "\u201CAlgún día\u201D, sin urgencia", p: 0 },
+        ] },
+    ],
+  },
+};
+
+function clasifLetra(modo, total) {
+  const c = CLASIF_CFG[modo];
+  if (total >= c.aMin) return "A";
+  if (total >= c.bMin) return "B";
+  return "C";
+}
+const LETRA_COLOR = {
+  A: { bg: "#f5a623", fg: "#1a1200", desc: "Prioridad alta" },
+  B: { bg: "#5c8fe0", fg: "#ffffff", desc: "Prioridad media" },
+  C: { bg: "#8b90a7", fg: "#12141c", desc: "Prioridad baja" },
+};
+
+
+function Clasificacion({ usuario, rol, onBack }) {
+  const [sub, setSub]           = useState("clasificar"); // "clasificar" | "historial"
+  const [modo, setModo]         = useState("actual");
+  const [clientesDir, setClientesDir] = useState([]);
+  const [historial, setHistorial]     = useState([]);
+  const [clienteSel, setClienteSel]   = useState(null);   // {id, nombre} en modo actual
+  const [prospNombre, setProspNombre] = useState("");     // texto libre en modo prospecto
+  const [busca, setBusca]       = useState("");
+  const [resp, setResp]         = useState({});           // { indiceCriterio: puntos }
+  const [guardando, setGuardando] = useState(false);
+  const [msg, setMsg]           = useState("");
+  const [fLetra, setFLetra]     = useState("");           // filtros del historial
+  const [fTexto, setFTexto]     = useState("");
+  const [dirCargado, setDirCargado]   = useState(false);  // el directorio se lee 1 sola vez
+  const [dirCargando, setDirCargando] = useState(false);
+  const [histCargado, setHistCargado]   = useState(false);// el historial se lee 1 sola vez
+  const [histCargando, setHistCargando] = useState(false);
+
+  // AHORRO DE CUOTA: nada se lee al abrir. El directorio se carga UNA vez y solo
+  // cuando de verdad se necesita (modo "cliente actual"). getDocs = lectura puntual,
+  // no un listener en vivo que se queda leyendo.
+  const cargarDirectorio = async (forzar) => {
+    if (dirCargando || (dirCargado && !forzar)) return;
+    setDirCargando(true);
+    try {
+      const snap = await getDocs(collection(db, "directorioClientes"));
+      setClientesDir(snap.docs.map(d => ({ ...d.data(), id: d.id }))
+        .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")));
+      setDirCargado(true);
+    } catch (e) { setMsg("No se pudo cargar el directorio: " + (e.message || e)); }
+    setDirCargando(false);
+  };
+  useEffect(() => {
+    if (sub === "clasificar" && modo === "actual" && !dirCargado) cargarDirectorio(false);
+  }, [sub, modo, dirCargado]); // eslint-disable-line
+
+  // El historial se carga UNA vez, solo al abrir su pestaña. Botón ↻ para refrescar.
+  const cargarHistorial = async (forzar) => {
+    if (histCargando || (histCargado && !forzar)) return;
+    setHistCargando(true);
+    try {
+      const qh = query(collection(db, "clasificaciones"), orderBy("fechaISO", "desc"), limit(300));
+      const snap = await getDocs(qh);
+      setHistorial(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      setHistCargado(true);
+    } catch (e) { setMsg("No se pudo cargar el historial: " + (e.message || e)); }
+    setHistCargando(false);
+  };
+  useEffect(() => {
+    if (sub === "historial" && !histCargado) cargarHistorial(false);
+  }, [sub, histCargado]); // eslint-disable-line
+
+  const cfg = CLASIF_CFG[modo];
+  const contestadas = cfg.crits.filter((_, i) => resp[i] !== undefined).length;
+  const completo = contestadas === cfg.crits.length;
+  const total = cfg.crits.reduce((s, _, i) => s + (resp[i] || 0), 0);
+  const L = completo ? clasifLetra(modo, total) : null;
+  const nombreCliente = modo === "actual" ? (clienteSel?.nombre || "") : prospNombre.trim();
+  const puedeGuardar = completo && nombreCliente && !guardando;
+
+  const cambiarModo = (m) => {
+    setModo(m); setResp({}); setClienteSel(null); setProspNombre(""); setBusca(""); setMsg("");
+  };
+
+  const guardar = async () => {
+    if (!puedeGuardar) return;
+    setGuardando(true); setMsg("");
+    try {
+      const respuestas = cfg.crits.map((c, i) => ({
+        criterio: c.q,
+        texto: c.opts.find(o => o.p === resp[i])?.t ?? "",
+        puntos: resp[i],
+      }));
+      const ref = await addDoc(collection(db, "clasificaciones"), {
+        modo, cliente: nombreCliente,
+        clienteId: modo === "actual" ? (clienteSel?.id || null) : null,
+        letra: L, puntaje: total, max: cfg.max,
+        respuestas,
+        creadoPor: usuario.email,
+        creadoPorNombre: usuario.displayName || usuario.email,
+        fecha: serverTimestamp(),
+        fechaISO: new Date().toISOString(),
+      });
+      // Refleja la letra vigente en la ficha del cliente (solo actual y si existe).
+      if (modo === "actual" && clienteSel?.id) {
+        await setDoc(doc(db, "directorioClientes", clienteSel.id),
+          { clasificacion: L, clasificadoEl: new Date().toISOString(), clasificadoPor: usuario.email },
+          { merge: true });
+      }
+      // AHORRO DE CUOTA: metemos el registro a la pantalla con el dato que ya tenemos,
+      // sin volver a leer de Firebase. Igual actualizamos la letra vigente en memoria.
+      const nuevoLocal = {
+        id: ref.id, modo, cliente: nombreCliente,
+        clienteId: modo === "actual" ? (clienteSel?.id || null) : null,
+        letra: L, puntaje: total, max: cfg.max, respuestas,
+        creadoPor: usuario.email, creadoPorNombre: usuario.displayName || usuario.email,
+        fechaISO: new Date().toISOString(),
+      };
+      setHistorial(prev => [nuevoLocal, ...prev]);
+      if (modo === "actual" && clienteSel?.id) {
+        setClientesDir(prev => prev.map(c => c.id === clienteSel.id ? { ...c, clasificacion: L } : c));
+      }
+      setMsg(`✓ Guardado: ${nombreCliente} → ${L}`);
+      setResp({}); setClienteSel(null); setProspNombre(""); setBusca("");
+    } catch (e) {
+      setMsg("Error al guardar: " + (e.message || e));
+    }
+    setGuardando(false);
+  };
+
+  // Lista filtrada de clientes para el buscador (modo actual)
+  const clientesFiltrados = busca.trim()
+    ? clientesDir.filter(c => (c.nombre || "").toLowerCase().includes(busca.trim().toLowerCase())).slice(0, 8)
+    : [];
+
+  // Historial filtrado
+  const histFiltrado = historial.filter(h => {
+    if (fLetra && h.letra !== fLetra) return false;
+    if (fTexto) {
+      const q = fTexto.toLowerCase();
+      if (!((h.cliente || "").toLowerCase().includes(q) ||
+            (h.creadoPorNombre || "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  });
+
+  const S = {
+    wrap:  { maxWidth: 760, margin: "0 auto", padding: "0 16px 48px" },
+    tab:   (on) => ({ flex: 1, padding: "11px 8px", border: "none", borderRadius: 9,
+                      background: on ? C.accent : "transparent", color: on ? "#1a1200" : C.muted,
+                      fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }),
+    card:  { background: C.card, border: "1px solid " + C.border, borderRadius: 12, padding: 14, marginBottom: 12 },
+    q:     { fontWeight: 800, color: C.text, fontSize: 15, marginBottom: 10 },
+    opt:   (on) => ({ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 10px",
+                      borderRadius: 9, cursor: "pointer", marginBottom: 4,
+                      border: "1.5px solid " + (on ? C.accent : "transparent"),
+                      background: on ? C.accentGlow : "transparent" }),
+    dot:   (on) => ({ width: 18, height: 18, borderRadius: "50%", flex: "none", marginTop: 1,
+                      border: "2px solid " + (on ? C.accent : C.muted),
+                      background: on ? C.accent : "transparent" }),
+    gate:  { fontSize: 12, color: C.accent, background: C.accentGlow, borderLeft: "3px solid " + C.accent,
+             padding: "7px 10px", borderRadius: "0 6px 6px 0", margin: "0 0 10px" },
+  };
+
+  const badge = (l, size = 30) => {
+    const c = LETRA_COLOR[l] || LETRA_COLOR.C;
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: size, height: size, borderRadius: 8, background: c.bg, color: c.fg,
+        fontWeight: 800, fontSize: size * 0.5, flex: "none" }}>{l}</span>
+    );
+  };
+
+  return (
+    <div style={S.wrap}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "6px 0 16px" }}>
+        <Btn onClick={onBack} variant="ghost" size="sm">← Volver</Btn>
+        <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>Clasificación de clientes</div>
+      </div>
+
+      {/* Sub-pestañas */}
+      <div style={{ display: "flex", gap: 4, background: C.surface, border: "1px solid " + C.border,
+        borderRadius: 12, padding: 4, marginBottom: 18 }}>
+        <button style={S.tab(sub === "clasificar")} onClick={() => setSub("clasificar")}>Clasificar</button>
+        <button style={S.tab(sub === "historial")} onClick={() => setSub("historial")}>
+          Historial
+        </button>
+      </div>
+
+      {/* ─────────────── CLASIFICAR ─────────────── */}
+      {sub === "clasificar" && (<>
+        {/* selector de modo */}
+        <div style={{ display: "flex", gap: 4, background: C.surface, border: "1px solid " + C.border,
+          borderRadius: 12, padding: 4, marginBottom: 16 }}>
+          <button style={S.tab(modo === "actual")}   onClick={() => cambiarModo("actual")}>Cliente actual</button>
+          <button style={S.tab(modo === "prospecto")} onClick={() => cambiarModo("prospecto")}>Prospecto</button>
+        </div>
+
+        {/* elegir cliente */}
+        <div style={S.card}>
+          {modo === "actual" ? (
+            clienteSel ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ color: C.text, fontWeight: 700 }}>{clienteSel.nombre}
+                  {clienteSel.clasificacion &&
+                    <span style={{ color: C.muted, fontWeight: 600, fontSize: 13 }}> · vigente: {clienteSel.clasificacion}</span>}
+                </div>
+                <Btn variant="ghost" size="sm" onClick={() => { setClienteSel(null); setBusca(""); }}>Cambiar</Btn>
+              </div>
+            ) : (<>
+              <div style={S.q}>¿Qué cliente clasificas?</div>
+              <input value={busca} onChange={e => setBusca(e.target.value)} placeholder={dirCargando ? "Cargando directorio…" : "Escribe para buscar…"}
+                style={{ width: "100%", background: C.surface, border: "1px solid " + C.border, borderRadius: 8,
+                  color: C.text, padding: "11px 12px", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+              {clientesFiltrados.map(c => (
+                <div key={c.id} onClick={() => { setClienteSel(c); setBusca(""); }}
+                  style={{ padding: "10px 12px", marginTop: 6, borderRadius: 8, cursor: "pointer",
+                    background: C.surface, border: "1px solid " + C.border, color: C.text, fontSize: 14 }}>
+                  {c.nombre}{c.clasificacion && <span style={{ color: C.muted }}> · {c.clasificacion}</span>}
+                </div>
+              ))}
+              {busca.trim() && clientesFiltrados.length === 0 &&
+                <div style={{ color: C.muted, fontSize: 13, marginTop: 8 }}>
+                  No aparece en el directorio. Si es cliente nuevo, clasifícalo como Prospecto.
+                </div>}
+            </>)
+          ) : (<>
+            <div style={S.q}>Nombre del prospecto</div>
+            <input value={prospNombre} onChange={e => setProspNombre(e.target.value)} placeholder="Ej. Planta XYZ, S.A."
+              style={{ width: "100%", background: C.surface, border: "1px solid " + C.border, borderRadius: 8,
+                color: C.text, padding: "11px 12px", fontSize: 15, outline: "none", boxSizing: "border-box" }} />
+          </>)}
+        </div>
+
+        {/* criterios */}
+        <div style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".1em",
+          color: C.info, fontWeight: 700, margin: "4px 2px 10px" }}>{cfg.label}</div>
+
+        {cfg.crits.map((c, ci) => (
+          <div key={ci}>
+            <div style={S.card}>
+              <div style={S.q}>
+                <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  width: 22, height: 22, background: C.accent, color: "#1a1200", borderRadius: 6,
+                  fontSize: 12, marginRight: 8, verticalAlign: 1 }}>{ci + 1}</span>{c.q}
+              </div>
+              {c.opts.map((o, oi) => {
+                const on = resp[ci] === o.p;
+                return (
+                  <div key={oi} style={S.opt(on)} onClick={() => setResp(p => ({ ...p, [ci]: o.p }))}>
+                    <span style={S.dot(on)} />
+                    <span style={{ color: C.text, fontSize: 14 }}>{o.t}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {c.gate && <div style={S.gate}>{c.gate}</div>}
+          </div>
+        ))}
+
+        {/* veredicto */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, background: C.card,
+          border: "1px solid " + C.border, borderRadius: 14, padding: 16, marginTop: 6 }}>
+          {L ? badge(L, 52) : (
+            <span style={{ width: 52, height: 52, borderRadius: 10, background: C.surface,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              color: C.muted, fontSize: 26, fontWeight: 800, flex: "none" }}>—</span>
+          )}
+          <div style={{ flex: 1 }}>
+            <div style={{ color: C.text, fontWeight: 800, fontSize: 15 }}>
+              {L ? LETRA_COLOR[L].desc : `Faltan ${cfg.crits.length - contestadas} criterios`}
+            </div>
+            <div style={{ color: C.muted, fontSize: 13, marginTop: 2 }}>
+              {completo ? `Puntaje: ${total} de ${cfg.max}` : "Marca una opción por criterio."}
+            </div>
+          </div>
+        </div>
+
+        <button onClick={guardar} disabled={!puedeGuardar}
+          style={{ width: "100%", marginTop: 14, padding: 14, border: "none", borderRadius: 12,
+            background: puedeGuardar ? "linear-gradient(135deg,#fbb040,#f57c00)" : C.surface,
+            color: puedeGuardar ? "#fff" : C.muted, fontWeight: 800, fontSize: 16,
+            cursor: puedeGuardar ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+          {guardando ? "Guardando…" : "Guardar clasificación"}
+        </button>
+        {msg && <div style={{ textAlign: "center", marginTop: 10, color: msg[0] === "✓" ? C.success : C.danger,
+          fontWeight: 700, fontSize: 14 }}>{msg}</div>}
+      </>)}
+
+      {/* ─────────────── HISTORIAL ─────────────── */}
+      {sub === "historial" && (<>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+          <input value={fTexto} onChange={e => setFTexto(e.target.value)} placeholder="Buscar cliente o vendedor…"
+            style={{ flex: 1, minWidth: 180, background: C.surface, border: "1px solid " + C.border,
+              borderRadius: 8, color: C.text, padding: "10px 12px", fontSize: 14, outline: "none" }} />
+          {["", "A", "B", "C"].map(l => (
+            <button key={l || "todas"} onClick={() => setFLetra(l)}
+              style={{ padding: "10px 14px", borderRadius: 8, fontWeight: 800, fontSize: 13, cursor: "pointer",
+                border: "1px solid " + C.border, fontFamily: "inherit",
+                background: fLetra === l ? C.accent : C.surface, color: fLetra === l ? "#1a1200" : C.muted }}>
+              {l || "Todas"}
+            </button>
+          ))}
+          <button onClick={() => cargarHistorial(true)} disabled={histCargando} title="Volver a leer de Firebase"
+            style={{ padding: "10px 14px", borderRadius: 8, fontWeight: 800, fontSize: 13,
+              cursor: histCargando ? "wait" : "pointer", border: "1px solid " + C.border, fontFamily: "inherit",
+              background: C.surface, color: C.muted }}>
+            {histCargando ? "…" : "↻"}
+          </button>
+        </div>
+
+        {histCargando && histFiltrado.length === 0 &&
+          <div style={{ color: C.muted, textAlign: "center", padding: "30px 0" }}>Cargando…</div>}
+        {!histCargando && histFiltrado.length === 0 &&
+          <div style={{ color: C.muted, textAlign: "center", padding: "30px 0" }}>Sin clasificaciones aún.</div>}
+
+        {histFiltrado.map(h => (
+          <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 12, background: C.card,
+            border: "1px solid " + C.border, borderRadius: 12, padding: "12px 14px", marginBottom: 8 }}>
+            {badge(h.letra, 34)}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: C.text, fontWeight: 700, fontSize: 15 }}>
+                {h.cliente}
+                <span style={{ color: C.muted, fontWeight: 600, fontSize: 12 }}>
+                  {" "}· {h.modo === "actual" ? "Cliente" : "Prospecto"} · {h.puntaje}/{h.max}
+                </span>
+              </div>
+              <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>
+                {(h.creadoPorNombre || h.creadoPor || "").split("@")[0]}
+                {h.fechaISO ? " · " + new Date(h.fechaISO).toLocaleDateString("es-MX",
+                  { day: "2-digit", month: "short", year: "numeric" }) : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+      </>)}
+    </div>
+  );
+}
+
+
 function AppInner() {
   // ── Ruta pública de seguimiento (cliente, sin login) ──
   const _seg = new URLSearchParams(window.location.search).get("seguimiento");
@@ -7183,29 +7637,32 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   // Recalcula el semáforo automáticamente (al liberar una orden a producción).
   // Elige el color más rápido cuya capacidad hábil cubra la cola comprometida.
   // `ordenActualizada` evita depender del snapshot async: se refleja de inmediato.
-  const recalcularSemaforo = async (ordenActualizada) => {
+  const recalcularSemaforo = async (ordenActualizada, capOverride) => {
     let lista = ordenes;
     if (ordenActualizada && ordenActualizada.id) {
       lista = ordenes.some(o => o.id === ordenActualizada.id)
         ? ordenes.map(o => o.id === ordenActualizada.id ? ordenActualizada : o)
         : [...ordenes, ordenActualizada];
     }
-    // Capacidad configurable (Administración). Lectura puntual, sin listener; respaldo a las constantes.
-    let cfg = { capLV: CAP_LV, capSab: CAP_SAB };
-    try {
-      const cfgSnap = await getDoc(doc(db, "config", "semaforoCfg"));
-      if (cfgSnap.exists()) {
-        const d = cfgSnap.data();
-        cfg = { capLV: Number(d.capLV) || CAP_LV, capSab: Number(d.capSab) || CAP_SAB };
-      }
-    } catch (e) {}
-    const s = semaforoAuto(colaProduccion(lista), new Date(), cfg);
+    // Capacidad: si viene capOverride (ej. al guardar en la consola), se usa directo (evita leer un
+    // valor recién escrito). Si no, lectura puntual de config/semaforoCfg. Respaldo: valores por defecto.
+    let cap = capOverride || null;
+    if (!cap) { try { const cfg = await getDoc(doc(db, "config", "semaforoCfg")); if (cfg.exists()) cap = cfg.data(); } catch (e) {} }
+    const s = semaforoAuto(colaProduccion(lista), new Date(), cap);
     try {
       await setDoc(doc(db, "config", "semaforo"), {
         valor: s.id, auto: true, cola: s.cola, dias: s.dias, capacidad: s.capacidad,
         saturado: s.saturado, actualizado: new Date().toISOString(), actualizadoPor: usuario.email,
       }, { merge: true });
     } catch (e) {}
+  };
+  // Consola de admin: leer la capacidad actual (lectura puntual) y guardarla + recalcular.
+  const cargarCfgSemaforo = async () => {
+    try { const cfg = await getDoc(doc(db, "config", "semaforoCfg")); return cfg.exists() ? cfg.data() : null; } catch (e) { return null; }
+  };
+  const guardarCfgSemaforo = async ({ lv, sab }) => {
+    await setDoc(doc(db, "config", "semaforoCfg"), { lv, sab, actualizado: new Date().toISOString(), actualizadoPor: usuario.email }, { merge: true });
+    await recalcularSemaforo(null, { lv, sab }); // aplica la capacidad nueva al instante
   };
 
   // ── Lista de bordadores (config) ──────────────────────────────────────────
@@ -7773,6 +8230,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     if (orden.etapa === "bordado" && nuevaEtapa === "calidad") {
       try { await recalcularSemaforo(actualizada); } catch (e) {}
     }
+    // Registrar el cambio de etapa en el historial (igual que al guardar desde el detalle)
     try {
       await addDoc(collection(db, "historial"), {
         ordenId: String(orden.id),
@@ -7952,8 +8410,8 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     if (anterior && anterior.etapa === "bordado" && form.etapa === "calidad") {
       try { await recalcularSemaforo(form); } catch (e) {}
     }
-    // Registrar cambios en historial
-    if (anterior) {
+// Registrar cambios en historial
+if (anterior) {
   const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre', 'prendas', 'seguimientoToken'];
   const cambios = [];
   const camposLegibles = {
@@ -8217,7 +8675,7 @@ const cancelar = async (id) => {
         <div style={{maxWidth:1140,margin:"0 auto",padding:"0 16px 40px"}}>
           <div style={{display:"flex", gap:14, flexDirection: window.innerWidth < 760 ? "column" : "row", alignItems:"stretch"}}>
             <div style={{flex: window.innerWidth < 760 ? "none" : 1, minWidth:0}}>
-              <Semaforo semaforo={semaforo} info={semaforoInfo} onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val, auto: false, actualizado: new Date().toISOString() }); }} puedeEditar={puedeEditarSeguimiento} />
+              <Semaforo semaforo={semaforo} info={semaforoInfo} />
             </div>
             {puedeCrear && (
               <button onClick={crear} disabled={creando} style={{width: window.innerWidth < 760 ? "100%" : 260, flexShrink:0, border:"none",borderRadius:14,cursor:creando?"wait":"pointer",background: creando?"#7a5a1e":"linear-gradient(135deg, #fbb040, #f57c00)",color:"#fff",padding:"17px 20px",marginBottom:20,fontSize:17,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:10,boxShadow:"0 6px 18px rgba(245,124,0,0.35)",fontFamily:"inherit",opacity:creando?0.85:1}}>
@@ -8404,6 +8862,21 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {(rol === "admin" || rol === "ventas") && (
+            <ModTile onClick={() => setVista("clasificacion")} label="Clasificación"
+              stat={<span style={{color:C.muted}}>Clientes A / B / C</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gClasif" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#fbb040"/><stop offset="1" stopColor="#f57c00"/>
+                </linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gClasif)"/>
+                <rect x="22" y="46" width="12" height="20" rx="2" fill="#fff"/>
+                <rect x="38" y="34" width="12" height="32" rx="2" fill="#fff" fillOpacity="0.85"/>
+                <rect x="54" y="24" width="12" height="42" rx="2" fill="#fff" fillOpacity="0.7"/>
+              </svg>
+            </ModTile>
+            )}
+
             {rol === "admin" && (
             <ModTile onClick={() => setVista("checador")} label="Checador"
               stat={<span style={{color:C.muted}}>{checadorRoster.length>0 ? checadorRoster.length+" empleado"+(checadorRoster.length===1?"":"s") : "Configurar"}</span>}>
@@ -8414,6 +8887,20 @@ const cancelar = async (id) => {
                 <g stroke="#fff" strokeWidth="4" strokeLinecap="round">
                   <path d="M44 30 v15 l10 6"/>
                 </g>
+              </svg>
+            </ModTile>
+            )}
+
+            {rol === "admin" && (
+            <ModTile onClick={() => setVista("cfgsemaforo")} label="Config. semáforo"
+              stat={<span style={{color:C.muted}}>Capacidad diaria</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gCfgSem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#f5a623"/><stop offset="1" stopColor="#c0392b"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCfgSem)"/>
+                <circle cx="30" cy="30" r="7" fill="#fff"/>
+                <circle cx="44" cy="44" r="7" fill="#ffffff" fillOpacity="0.85"/>
+                <circle cx="58" cy="58" r="7" fill="#ffffff" fillOpacity="0.7"/>
+                <g stroke="#fff" strokeWidth="3.4" strokeLinecap="round"><path d="M30 44 v20 M44 30 v6 M44 52 v12 M58 30 v20"/></g>
               </svg>
             </ModTile>
             )}
@@ -8485,7 +8972,6 @@ const cancelar = async (id) => {
     onDashboard={() => setVista("dashboard")}
     semaforo={semaforo}
     semaforoInfo={semaforoInfo}
-    onSemaforo={async (val) => { await setDoc(doc(db, "config", "semaforo"), { valor: val, auto: false, actualizado: new Date().toISOString() }); }}
     puedeEditarSeguimiento={puedeEditarSeguimiento}
     onBack={() => setVista("home")}
   />
@@ -8672,11 +9158,27 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "clasificacion" && (rol === "admin" || rol === "ventas") && (
+        <Clasificacion
+          usuario={usuario}
+          rol={rol}
+          onBack={() => setVista("home")}
+        />
+      )}
+
       {vista === "usuarios" && rol === "admin" && (
         <GestionUsuarios
           usuariosDoc={usuariosDoc}
           onGuardar={guardarUsuarios}
           miEmail={usuario.email}
+        />
+      )}
+
+      {vista === "cfgsemaforo" && rol === "admin" && (
+        <ConfigSemaforo
+          onCargar={cargarCfgSemaforo}
+          onGuardar={guardarCfgSemaforo}
+          onBack={() => setVista("home")}
         />
       )}
 

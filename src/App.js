@@ -8314,15 +8314,18 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     await syncCalendarioBordador(orden);
     await upsertLogosDeOrden(orden);
   };
-  // Catálogo de logos (para autocompletado en la orden y precios en Pago a bordadores)
+  // Catálogo de logos (para autocompletado en la orden y precios en Pago a bordadores).
+  // Dato casi estático: se suscribe UNA sola vez por sesión y NO se re-engancha por
+  // actividad. Un listener persistente sobre datos que casi no cambian cuesta ~1 lectura
+  // completa al entrar y luego solo deltas (rarísimos), en vez de re-leer los ~600 logos
+  // en cada ciclo inactiva->activa. La UI del catálogo se mantiene fresca automáticamente.
   useEffect(() => {
     if (!usuario?.email) return;
-    if (!escuchasActivas) return;
     const unsub = onSnapshot(collection(db, "logos"), snap => {
       setLogosCatalogo(snap.docs.map(d => ({ ...d.data(), id: d.id })));
     });
     return unsub;
-  }, [usuario, escuchasActivas]);
+  }, [usuario]);
   const logoSlug = (nombre) => (nombre||"").trim().toLowerCase().replace(/[^a-z0-9áéíóúüñ]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120);
   // Da de alta (sin precio) los logos nuevos que aparezcan en una orden, sin tocar precios existentes
   const upsertLogosDeOrden = async (orden) => {

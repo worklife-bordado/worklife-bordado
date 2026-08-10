@@ -4725,7 +4725,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 }
 
 
-function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asignables, miEmail }) {
+function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, onReprogramar, esAdmin, asignables, miEmail }) {
   const [texto, setTexto] = useState("");
   const [vence, setVence] = useState("");
   const [para, setPara] = useState((asignables[0] && asignables[0].email) || "");
@@ -4735,40 +4735,99 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
   const [verHechas, setVerHechas] = useState(false);
   const [deshacer, setDeshacer] = useState(null); // {id, texto} de la última completada
   const timerDeshacer = useRef(null);
-  const etiquetaDe = (email) => { const a = asignables.find(x => x.email === email); return a ? (a.label === "Yo" ? "Yo" : a.label.split(" · ")[0]) : (email||"").split("@")[0]; };
+  // ── Estado del calendario ──
+  const [vista, setVista] = useState("lista"); // "lista" | "mes"
   const hoyISO = () => { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); };
+  const hoy = hoyISO();
+  const [sel, setSel] = useState(hoy);            // día seleccionado en el calendario (ISO)
+  const [cursor, setCursor] = useState(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const [verSinFecha, setVerSinFecha] = useState(false);
+  const [reprogId, setReprogId] = useState(null); // id de la tarea que se está reprogramando
+  const taRef = useRef(null);
+  const caretRef = useRef(null);
+
+  const etiquetaDe = (email) => { const a = asignables.find(x => x.email === email); return a ? (a.label === "Yo" ? "Yo" : a.label.split(" · ")[0]) : (email||"").split("@")[0]; };
   const fmtVence = (iso) => { if (!iso) return ""; const p = iso.split("-").map(Number); return new Date(p[0], p[1]-1, p[2]).toLocaleDateString("es-MX", { weekday:"short", day:"numeric", month:"short" }); };
   const fmtHecha = (iso) => { if (!iso) return ""; const dt = new Date(iso); return dt.toLocaleDateString("es-MX",{day:"numeric",month:"short"}) + " " + dt.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"}); };
+  const fmtDiaLargo = (iso) => { if (!iso) return ""; const p = iso.split("-").map(Number); return new Date(p[0], p[1]-1, p[2]).toLocaleDateString("es-MX", { weekday:"long", day:"numeric", month:"long" }); };
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const isoDe = (y, m, d) => y + "-" + pad2(m+1) + "-" + pad2(d);
+  const diasMes = (y, m) => new Date(y, m+1, 0).getDate();
+  const offsetLunes = (y, m) => (new Date(y, m, 1).getDay() + 6) % 7; // 0 = lunes
 
-  const hoy = hoyISO();
   const filtro = (t) => !esAdmin ? true : verDe === "mios" ? t.para === miEmail : verDe === "todos" ? true : t.para === verDe;
   const visibles = tareas.filter(t => !t.completada && filtro(t));
   const hechas = tareas.filter(t => t.completada && filtro(t)).sort((a,b) => (b.completadaEl||"").localeCompare(a.completadaEl||"")).slice(0, 25);
+  const sinFecha = visibles.filter(t => !t.vence);
 
-  // Agrupación por vencimiento: vencidas primero, luego hoy, próximas y sin fecha.
+  // Agrupación por vencimiento (vista Lista): vencidas primero, luego hoy, próximas y sin fecha.
   const grupos = [
     { key:"venc", label:"Vencidas",  color:"#e5484d", items: visibles.filter(t => t.vence && t.vence < hoy).sort((a,b)=>a.vence.localeCompare(b.vence)) },
     { key:"hoy",  label:"Hoy",       color:"#f5a623", items: visibles.filter(t => t.vence === hoy) },
     { key:"prox", label:"Próximas",  color:C.accent,  items: visibles.filter(t => t.vence && t.vence > hoy).sort((a,b)=>a.vence.localeCompare(b.vence)) },
-    { key:"sin",  label:"Sin fecha", color:C.muted,   items: visibles.filter(t => !t.vence) },
+    { key:"sin",  label:"Sin fecha", color:C.muted,   items: sinFecha },
   ].filter(g => g.items.length);
 
+  const inputBase = { background:C.bg, border:"1px solid "+C.border, borderRadius:9, color:C.text, outline:"none", fontFamily:"inherit" };
+
+  // Restaura la posición del cursor tras las transformaciones del textarea de lista.
+  useEffect(() => {
+    if (caretRef.current != null && taRef.current) {
+      const p = caretRef.current; caretRef.current = null;
+      try { taRef.current.selectionStart = taRef.current.selectionEnd = p; } catch (e) {}
+    }
+  }, [texto]);
+
   const agregar = async () => {
-    const t = texto.trim(); if (!t) return;
+    const t = texto.replace(/\s+$/,"").trim(); if (!t) return;
     await onAgregar(t, esAdmin ? para : null, vence);
-    setTexto(""); setVence("");
+    setTexto("");
+    if (vista === "lista") setVence("");
     if (esAdmin && para !== ((asignables[0] && asignables[0].email) || "")) {
       const lbl = (asignables.find(a => a.email === para) || {}).label || "usuario";
       setConfirm("✓ Tarea asignada a " + lbl);
       setTimeout(() => setConfirm(""), 2500);
     }
   };
+
+  // Textarea con lista por guiones: "-" al inicio de línea abre viñeta; Enter continúa
+  // la lista; Enter en viñeta vacía la cierra; Ctrl/Cmd+Enter guarda. Un guion a media
+  // palabra se respeta tal cual.
+  const onKeyTexto = (e) => {
+    const ta = e.target;
+    const val = ta.value;
+    const start = ta.selectionStart;
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); agregar(); return; }
+    const lineStart = val.lastIndexOf("\n", start - 1) + 1;
+    const antesCaret = val.slice(lineStart, start); // texto de la línea actual hasta el cursor
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const esVinneta = /^-\s/.test(antesCaret);
+      if (esVinneta) {
+        const contenido = antesCaret.replace(/^-\s/, "");
+        if (contenido.trim() === "") {
+          // viñeta vacía -> cerrar lista (quitar el marcador "- ")
+          const nuevo = val.slice(0, lineStart) + val.slice(lineStart + 2);
+          setTexto(nuevo); caretRef.current = lineStart; return;
+        }
+        const nuevo = val.slice(0, start) + "\n- " + val.slice(start);
+        setTexto(nuevo); caretRef.current = start + 3; return;
+      }
+      const nuevo = val.slice(0, start) + "\n" + val.slice(start);
+      setTexto(nuevo); caretRef.current = start + 1; return;
+    }
+    if (e.key === "-" && antesCaret === "") {
+      e.preventDefault();
+      const nuevo = val.slice(0, start) + "- " + val.slice(start);
+      setTexto(nuevo); caretRef.current = start + 2; return;
+    }
+  };
+
   const marcar = (id) => {
     const t = tareas.find(x => x.id === id);
     setCompletando(c => [...c, id]);
     setTimeout(() => {
       onCompletar(id);
-      // Ventana para deshacer un toque accidental (6 segundos)
       setDeshacer({ id, texto: (t && t.texto) || "" });
       if (timerDeshacer.current) clearTimeout(timerDeshacer.current);
       timerDeshacer.current = setTimeout(() => setDeshacer(null), 6000);
@@ -4782,8 +4841,27 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
     if (timerDeshacer.current) clearTimeout(timerDeshacer.current);
     if (deshacer && deshacer.id === objetivo) setDeshacer(null);
   };
+  const reprogramar = (id, fecha) => { setReprogId(null); onReprogramar(id, fecha || ""); };
+  const clicDia = (iso) => { setSel(iso); setVence(iso); setReprogId(null); };
+  const mover = (delta) => { let { y, m } = cursor; m += delta; if (m < 0) { m = 11; y--; } if (m > 11) { m = 0; y++; } setCursor({ y, m }); };
+  const irHoy = () => { const d = new Date(); setCursor({ y: d.getFullYear(), m: d.getMonth() }); setSel(hoy); setVence(hoy); };
 
-  const inputBase = { background:C.bg, border:"1px solid "+C.border, borderRadius:9, color:C.text, outline:"none", fontFamily:"inherit" };
+  // Muestra el texto de una tarea: 1ª línea = título; líneas "- ..." = viñetas.
+  const renderTexto = (txt, tachado) => {
+    const ls = (txt || "").split("\n");
+    const tit = ls[0] || "";
+    const resto = ls.slice(1);
+    return (
+      <div style={{minWidth:0}}>
+        <div style={{color:C.text,fontSize:14,textDecoration:tachado?"line-through":"none",wordBreak:"break-word"}}>{tit}</div>
+        {resto.map((l, i) => {
+          const b = /^-\s/.test(l);
+          return <div key={i} style={{color:C.muted,fontSize:13,paddingLeft:b?14:2,textDecoration:tachado?"line-through":"none",wordBreak:"break-word"}}>{b ? "• " : ""}{b ? l.replace(/^-\s/,"") : l}</div>;
+        })}
+      </div>
+    );
+  };
+
   const filaTarea = (t) => {
     const done = completando.includes(t.id);
     const ajena = esAdmin && verDe !== "mios" && t.para !== miEmail;
@@ -4791,14 +4869,112 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
     const esHoy = t.vence === hoy;
     const bc = venc ? "#e5484d" : esHoy ? "#f5a623" : C.muted;
     return (
-      <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 0",borderBottom:"1px solid "+C.border,opacity:done?0.4:1,transition:"opacity 0.35s"}}>
-        <button onClick={()=>!done && marcar(t.id)} role="checkbox" aria-checked={done} aria-label={"Completar tarea: " + t.texto}
-          style={{padding:"8px",margin:"-4px 0",cursor:done?"default":"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:"none",border:"none"}}>
-          <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
-        </button>
-        <div style={{flex:1,minWidth:0,color:C.text,fontSize:14,textDecoration:done?"line-through":"none",padding:"4px 0"}}>{t.texto}</div>
-        {t.vence && <span title={venc?"Vencida":esHoy?"Vence hoy":"Programada"} style={{fontSize:11,fontWeight:700,color:bc,background:bc+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{venc?"⚠ ":""}{fmtVence(t.vence)}</span>}
-        {ajena && <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap"}}>{etiquetaDe(t.para)}</span>}
+      <div key={t.id} style={{padding:"7px 0",borderBottom:"1px solid "+C.border,opacity:done?0.4:1,transition:"opacity 0.35s"}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+          <button onClick={()=>!done && marcar(t.id)} role="checkbox" aria-checked={done} aria-label={"Completar tarea: " + (t.texto||"").split("\n")[0]}
+            style={{padding:"6px",margin:"-2px 0",cursor:done?"default":"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",background:"none",border:"none"}}>
+            <div style={{width:22,height:22,borderRadius:"50%",border:"2px solid "+(done?"#4caf7d":C.muted),background:done?"#4caf7d":"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800}}>{done?"✓":""}</div>
+          </button>
+          <div style={{flex:1,minWidth:0,padding:"2px 0"}}>{renderTexto(t.texto, done)}</div>
+          {t.vence
+            ? <button onClick={()=>setReprogId(reprogId===t.id?null:t.id)} title="Reprogramar" aria-label="Reprogramar tarea" style={{fontSize:11,fontWeight:700,color:bc,background:bc+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap",border:"none",cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>{venc?"⚠ ":""}{fmtVence(t.vence)}</button>
+            : <button onClick={()=>setReprogId(reprogId===t.id?null:t.id)} title="Poner fecha" aria-label="Poner fecha" style={{fontSize:12,color:C.muted,background:"transparent",padding:"3px 8px",borderRadius:12,border:"1px solid "+C.border,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>📅</button>}
+          {ajena && <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"3px 9px",borderRadius:12,whiteSpace:"nowrap",flexShrink:0}}>{etiquetaDe(t.para)}</span>}
+        </div>
+        {reprogId===t.id && (
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"8px 0 2px 34px"}}>
+            <input type="date" defaultValue={t.vence||""} onChange={e=>reprogramar(t.id, e.target.value)} aria-label="Nueva fecha" style={{...inputBase,padding:"8px 10px",fontSize:13,colorScheme:"dark"}}/>
+            {t.vence && <button onClick={()=>reprogramar(t.id, "")} style={{border:"1px solid "+C.border,borderRadius:8,background:C.bg,color:C.muted,padding:"7px 11px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Quitar fecha</button>}
+            <button onClick={()=>setReprogId(null)} style={{border:"none",background:"transparent",color:C.muted,padding:"7px 6px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const formAgregar = (modo) => (
+    <div style={{marginBottom:12}}>
+      <textarea ref={taRef} value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={onKeyTexto}
+        aria-label="Nueva tarea"
+        placeholder={modo==="mes" ? ("Tarea para " + fmtVence(sel) + "…   (- para lista)") : "Escribe una tarea…   (- al inicio de línea para lista)"}
+        rows={Math.min(6, Math.max(2, (texto.match(/\n/g)||[]).length + 1))}
+        style={{...inputBase,width:"100%",boxSizing:"border-box",padding:"11px 14px",fontSize:14,resize:"vertical",minHeight:46,lineHeight:1.5}}/>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8,alignItems:"center"}}>
+        {modo==="lista"
+          ? <input type="date" value={vence} onChange={e=>setVence(e.target.value)} aria-label="Fecha de vencimiento (opcional)" title="Fecha de vencimiento (opcional)" style={{...inputBase,padding:"10px 12px",fontSize:13,colorScheme:"dark"}}/>
+          : <span style={{fontSize:12.5,color:C.muted,alignSelf:"center"}}>📅 {fmtVence(sel)}</span>}
+        {esAdmin && (
+          <select value={para} onChange={e=>setPara(e.target.value)} aria-label="Asignar a" title="Asignar a" style={{...inputBase,padding:"11px 12px",fontSize:13}}>
+            {asignables.map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
+          </select>
+        )}
+        <button onClick={agregar} style={{border:"none",borderRadius:9,cursor:"pointer",background:C.accent,color:"#1a1d27",padding:"11px 18px",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>Agregar</button>
+        <span style={{fontSize:11,color:C.muted,alignSelf:"center"}}>Ctrl+Enter</span>
+      </div>
+    </div>
+  );
+
+  const btnTog = (activo) => ({ background: activo?C.accent:"transparent", border:"none", color: activo?"#1a1d27":C.muted, height:32, padding:"0 14px", cursor:"pointer", fontSize:12.5, fontWeight:800, fontFamily:"inherit" });
+  const navBtn = { background:"transparent", border:"1px solid "+C.border, borderRadius:9, color:C.text, width:32, height:32, cursor:"pointer", fontSize:16, fontFamily:"inherit", lineHeight:1 };
+  const DOW = ["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"];
+
+  const renderMes = () => {
+    const { y, m } = cursor;
+    const off = offsetLunes(y, m);
+    const dim = diasMes(y, m);
+    const celdas = [];
+    for (let i=0;i<off;i++) celdas.push(null);
+    for (let d=1;d<=dim;d++) celdas.push(d);
+    while (celdas.length % 7 !== 0) celdas.push(null);
+    const tituloMes = new Date(y, m, 1).toLocaleDateString("es-MX", { month:"long", year:"numeric" });
+    return (
+      <div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,gap:8,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <button onClick={()=>mover(-1)} aria-label="Mes anterior" style={navBtn}>‹</button>
+            <div style={{fontSize:15,fontWeight:800,color:C.text,minWidth:150,textAlign:"center",textTransform:"capitalize"}}>{tituloMes}</div>
+            <button onClick={()=>mover(1)} aria-label="Mes siguiente" style={navBtn}>›</button>
+          </div>
+          <button onClick={irHoy} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:9,color:C.muted,height:32,padding:"0 12px",cursor:"pointer",fontSize:12.5,fontFamily:"inherit"}}>Hoy</button>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:4}}>
+          {DOW.map(d => <div key={d} style={{textAlign:"center",fontSize:11,color:C.muted,padding:"2px 0"}}>{d}</div>)}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+          {celdas.map((d, i) => {
+            if (d === null) return <div key={"e"+i}/>;
+            const iso = isoDe(y, m, d);
+            const arr = visibles.filter(t => t.vence === iso);
+            const isT = iso === hoy;
+            const isS = iso === sel;
+            return (
+              <div key={iso} onClick={()=>clicDia(iso)} role="button" aria-label={"Día " + d + (arr.length ? ", " + arr.length + " tareas" : "")}
+                style={{minHeight:66,border:"1px solid "+(isS?C.accent:C.border),borderRadius:9,padding:"4px 5px",cursor:"pointer",background:isS?C.accent+"14":"transparent",overflow:"hidden"}}>
+                <div style={{fontSize:12,fontWeight:isT?800:400,color:isT?"#1a1d27":C.muted,...(isT?{background:"#f5a623",width:20,height:20,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center"}:{})}}>{d}</div>
+                {arr.slice(0,2).map((t,k) => {
+                  const venc = t.vence < hoy; const esHoy = t.vence === hoy;
+                  const bc = venc ? "#e5484d" : esHoy ? "#f5a623" : C.accent;
+                  const ajena = esAdmin && verDe !== "mios" && t.para !== miEmail;
+                  return <div key={k} style={{fontSize:10.5,color:C.text,background:bc+"26",borderLeft:"2px solid "+bc,borderRadius:3,padding:"1px 4px",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ajena?"● ":""}{(t.texto||"").split("\n")[0]}</div>;
+                })}
+                {arr.length > 2 && <div style={{fontSize:10,color:C.muted,marginTop:2}}>+{arr.length-2} más</div>}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{marginTop:14,borderTop:"1px solid "+C.border,paddingTop:12}}>
+          <div style={{fontSize:13,fontWeight:800,color:C.text,marginBottom:8,textTransform:"capitalize"}}>{fmtDiaLargo(sel)}</div>
+          {(() => { const items = visibles.filter(t => t.vence === sel); return items.length ? items.map(filaTarea) : <div style={{fontSize:13,color:C.muted,padding:"2px 0 10px"}}>Sin tareas este día.</div>; })()}
+          <div style={{marginTop:10}}>{formAgregar("mes")}</div>
+        </div>
+        {sinFecha.length > 0 && (
+          <div style={{marginTop:6,borderTop:"1px solid "+C.border,paddingTop:8}}>
+            <button onClick={()=>setVerSinFecha(v=>!v)} aria-expanded={verSinFecha} style={{background:"none",border:"none",color:C.muted,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:"4px 0",display:"flex",alignItems:"center",gap:6}}>
+              {verSinFecha ? "▾" : "▸"} Sin fecha ({sinFecha.length})
+            </button>
+            {verSinFecha && sinFecha.map(filaTarea)}
+          </div>
+        )}
       </div>
     );
   };
@@ -4807,42 +4983,48 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"20px 18px",marginTop:24}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
         <div style={{fontSize:17,fontWeight:800,color:C.text}}>📋 Pendientes</div>
-        {esAdmin && (
-          <select value={verDe} onChange={e=>setVerDe(e.target.value)} aria-label="Ver pendientes de" title="Ver pendientes de" style={{...inputBase,border:"1px solid "+(verDe==="mios"?C.border:C.accent),color:verDe==="mios"?C.text:C.accent,padding:"8px 10px",fontSize:12.5,fontWeight:700}}>
-            <option value="mios">👤 Mis pendientes</option>
-            {asignables.filter(a => a.email !== miEmail).map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
-            <option value="todos">👥 Todos</option>
-          </select>
-        )}
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {esAdmin && (
+            <select value={verDe} onChange={e=>setVerDe(e.target.value)} aria-label="Ver pendientes de" title="Ver pendientes de" style={{...inputBase,border:"1px solid "+(verDe==="mios"?C.border:C.accent),color:verDe==="mios"?C.text:C.accent,padding:"8px 10px",fontSize:12.5,fontWeight:700}}>
+              <option value="mios">👤 Mis pendientes</option>
+              {asignables.filter(a => a.email !== miEmail).map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
+              <option value="todos">👥 Todos</option>
+            </select>
+          )}
+          <div style={{display:"flex",border:"1px solid "+C.border,borderRadius:9,overflow:"hidden"}}>
+            <button onClick={()=>setVista("lista")} style={btnTog(vista==="lista")}>Lista</button>
+            <button onClick={()=>{ setVista("mes"); setVence(sel); }} style={btnTog(vista==="mes")}>Mes</button>
+          </div>
+        </div>
       </div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-        <input value={texto} onChange={e=>setTexto(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") agregar(); }} aria-label="Nueva tarea" placeholder="Escribe una tarea..." style={{...inputBase,flex:"1 1 180px",minWidth:0,padding:"11px 14px",fontSize:14}}/>
-        <input type="date" value={vence} onChange={e=>setVence(e.target.value)} aria-label="Fecha de vencimiento (opcional)" title="Fecha de vencimiento (opcional)" style={{...inputBase,padding:"10px 12px",fontSize:13,colorScheme:"dark"}}/>
-        {esAdmin && (
-          <select value={para} onChange={e=>setPara(e.target.value)} aria-label="Asignar a" title="Asignar a" style={{...inputBase,padding:"11px 12px",fontSize:13}}>
-            {asignables.map(a => <option key={a.email} value={a.email}>{a.label}</option>)}
-          </select>
-        )}
-        <button onClick={agregar} style={{border:"none",borderRadius:9,cursor:"pointer",background:C.accent,color:"#1a1d27",padding:"11px 18px",fontSize:14,fontWeight:800,fontFamily:"inherit"}}>Agregar</button>
-      </div>
+
       {confirm && <div style={{color:"#4caf7d",fontSize:13,fontWeight:700,marginBottom:10}}>{confirm}</div>}
       {deshacer && (
         <div style={{display:"flex",alignItems:"center",gap:10,background:"#13351f",border:"1px solid #4caf7d",borderRadius:10,padding:"10px 14px",marginBottom:10}}>
-          <div style={{flex:1,fontSize:13,color:"#cdeed9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✓ Completada: {deshacer.texto}</div>
+          <div style={{flex:1,fontSize:13,color:"#cdeed9",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✓ Completada: {(deshacer.texto||"").split("\n")[0]}</div>
           <button onClick={()=>revivir()} style={{border:"none",borderRadius:8,background:"#4caf7d",color:"#fff",padding:"8px 14px",fontSize:12.5,fontWeight:800,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩ Deshacer</button>
         </div>
       )}
-      {!visibles.length && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>{(!esAdmin || verDe==="mios") ? "No tienes pendientes 🎉" : "Sin pendientes aquí 🎉"}</div>}
-      {grupos.map(g => (
-        <div key={g.key} style={{marginBottom:2}}>
-          <div style={{display:"flex",alignItems:"center",gap:7,margin:"12px 0 4px"}}>
-            <span style={{width:8,height:8,borderRadius:"50%",background:g.color,flexShrink:0}}/>
-            <span style={{fontSize:11.5,fontWeight:800,color:g.color,textTransform:"uppercase",letterSpacing:0.4}}>{g.label}</span>
-            <span style={{fontSize:11,color:C.muted}}>({g.items.length})</span>
-          </div>
-          {g.items.map(filaTarea)}
+
+      {vista === "lista" && (
+        <div>
+          {formAgregar("lista")}
+          {!visibles.length && <div style={{color:C.muted,fontSize:14,textAlign:"center",padding:"14px 0"}}>{(!esAdmin || verDe==="mios") ? "No tienes pendientes 🎉" : "Sin pendientes aquí 🎉"}</div>}
+          {grupos.map(g => (
+            <div key={g.key} style={{marginBottom:2}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,margin:"12px 0 4px"}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:g.color,flexShrink:0}}/>
+                <span style={{fontSize:11.5,fontWeight:800,color:g.color,textTransform:"uppercase",letterSpacing:0.4}}>{g.label}</span>
+                <span style={{fontSize:11,color:C.muted}}>({g.items.length})</span>
+              </div>
+              {g.items.map(filaTarea)}
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      {vista === "mes" && renderMes()}
+
       {hechas.length > 0 && (
         <div style={{marginTop:14,borderTop:"1px solid "+C.border,paddingTop:8}}>
           <button onClick={()=>setVerHechas(v=>!v)} aria-expanded={verHechas} style={{background:"none",border:"none",color:C.muted,fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",padding:"4px 0",display:"flex",alignItems:"center",gap:6}}>
@@ -4852,10 +5034,10 @@ function Pendientes({ tareas, onAgregar, onCompletar, onDeshacer, esAdmin, asign
             <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:"1px solid "+C.border}}>
               <span style={{color:"#4caf7d",fontSize:14,flexShrink:0}}>✓</span>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{color:C.muted,fontSize:13.5,textDecoration:"line-through",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.texto}</div>
+                <div style={{color:C.muted,fontSize:13.5,textDecoration:"line-through",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(t.texto||"").split("\n")[0]}</div>
                 <div style={{color:C.muted,fontSize:11,opacity:0.8}}>{etiquetaDe(t.completadaPor)} · {fmtHecha(t.completadaEl)}</div>
               </div>
-              <button onClick={()=>revivir(t.id)} title="Reactivar" aria-label={"Reactivar tarea: " + t.texto} style={{border:"1px solid "+C.border,borderRadius:8,background:C.bg,color:C.muted,padding:"5px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩</button>
+              <button onClick={()=>revivir(t.id)} title="Reactivar" aria-label={"Reactivar tarea: " + (t.texto||"").split("\n")[0]} style={{border:"1px solid "+C.border,borderRadius:8,background:C.bg,color:C.muted,padding:"5px 10px",fontSize:11.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>↩</button>
             </div>
           ))}
         </div>
@@ -7784,6 +7966,10 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     // Al reactivar, se limpia expiraEl para que el TTL no la borre.
     try { await updateDoc(doc(db, "tareas", id), { completada: false, completadaEl: "", completadaPor: "", expiraEl: null }); } catch (e) {}
   };
+  // Reprograma (o quita) la fecha de vencimiento de una tarea desde el calendario.
+  const reprogramarTarea = async (id, vence) => {
+    try { await updateDoc(doc(db, "tareas", id), { vence: vence || "" }); } catch (e) {}
+  };
 
   // ── Rutas (hoja de ruta diaria + cierre) ──────────────────────────────────
   useEffect(() => {
@@ -8946,6 +9132,7 @@ const cancelar = async (id) => {
             onAgregar={agregarTarea}
             onCompletar={completarTarea}
             onDeshacer={deshacerTarea}
+            onReprogramar={reprogramarTarea}
             esAdmin={rol === "admin"}
             miEmail={usuario.email}
             asignables={(() => {

@@ -239,7 +239,7 @@ function emptyOrden(ordenes) {
   const pos = {};
   POSICIONES.forEach(p => pos[p.key] = emptyPosicion());
   return {
-    id: Date.now(),
+    id: "o" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
     seguimientoToken: genToken(),
     numero: nextNumero(ordenes),
     cliente: "",
@@ -7679,6 +7679,7 @@ function AppInner() {
   const [activa,   setActiva]   = useState(null);
   const [semaforo, setSemaforo] = useState("verde");
   const [semaforoInfo, setSemaforoInfo] = useState({ valor: "verde" });
+  const [capSemaforo, setCapSemaforo] = useState(null);
   const importRef = useRef(null);
 
   // ── Auth listener ─────────────────────────────────────────────────────────
@@ -7808,6 +7809,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   }, [usuario, rol, escuchasActivas]);
 
   // ── Semáforo de carga de trabajo ──────────────────────────────────────────
+  // Se MUESTRA desde config/semaforo (así los roles que NO cargan todas las órdenes también lo ven).
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "config", "semaforo"), snap => {
       const d = snap.exists() ? snap.data() : {};
@@ -7816,35 +7818,47 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     });
     return unsub;
   }, []);
-  // Recalcula el semáforo automáticamente (al liberar una orden a producción).
-  // Elige el color más rápido cuya capacidad hábil cubra la cola comprometida.
-  // `ordenActualizada` evita depender del snapshot async: se refleja de inmediato.
-  const recalcularSemaforo = async (ordenActualizada, capOverride) => {
-    let lista = ordenes;
-    if (ordenActualizada && ordenActualizada.id) {
-      lista = ordenes.some(o => o.id === ordenActualizada.id)
-        ? ordenes.map(o => o.id === ordenActualizada.id ? ordenActualizada : o)
-        : [...ordenes, ordenActualizada];
+  // Capacidad del taller (config/semaforoCfg): se carga una vez y se actualiza al guardarla.
+  // Siempre se resuelve a un objeto (aunque no exista el doc) para que el efecto no quede bloqueado.
+  useEffect(() => {
+    (async () => { try { const cfg = await getDoc(doc(db, "config", "semaforoCfg")); setCapSemaforo(cfg.exists() ? cfg.data() : {}); } catch (e) { setCapSemaforo({}); } })();
+  }, []);
+  // Semáforo REACTIVO: recalcula la cola desde las `ordenes` en memoria y persiste el valor
+  // SOLO si cambió. Antes esto era imperativo (al liberar / mover a calidad / guardar capacidad)
+  // y se "saltaba" si la cadena de guardado fallaba, dejando la cola congelada. Ahora, en cuanto
+  // el listener de `ordenes` refleja cualquier cambio, se recalcula solo. Solo escriben los roles
+  // que cargan TODAS las órdenes (admin/seguimiento); los demás leen el valor guardado.
+  const ultimoSemaforoRef = useRef(null);
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    if (capSemaforo === null) return;              // esperar a que la capacidad se resuelva
+    if (!ordenes || ordenes.length === 0) return;  // esperar a que carguen las órdenes (evita escribir cola 0 en blanco)
+    const s = semaforoAuto(colaProduccion(ordenes), new Date(), capSemaforo);
+    const firma = s.id + "|" + s.cola + "|" + s.capacidad + "|" + (s.saturado ? 1 : 0);
+    if (ultimoSemaforoRef.current === firma) return; // ya lo escribimos en esta sesión
+    // Si el valor ya persistido coincide, no reescribir (evita escrituras redundantes).
+    if (semaforoInfo && semaforoInfo.valor === s.id && semaforoInfo.cola === s.cola
+        && semaforoInfo.capacidad === s.capacidad && !!semaforoInfo.saturado === !!s.saturado) {
+      ultimoSemaforoRef.current = firma; return;
     }
-    // Capacidad: si viene capOverride (ej. al guardar en la consola), se usa directo (evita leer un
-    // valor recién escrito). Si no, lectura puntual de config/semaforoCfg. Respaldo: valores por defecto.
-    let cap = capOverride || null;
-    if (!cap) { try { const cfg = await getDoc(doc(db, "config", "semaforoCfg")); if (cfg.exists()) cap = cfg.data(); } catch (e) {} }
-    const s = semaforoAuto(colaProduccion(lista), new Date(), cap);
-    try {
-      await setDoc(doc(db, "config", "semaforo"), {
-        valor: s.id, auto: true, cola: s.cola, dias: s.dias, capacidad: s.capacidad,
-        saturado: s.saturado, actualizado: new Date().toISOString(), actualizadoPor: usuario.email,
-      }, { merge: true });
-    } catch (e) {}
-  };
+    ultimoSemaforoRef.current = firma;
+    (async () => {
+      try {
+        await setDoc(doc(db, "config", "semaforo"), {
+          valor: s.id, auto: true, cola: s.cola, dias: s.dias, capacidad: s.capacidad,
+          saturado: s.saturado, actualizado: new Date().toISOString(), actualizadoPor: usuario.email,
+        }, { merge: true });
+      } catch (e) {}
+    })();
+  }, [ordenes, capSemaforo, rol, usuario, semaforoInfo]);
   // Consola de admin: leer la capacidad actual (lectura puntual) y guardarla + recalcular.
   const cargarCfgSemaforo = async () => {
     try { const cfg = await getDoc(doc(db, "config", "semaforoCfg")); return cfg.exists() ? cfg.data() : null; } catch (e) { return null; }
   };
   const guardarCfgSemaforo = async ({ lv, sab }) => {
     await setDoc(doc(db, "config", "semaforoCfg"), { lv, sab, actualizado: new Date().toISOString(), actualizadoPor: usuario.email }, { merge: true });
-    await recalcularSemaforo(null, { lv, sab }); // aplica la capacidad nueva al instante
+    setCapSemaforo({ lv, sab }); // el efecto reactivo del semáforo recalcula con la capacidad nueva
   };
 
   // ── Lista de bordadores (config) ──────────────────────────────────────────
@@ -8412,10 +8426,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       historial: [...(orden.historial||[]), { etapa: nuevaEtapa, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(nuevaEtapa).label}" desde el tablero` }],
     };
     await guardarOrden(actualizada);
-    // Al salir de la cola de producción (bordado -> calidad) el semáforo puede mejorar: recalcular.
-    if (orden.etapa === "bordado" && nuevaEtapa === "calidad") {
-      try { await recalcularSemaforo(actualizada); } catch (e) {}
-    }
+    // El semáforo se recalcula solo (efecto reactivo sobre `ordenes`).
     // Registrar el cambio de etapa en el historial (igual que al guardar desde el detalle)
     try {
       await addDoc(collection(db, "historial"), {
@@ -8595,10 +8606,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       form = { ...form, historial: [...(form.historial||[]), { etapa: form.etapa, fecha: new Date().toISOString(), nota }] };
     }
     await guardarOrden(form);
-    // Al salir de la cola de producción (bordado -> calidad) el semáforo puede mejorar: recalcular.
-    if (anterior && anterior.etapa === "bordado" && form.etapa === "calidad") {
-      try { await recalcularSemaforo(form); } catch (e) {}
-    }
+    // El semáforo se recalcula solo (efecto reactivo sobre `ordenes`).
 // Registrar cambios en historial
 if (anterior) {
   const camposIgnorar = ['historial', 'posiciones', 'id', 'creadoPor', 'creadoPorNombre', 'prendas', 'seguimientoToken'];
@@ -9389,7 +9397,6 @@ const cancelar = async (id) => {
           catalogoLogos={logosCatalogo}
           usuariosRoles={rolesActivos}
           onGenerarEnvio={(rol === "admin" || rol === "seguimiento") ? prepararEnvioDesdeOrden : null}
-          onLiberar={recalcularSemaforo}
           semaforo={semaforo}
         />
       )}

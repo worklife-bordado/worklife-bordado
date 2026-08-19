@@ -2822,15 +2822,16 @@ function SeguimientoPublico({ token }) {
 }
 
 // ── Calendario público del bordador (proveedor externo, solo lectura por token) ──
-function CalendarioBordador({ token }) {
-  const [info, setInfo] = useState(undefined);   // undefined=cargando, null=token inválido, {nombre} si existe
+function CalendarioBordador({ token, todos }) {
+  const [info, setInfo] = useState(todos ? { nombre: "Todos los bordadores", todos: true } : undefined);   // undefined=cargando, null=token inválido, {nombre} si existe
   const [ordenes, setOrdenes] = useState([]);
   const hoy = new Date();
   const [anio, setAnio] = useState(hoy.getFullYear());
   const [mes, setMes] = useState(hoy.getMonth());
 
-  // 1) Validar el token -> obtener el nombre del bordador
+  // 1) Validar el token -> obtener el nombre del bordador (se omite en modo monitor "todos")
   useEffect(() => {
+    if (todos) return;
     if (!token) { setInfo(null); return; }
     const unsub = onSnapshot(doc(db, "config", "bordadorTokens"),
       snap => {
@@ -2842,10 +2843,18 @@ function CalendarioBordador({ token }) {
       () => setInfo(null)
     );
     return () => unsub();
-  }, [token]);
+  }, [token, todos]);
 
-  // 2) Con el nombre, escuchar SOLO sus órdenes en tiempo real
+  // 2) Escuchar órdenes en tiempo real. Modo monitor: TODAS. Modo bordador: solo las suyas.
+  // Un listener solo cobra lecturas en la carga inicial y cuando cambian los datos; en reposo, 0.
   useEffect(() => {
+    if (todos) {
+      const unsub = onSnapshot(collection(db, "calendarioBordador"),
+        snap => setOrdenes(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+        () => setOrdenes([])
+      );
+      return () => unsub();
+    }
     if (!info || !info.nombre) { setOrdenes([]); return; }
     const qy = query(collection(db, "calendarioBordador"), where("bordador", "==", info.nombre));
     const unsub = onSnapshot(qy,
@@ -2853,7 +2862,7 @@ function CalendarioBordador({ token }) {
       () => setOrdenes([])
     );
     return () => unsub();
-  }, [info]);
+  }, [info, todos]);
 
   const NAVY = "#182B55", ORANGE = "#F7941D", GREY = "#8b90a7";
   const wrap = { minHeight:"100vh", background:"#0f1117", color:"#e8eaf0", fontFamily:"'Barlow','Segoe UI',sans-serif", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 12px", boxSizing:"border-box" };
@@ -2872,6 +2881,10 @@ function CalendarioBordador({ token }) {
   const diasEnMes = new Date(anio, mes + 1, 0).getDate();
   const etColor = (et) => (ETAPAS.find(e => e.id === et) || {}).color || C.muted;
   const etLabel = (et) => (ETAPAS.find(e => e.id === et) || {}).label || "Nueva";
+  // Modo monitor: un color estable por bordador (mismo nombre -> mismo color siempre).
+  const PALETA_BORD = ["#4fd1b5","#f7941d","#5b8def","#e5484d","#a06bd4","#f5a623","#8bc34a","#ff7ab6","#00bcd4","#c9a227"];
+  const colorBordador = (nombre) => { let h = 0; const s = String(nombre || ""); for (let i = 0; i < s.length; i++) h = ((h * 31) + s.charCodeAt(i)) >>> 0; return PALETA_BORD[h % PALETA_BORD.length]; };
+  const salirMonitor = () => { if (window.confirm("¿Salir del modo monitor en este dispositivo?")) { try { localStorage.removeItem("wl_modo"); } catch (e) {} window.location.href = "/"; } };
 
   // Agrupar por día (fecha de entrega requerida o reprogramada)
   const porDia = {};
@@ -2921,10 +2934,11 @@ function CalendarioBordador({ token }) {
                 <div style={{fontSize:12, fontWeight:700, color: esHoy(d)?ORANGE:GREY}}>{d}</div>
                 {items.slice(0,4).map(o => {
                   const pz = parseInt(o.piezas) || 0;
+                  const col = todos ? colorBordador(o.bordador) : etColor(o.etapa);
                   return (
-                  <div key={o.id} title={"#"+(o.numero||"")+" · "+etLabel(o.etapa)} style={{background:etColor(o.etapa)+"22", borderLeft:"3px solid "+etColor(o.etapa), borderRadius:4, padding:"3px 4px", lineHeight:1.2, overflow:"hidden"}}>
+                  <div key={o.id} title={"#"+(o.numero||"")+(todos?(" · "+(o.bordador||"")):"")+" · "+etLabel(o.etapa)} style={{background:col+"22", borderLeft:"3px solid "+col, borderRadius:4, padding:"3px 4px", lineHeight:1.2, overflow:"hidden"}}>
                     <div style={{fontWeight:800, fontSize:12, whiteSpace:"nowrap"}}>#{o.numero||"—"}</div>
-                    <div style={{color:GREY, fontSize:9.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{etLabel(o.etapa)}{pz?(" · "+pz+" pz"):""}</div>
+                    <div style={{color:GREY, fontSize:9.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{todos ? (o.bordador||"—") : etLabel(o.etapa)}{pz?(" · "+pz+" pz"):""}</div>
                   </div>
                   );
                 })}
@@ -2934,18 +2948,27 @@ function CalendarioBordador({ token }) {
           })}
         </div>
 
-        {/* Leyenda de estatus */}
+        {/* Leyenda: por bordador (modo monitor) o por etapa (modo bordador) */}
         <div style={{display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", marginTop:16}}>
-          {ETAPAS.map(et => (
-            <div key={et.id} style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color:GREY}}>
-              <span style={{width:10, height:10, borderRadius:2, background:et.color, display:"inline-block"}} />{et.label}
-            </div>
-          ))}
+          {todos
+            ? Array.from(new Set(ordenes.map(o => o.bordador).filter(Boolean))).sort().map(nb => (
+                <div key={nb} style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color:GREY}}>
+                  <span style={{width:10, height:10, borderRadius:2, background:colorBordador(nb), display:"inline-block"}} />{nb}
+                </div>
+              ))
+            : ETAPAS.map(et => (
+                <div key={et.id} style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color:GREY}}>
+                  <span style={{width:10, height:10, borderRadius:2, background:et.color, display:"inline-block"}} />{et.label}
+                </div>
+              ))}
         </div>
 
         <div style={{textAlign:"center", color:GREY, fontSize:11, marginTop:20}}>
           WORK-LIFE · Esta página se actualiza sola · Solo lectura
         </div>
+        {todos && (
+          <div onClick={salirMonitor} style={{textAlign:"center", color:GREY, fontSize:10, marginTop:10, cursor:"pointer", textDecoration:"underline", opacity:.6}}>Salir del modo monitor</div>
+        )}
       </div>
     </div>
   );
@@ -7589,6 +7612,9 @@ function AppInner() {
   if (_chk) { try { localStorage.setItem("wl_modo", "checador"); } catch(e){} return <ChecadorPublico />; }
   const _rm = new URLSearchParams(window.location.search).get("rutamovil");
   if (_rm) { try { localStorage.setItem("wl_modo", "rutamovil"); } catch(e){} return <RutaMovil />; }
+  // Monitor del taller: marca el modo pero NO retorna aquí — requiere sesión (cuenta dedicada).
+  const _mon = new URLSearchParams(window.location.search).get("monitor");
+  if (_mon) { try { localStorage.setItem("wl_modo", "monitor"); } catch(e){} }
   // Modo dedicado recordado: la PWA instalada abre en "/" e ignora el ?parametro,
   // así que si este dispositivo ya se usó como checador o hoja de ruta, abre directo ahí.
   let _modo = null; try { _modo = localStorage.getItem("wl_modo"); } catch(e){}
@@ -8795,6 +8821,9 @@ const cancelar = async (id) => {
   );
 
   if (!usuario) return <LoginScreen onLogin={login} error={loginErr}/>;
+  // Modo monitor de taller: sesión iniciada + wl_modo="monitor" -> calendario combinado (solo lectura).
+  // Va antes del gate de rol: la cuenta dedicada no necesita rol para ver el calendario.
+  if (_modo === "monitor") return <CalendarioBordador todos />;
   if (!rol) {
     if (!rolesListo) return <LoginScreen onLogin={login} error={loginErr}/>;
     return (

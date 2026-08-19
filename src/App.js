@@ -173,6 +173,8 @@ const TALLA_GRUPOS = [
 const TALLAS = TALLA_GRUPOS.flatMap(g => [g.ropa, g.num, g.idx]);
 // Clave para salir del modo checador en la tablet (cámbiala por la que tú quieras).
 const CLAVE_SALIDA_CHECADOR = "8006";
+// Token secreto del monitor de taller (enlace ?monitor=<token>, sin login). Cámbialo por el que quieras.
+const TOKEN_MONITOR = "wlmon-9f3k7q2x8w5t";
 
 const ETAPAS = [
   {id:"nueva",     label:"Nueva",           color:"#8b90a7"},
@@ -7613,13 +7615,16 @@ function AppInner() {
   const _rm = new URLSearchParams(window.location.search).get("rutamovil");
   if (_rm) { try { localStorage.setItem("wl_modo", "rutamovil"); } catch(e){} return <RutaMovil />; }
   // Monitor del taller: marca el modo pero NO retorna aquí — requiere sesión (cuenta dedicada).
+  // Monitor del taller (público con token secreto, SIN login). Token válido -> abre el calendario
+  // combinado directo y lo recuerda en el dispositivo. Token inválido -> se ignora (flujo normal).
   const _mon = new URLSearchParams(window.location.search).get("monitor");
-  if (_mon) { try { localStorage.setItem("wl_modo", "monitor"); } catch(e){} }
+  if (_mon === TOKEN_MONITOR) { try { localStorage.setItem("wl_modo", "monitor"); } catch(e){} return <CalendarioBordador todos />; }
   // Modo dedicado recordado: la PWA instalada abre en "/" e ignora el ?parametro,
   // así que si este dispositivo ya se usó como checador o hoja de ruta, abre directo ahí.
   let _modo = null; try { _modo = localStorage.getItem("wl_modo"); } catch(e){}
   if (_modo === "checador") return <ChecadorPublico />;
   if (_modo === "rutamovil") return <RutaMovil />;
+  if (_modo === "monitor") return <CalendarioBordador todos />;
 
   const [usuario,  setUsuario]  = useState(null);   // Firebase user object
   const [rol,      setRol]      = useState(null);   // "admin" | "ventas" | "seguimiento"
@@ -8821,9 +8826,6 @@ const cancelar = async (id) => {
   );
 
   if (!usuario) return <LoginScreen onLogin={login} error={loginErr}/>;
-  // Modo monitor de taller: sesión iniciada + wl_modo="monitor" -> calendario combinado (solo lectura).
-  // Va antes del gate de rol: la cuenta dedicada no necesita rol para ver el calendario.
-  if (_modo === "monitor") return <CalendarioBordador todos />;
   if (!rol) {
     if (!rolesListo) return <LoginScreen onLogin={login} error={loginErr}/>;
     return (

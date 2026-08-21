@@ -2866,6 +2866,26 @@ function CalendarioBordador({ token, todos }) {
     return () => unsub();
   }, [info, todos]);
 
+  // Wake Lock (SOLO en modo monitor/TV): la página le pide a la pantalla no dormirse mientras el
+  // calendario está abierto, y lo vuelve a pedir si la pantalla se reactiva (el permiso se suelta
+  // solo al ocultarse la página). No-op si el navegador no lo soporta. Evita que el Fire TV Stick
+  // o la TV entren en suspensión por inactividad.
+  useEffect(() => {
+    if (!todos) return;
+    if (typeof navigator === "undefined" || !("wakeLock" in navigator)) return;
+    let sentinel = null;
+    let cancelado = false;
+    const pedir = async () => { try { sentinel = await navigator.wakeLock.request("screen"); } catch (e) {} };
+    const alVisibilizar = () => { if (document.visibilityState === "visible" && !cancelado) pedir(); };
+    pedir();
+    document.addEventListener("visibilitychange", alVisibilizar);
+    return () => {
+      cancelado = true;
+      document.removeEventListener("visibilitychange", alVisibilizar);
+      if (sentinel) { try { sentinel.release(); } catch (e) {} sentinel = null; }
+    };
+  }, [todos]);
+
   const NAVY = "#182B55", ORANGE = "#F7941D", GREY = "#8b90a7";
   const wrap = { minHeight:"100vh", background:"#0f1117", color:"#e8eaf0", fontFamily:"'Barlow','Segoe UI',sans-serif", display:"flex", flexDirection:"column", alignItems:"center", padding:"24px 12px", boxSizing:"border-box" };
 

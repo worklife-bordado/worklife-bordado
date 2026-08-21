@@ -2909,67 +2909,80 @@ function CalendarioBordador({ token, todos }) {
 
   const esHoy = (d) => d === hoy.getDate() && mes === hoy.getMonth() && anio === hoy.getFullYear();
 
+  // Escalado para monitor de taller (TV): contenedor ancho y todo más grande.
+  // En modo bordador (teléfono) mon=false -> queda exactamente igual que antes.
+  const mon = !!todos;
+  // Monitor (TV): medidas FLUIDAS en vh/% para llenar y CABER en cualquier resolución
+  // (720p/1080p/4K) sin depender de un ancho fijo. Teléfono (bordador): px originales, sin cambios.
+  const S = {
+    cont: mon ? "100%" : 920, logo: mon ? "8.5vh" : 76, sub: mon ? "1.5vh" : 12, nombre: mon ? "2.8vh" : 20,
+    navF: mon ? "1.8vh" : 14, navP: mon ? "0.9vh 1.8vh" : "8px 14px", mesT: mon ? "2.5vh" : 18, gap: mon ? 6 : 4,
+    dow: mon ? "1.6vh" : 11, celda: mon ? "10vh" : 84, diaN: mon ? "2vh" : 12, cNum: mon ? "1.9vh" : 12,
+    cSub: mon ? "1.35vh" : 9.5, cPad: mon ? "0.4vh 0.7vh" : "3px 4px", cGap: mon ? 3 : 3, cBorde: mon ? 4 : 3,
+    maxC: mon ? 5 : 4, masF: mon ? "1.35vh" : 10, leg: mon ? "1.5vh" : 11, pto: mon ? "1.4vh" : 10,
+  };
+
   return (
     <div style={wrap}>
-      <div style={{maxWidth:920, width:"100%"}}>
+      <div style={{maxWidth:S.cont, width:"100%"}}>
         <div style={{textAlign:"center", marginBottom:16}}>
-          <img src={LOGO_WL} alt="WORK-LIFE" style={{height:76, objectFit:"contain"}} />
-          <div style={{fontSize:12, color:GREY, textTransform:"uppercase", letterSpacing:1, marginTop:6}}>Calendario de entregas</div>
-          <div style={{fontSize:20, fontWeight:800, marginTop:2}}>{info.nombre}</div>
+          <img src={LOGO_WL} alt="WORK-LIFE" style={{height:S.logo, objectFit:"contain"}} />
+          <div style={{fontSize:S.sub, color:GREY, textTransform:"uppercase", letterSpacing:1, marginTop:6}}>Calendario de entregas</div>
+          <div style={{fontSize:S.nombre, fontWeight:800, marginTop:2}}>{info.nombre}</div>
         </div>
 
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, gap:8}}>
-          <button onClick={() => cambiarMes(-1)} style={{background:"#1a1d27", border:"1px solid #2e3450", color:"#e8eaf0", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:14}}>‹ Anterior</button>
-          <div style={{fontSize:18, fontWeight:800}}>{meses[mes]} {anio}</div>
-          <button onClick={() => cambiarMes(1)} style={{background:"#1a1d27", border:"1px solid #2e3450", color:"#e8eaf0", borderRadius:8, padding:"8px 14px", cursor:"pointer", fontSize:14}}>Siguiente ›</button>
+          <button onClick={() => cambiarMes(-1)} style={{background:"#1a1d27", border:"1px solid #2e3450", color:"#e8eaf0", borderRadius:8, padding:S.navP, cursor:"pointer", fontSize:S.navF}}>‹ Anterior</button>
+          <div style={{fontSize:S.mesT, fontWeight:800}}>{meses[mes]} {anio}</div>
+          <button onClick={() => cambiarMes(1)} style={{background:"#1a1d27", border:"1px solid #2e3450", color:"#e8eaf0", borderRadius:8, padding:S.navP, cursor:"pointer", fontSize:S.navF}}>Siguiente ›</button>
         </div>
 
-        <div style={{display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:4}}>
+        <div style={{display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:S.gap}}>
           {["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"].map(d => (
-            <div key={d} style={{textAlign:"center", fontSize:11, color:GREY, fontWeight:700, padding:"4px 0", textTransform:"uppercase"}}>{d}</div>
+            <div key={d} style={{textAlign:"center", fontSize:S.dow, color:GREY, fontWeight:700, padding:"4px 0", textTransform:"uppercase"}}>{d}</div>
           ))}
           {celdas.map((d, i) => {
-            if (d === null) return <div key={"e"+i} style={{minHeight:84}} />;
+            if (d === null) return <div key={"e"+i} style={{minHeight:S.celda}} />;
             const items = porDia[d] || [];
             return (
-              <div key={d} style={{minHeight:84, background:"#1a1d27", border:"1px solid "+(esHoy(d)?ORANGE:"#2e3450"), borderRadius:8, padding:6, display:"flex", flexDirection:"column", gap:3, overflow:"hidden"}}>
-                <div style={{fontSize:12, fontWeight:700, color: esHoy(d)?ORANGE:GREY}}>{d}</div>
-                {items.slice(0,4).map(o => {
+              <div key={d} style={{minHeight:S.celda, background:"#1a1d27", border:"1px solid "+(esHoy(d)?ORANGE:"#2e3450"), borderRadius:8, padding:mon?9:6, display:"flex", flexDirection:"column", gap:S.cGap, overflow:"hidden"}}>
+                <div style={{fontSize:S.diaN, fontWeight:700, color: esHoy(d)?ORANGE:GREY}}>{d}</div>
+                {items.slice(0,S.maxC).map(o => {
                   const pz = parseInt(o.piezas) || 0;
                   const col = todos ? colorBordador(o.bordador) : etColor(o.etapa);
                   return (
-                  <div key={o.id} title={"#"+(o.numero||"")+(todos?(" · "+(o.bordador||"")):"")+" · "+etLabel(o.etapa)} style={{background:col+"22", borderLeft:"3px solid "+col, borderRadius:4, padding:"3px 4px", lineHeight:1.2, overflow:"hidden"}}>
-                    <div style={{fontWeight:800, fontSize:12, whiteSpace:"nowrap"}}>#{o.numero||"—"}</div>
-                    <div style={{color:GREY, fontSize:9.5, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{todos ? (o.bordador||"—") : etLabel(o.etapa)}{pz?(" · "+pz+" pz"):""}</div>
+                  <div key={o.id} title={"#"+(o.numero||"")+(todos?(" · "+(o.bordador||"")):"")+" · "+etLabel(o.etapa)} style={{background:col+"22", borderLeft:S.cBorde+"px solid "+col, borderRadius:4, padding:S.cPad, lineHeight:1.2, overflow:"hidden"}}>
+                    <div style={{fontWeight:800, fontSize:S.cNum, whiteSpace:"nowrap"}}>#{o.numero||"—"}</div>
+                    <div style={{color:GREY, fontSize:S.cSub, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{todos ? (o.bordador||"—") : etLabel(o.etapa)}{pz?(" · "+pz+" pz"):""}</div>
                   </div>
                   );
                 })}
-                {items.length > 4 && <div style={{fontSize:10, color:GREY}}>+{items.length-4} más</div>}
+                {items.length > S.maxC && <div style={{fontSize:S.masF, color:GREY}}>+{items.length-S.maxC} más</div>}
               </div>
             );
           })}
         </div>
 
         {/* Leyenda: por bordador (modo monitor) o por etapa (modo bordador) */}
-        <div style={{display:"flex", flexWrap:"wrap", gap:10, justifyContent:"center", marginTop:16}}>
+        <div style={{display:"flex", flexWrap:"wrap", gap:mon?16:10, justifyContent:"center", marginTop:16}}>
           {todos
             ? Array.from(new Set(ordenes.map(o => o.bordador).filter(Boolean))).sort().map(nb => (
-                <div key={nb} style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color:GREY}}>
-                  <span style={{width:10, height:10, borderRadius:2, background:colorBordador(nb), display:"inline-block"}} />{nb}
+                <div key={nb} style={{display:"flex", alignItems:"center", gap:6, fontSize:S.leg, color:GREY}}>
+                  <span style={{width:S.pto, height:S.pto, borderRadius:3, background:colorBordador(nb), display:"inline-block"}} />{nb}
                 </div>
               ))
             : ETAPAS.map(et => (
-                <div key={et.id} style={{display:"flex", alignItems:"center", gap:5, fontSize:11, color:GREY}}>
+                <div key={et.id} style={{display:"flex", alignItems:"center", gap:5, fontSize:S.leg, color:GREY}}>
                   <span style={{width:10, height:10, borderRadius:2, background:et.color, display:"inline-block"}} />{et.label}
                 </div>
               ))}
         </div>
 
-        <div style={{textAlign:"center", color:GREY, fontSize:11, marginTop:20}}>
+        <div style={{textAlign:"center", color:GREY, fontSize:mon?13:11, marginTop:20}}>
           WORK-LIFE · Esta página se actualiza sola · Solo lectura
         </div>
         {todos && (
-          <div onClick={salirMonitor} style={{textAlign:"center", color:GREY, fontSize:10, marginTop:10, cursor:"pointer", textDecoration:"underline", opacity:.6}}>Salir del modo monitor</div>
+          <div onClick={salirMonitor} style={{textAlign:"center", color:GREY, fontSize:12, marginTop:10, cursor:"pointer", textDecoration:"underline", opacity:.6}}>Salir del modo monitor</div>
         )}
       </div>
     </div>

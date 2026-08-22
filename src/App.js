@@ -8664,6 +8664,20 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       if (form.fechaReprogramada) {
         const [y,m,d] = form.fechaReprogramada.split("-");
         nota = `Reprogramada por atraso a ${d}/${m}/${y}`;
+        // Avisar al vendedor (creador de la orden) por la campanita, con la instrucción de avisar al cliente.
+        // No se auto-avisa si el propio vendedor fue quien hizo el cambio.
+        if (form.creadoPor && form.creadoPor !== usuario.email) {
+          try {
+            await addDoc(collection(db, "notificaciones"), {
+              para: form.creadoPor,
+              titulo: "⚠️ Fecha reprogramada por atraso",
+              cuerpo: `La orden #${form.numero||"—"}${form.cliente?(" ("+form.cliente+")"):""} se reprogramó al ${d}/${m}/${y} por atraso. Debes avisarle al cliente del nuevo plazo de entrega.`,
+              ordenId: String(form.id),
+              leida: false,
+              fecha: serverTimestamp(),
+            });
+          } catch (e) {}
+        }
       } else {
         nota = "Se quitó la fecha reprogramada";
       }

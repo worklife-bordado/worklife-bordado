@@ -650,8 +650,8 @@ async function buildPdfHtml(orden) {
   .viz-inner{display:flex;flex-direction:row;flex-wrap:nowrap;width:100%;height:100%;box-sizing:border-box;padding:4px 6px;gap:4px;align-items:stretch;justify-content:space-between;}
   .viz-cell{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;overflow:visible;}
   .viz-cell .viz-label{font-size:6px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;white-space:nowrap;}
-  .viz-cell .viz-frame{position:relative;line-height:0;display:inline-block;max-width:100%;}
-  .viz-cell .viz-frame img.sil{display:block;width:auto;height:auto;max-width:100%;max-height:490px;}
+  .viz-cell .viz-frame{position:relative;line-height:0;display:block;width:100%;max-width:100%;}
+  .viz-cell .viz-frame img.sil{display:block;width:100%;height:auto;max-width:100%;max-height:340px;margin:0 auto;}
 
   /* Footer */
   .footer-text { font-size: 8px; color: #333; margin-top: 4px; border: 1px solid #ccc; padding: 3px 5px; line-height: 1.5; }

@@ -501,9 +501,9 @@ async function buildPdfHtml(orden) {
     const fg = ASPECTOS_SIL[viewId] || ratio || 1;
     const maxW = (430 * fg).toFixed(1);      // ancho máx = alto máx (430) × proporción -> tope uniforme
     const padPct = (100 / fg).toFixed(3);    // alto del marco = ancho / proporción (marco = silueta exacta)
-    return `<div class="viz-cell" style="flex-grow:${fg};">
+    return `<div class="viz-cell" style="flex-grow:${fg};max-width:${maxW}px;">
   <span class="viz-label">${label}</span>
-  <div class="viz-frame" style="max-width:${maxW}px;padding-bottom:${padPct}%;">
+  <div class="viz-frame" style="padding-bottom:${padPct}%;">
     <img class="sil" src="${IMGS[viewId]}" alt="${label}" style="mix-blend-mode:multiply;"/>
     ${pinDivs}
   </div>
@@ -551,15 +551,6 @@ async function buildPdfHtml(orden) {
   // Comentarios del logo: cada "-" inicia una nueva línea (formato lista)
   const comentariosLogoItems = (orden.comentariosLogo || "").split("-").map(s => s.trim()).filter(Boolean);
   const comentariosLogoHtml = comentariosLogoItems.map(s => `<div style="margin:1px 0;">• ${s}</div>`).join("");
-
-  // Empty rows to fill table (min 4 rows total)
-  const filledCount = orden.prendas.filter(p => p.descripcion).length;
-  const emptyRows = Math.max(0, 4 - filledCount);
-  const emptyRowsHtml = Array(emptyRows).fill(
-    `<tr><td style="border:1px solid #ccc;padding:6px;">&nbsp;</td>`+
-    gruposActivos.map(() => `<td style="border:1px solid #ccc;padding:6px;">&nbsp;</td>`).join("")+
-    `<td style="border:1px solid #ccc;padding:6px;">&nbsp;</td></tr>`
-  ).join("");
 
   // Totals row
   const totalesRow = `<tr style="background:#e8e8e8;">
@@ -673,7 +664,7 @@ async function buildPdfHtml(orden) {
 /* Visualization section */
   .viz-section{margin-top:4px;border:1px solid #555;page-break-inside:avoid;flex-shrink:1;flex-grow:1;min-height:0;overflow:hidden;}
   .viz-section .section-title{background:#444;color:#fff;font-size:8px;font-weight:700;text-align:center;padding:3px;letter-spacing:1px;}
-  .viz-inner{display:flex;flex-direction:row;flex-wrap:nowrap;width:100%;height:100%;box-sizing:border-box;padding:4px 6px;gap:4px;align-items:stretch;justify-content:space-between;}
+  .viz-inner{display:flex;flex-direction:row;flex-wrap:nowrap;width:100%;height:100%;box-sizing:border-box;padding:4px 6px;gap:4px;align-items:stretch;justify-content:center;}
   .viz-cell{display:flex;flex-direction:column;align-items:center;flex:1 1 0;min-width:0;overflow:visible;}
   .viz-cell .viz-label{font-size:6px;color:#555;font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px;white-space:nowrap;}
   .viz-cell .viz-frame{position:relative;line-height:0;width:100%;height:0;margin:0 auto;}
@@ -795,7 +786,6 @@ async function buildPdfHtml(orden) {
           </thead>
           <tbody>
             ${prendasRows}
-            ${emptyRowsHtml}
             ${totalesRow}
           </tbody>
         </table>

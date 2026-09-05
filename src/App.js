@@ -5234,7 +5234,7 @@ function piezasOrden(o){
 function mermasOrden(o){
   return ((o && o.mermas) || []).reduce((s,m) => s + (parseInt(m.cantidad)||0), 0);
 }
-function autoValoresBonos(periodo, ordenes, rutas){
+function autoValoresBonos(periodo, ordenes, rutas, choferBonoId){
   const [Y, M] = periodo.split("-").map(Number);
   const desde = periodo + "-01";
   const hasta = periodo + "-" + String(new Date(Y, M, 0).getDate()).padStart(2, "0"); // último día real del mes
@@ -5259,7 +5259,7 @@ function autoValoresBonos(periodo, ordenes, rutas){
   // Una ruta SIN asignar no cuenta para nadie: bajo la regla actual ningún chofer
   // puede trabajarla, y contarla sería castigar un olvido ajeno.
   const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta)
-    .filter(r => (r.responsable||"").trim() === "Andrés");
+    .filter(r => choferBonoId ? (r.choferId === choferBonoId) : ((r.responsable||"").trim() === "Andrés"));
   let entBase=0, entOk=0, extBase=0, extOk=0;
   rutasMes.forEach(r => { const s=resumenRuta(r); entBase+=s.entregasBase; entOk+=s.entregasOk; extBase+=s.externosBase; extOk+=s.externosOk; });
   const entregasEjec = entBase ? Math.round(entOk/entBase*100) : "";
@@ -5610,7 +5610,7 @@ function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, onUltimos, envioInic
   );
 }
 
-function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onImprimir, onGuardarSalarios, kpiCfg, onGuardarKpiCfg }){
+function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, onGuardar, onImprimir, onGuardarSalarios, kpiCfg, onGuardarKpiCfg }){
   // Definición vigente (con objetivos editados). Con kpiCfg vacío = reglas de siempre.
   const defDe = (cl) => bonosDefEfectiva(cl, kpiCfg);
   const [p, setP] = useState(null);
@@ -5695,6 +5695,21 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
     try { await onGuardarKpiCfg({ kpiPesos, kpiUmbrales }); setObjOpen(false); setObjLocal(null); }
     catch (e) { alert("No se pudo guardar: " + e.message); }
   };
+  const PanelChoferBono = () => !esAdmin ? null : (
+    <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
+      <div style={{display:"flex", alignItems:"center", gap:10, flexWrap:"wrap"}}>
+        <span style={{fontSize:14, fontWeight:700, color:C2.text}}>🚚 Chofer del bono</span>
+        <select value={(kpiCfg||{}).choferBonoId || ""}
+          onChange={async e => { const id = e.target.value; try { await onGuardarKpiCfg({ ...(kpiCfg||{}), choferBonoId: id }); } catch (err) { alert("No se pudo guardar: " + err.message); } }}
+          style={{background:C2.bg, border:"1px solid "+C2.border, borderRadius:9, color:C2.text, padding:"9px 12px", fontSize:13, fontFamily:"inherit"}}>
+          <option value="">— por nombre "Andrés" (respaldo) —</option>
+          {(choferes||[]).map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          {(kpiCfg||{}).choferBonoId && !(choferes||[]).some(c => c.id === (kpiCfg||{}).choferBonoId) ? <option value={(kpiCfg||{}).choferBonoId}>(chofer dado de baja)</option> : null}
+        </select>
+      </div>
+      <div style={{fontSize:11.5, color:C2.muted, marginTop:8, lineHeight:1.5}}>Sus rutas cerradas del mes alimentan los KPIs de Andrés (entregas a clientes, externos y documentos). Se identifica por su ID del roster, así no depende de cómo esté escrito el nombre. En "respaldo" usa el nombre exacto "Andrés" como antes.</div>
+    </div>
+  );
   const PanelObjetivos = () => !esAdmin ? null : (
     <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
       <div onClick={()=>{ setObjOpen(o=>{ const nv=!o; if (nv && !objLocal) iniciarObjetivos(); return nv; }); }} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
@@ -5789,6 +5804,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
           </div>
         </div>
         <PanelSueldos />
+        <PanelChoferBono />
         <PanelObjetivos />
         {ordenados.length===0 && <div style={{color:C2.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay períodos. Crea el del mes actual para empezar.</div>}
         {ordenados.map(b => {
@@ -5821,7 +5837,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, esAdmin, onGuardar, onIm
 
   // ── EDITOR ──
   const cerrado = p.estado === "cerrado";
-  const auto = autoValoresBonos(p.periodo, ordenes, rutas);
+  const auto = autoValoresBonos(p.periodo, ordenes, rutas, (kpiCfg||{}).choferBonoId);
   const setCap = (cl, kid, val) => { if (cerrado) return; setP(prev => ({ ...prev, capturas:{ ...prev.capturas, [cl]:{ ...(prev.capturas[cl]||{}), [kid]:val } } })); };
   const guardar = async (estado) => {
     setGuardando(true);
@@ -8240,7 +8256,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   const guardarBonosKpis = async (data) => {
     const prev = kpiCfg || {};
     const log = [{ fecha: new Date().toISOString(), por: usuario.email }, ...(prev.log || [])].slice(0, 30);
-    await setDoc(doc(db, "config", "bonosKpis"), { ...data, log, actualizadoPor: usuario.email, actualizado: new Date().toISOString() });
+    await setDoc(doc(db, "config", "bonosKpis"), { ...data, log, actualizadoPor: usuario.email, actualizado: new Date().toISOString() }, { merge: true });
   };
   const guardarSalariosBonos = async (data) => {
     await setDoc(doc(db, "config", "bonosSalarios"), { ...data, actualizadoPor: usuario.email }, { merge: true });
@@ -9416,6 +9432,7 @@ const cancelar = async (id) => {
           salarios={rol === "admin" ? (salariosBonos || {}) : null}
           ordenes={ordenes}
           rutas={rutas}
+          choferes={choferes}
           esAdmin={rol === "admin"}
           onGuardar={guardarBono}
           onImprimir={imprimirBono}

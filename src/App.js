@@ -428,7 +428,7 @@ async function buildPdfHtml(orden) {
   // Garment thumbnails for left panel (with position pins drawn as SVG circles)
   const PINS_PDF = {
     camisa_completa: [{key:"C1",x:17.15,y:23.15},{key:"C2",x:43.84,y:32.94},{key:"C3",x:57.98,y:32.94},{key:"C5",x:78.06,y:32.94},{key:"C6",x:87.12,y:32.94},{key:"C4",x:69.04,y:89.52},{key:"C7",x:96.15,y:89.52}],
-    playera_frente: [{key:"B",x:36.76,y:30.5},{key:"E",x:51.25,y:35.95},{key:"A",x:65.28,y:30.45},{key:"W",x:37,y:76},{key:"V",x:51,y:79},{key:"U",x:65,y:76}],
+    playera_frente: [{key:"B",x:36.76,y:30.5},{key:"E",x:51.25,y:35.95},{key:"A",x:65.28,y:30.45},{key:"W",x:37,y:76},{key:"V",x:51,y:79},{key:"U",x:65,y:76},{key:"C",x:8,y:40,tag:"M. DER",size:13},{key:"D",x:92,y:40,tag:"M. IZQ",size:13}],
     playera_atras: [{key:"F",x:50.32,y:19.49},{key:"G",x:50.39,y:40.45},{key:"H",x:50.39,y:77.7}],
     playera_derecho: [{key:"C",x:43.21,y:53.37}],
     playera_izquierdo: [{key:"D",x:54.41,y:51.39}],
@@ -473,7 +473,9 @@ async function buildPdfHtml(orden) {
       if (!proc) return '';
       const { dataUrl } = proc;
       // ancho del logo en % del marco de la silueta -> escala junto con la silueta
-      return `<img src="${dataUrl}" style="position:absolute;left:${pin.x}%;top:${pin.y}%;transform:translate(-50%,-50%);width:${logoPct}%;height:auto;z-index:5;pointer-events:none;mix-blend-mode:multiply;display:block;" />`;
+      const w = pin.size || logoPct;
+      const tag = pin.tag ? `<div style="position:absolute;left:${pin.x}%;top:${pin.y+8}%;transform:translate(-50%,0);z-index:6;font-size:6px;font-weight:800;color:#c0392b;background:#fff;padding:0 2px;border-radius:2px;white-space:nowrap;line-height:1.3;">${pin.tag}</div>` : '';
+      return `<img src="${dataUrl}" style="position:absolute;left:${pin.x}%;top:${pin.y}%;transform:translate(-50%,-50%);width:${w}%;height:auto;z-index:5;pointer-events:none;mix-blend-mode:multiply;display:block;" />${tag}`;
     }).join('');
 
     return `<div class="viz-cell" style="flex-grow:${ratio};">

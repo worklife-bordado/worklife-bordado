@@ -1914,7 +1914,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
       {/* ── POSICIONES ── */}
       {tab === "pos" && (
         <div>
-          <div style={{display:"grid",gridTemplateColumns:"90px 1fr 1fr 90px 1fr",gap:"0 8px",padding:"6px 8px",fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border,marginBottom:4}}>
+          <div style={{display:"grid",gridTemplateColumns:"130px 1fr 1fr 90px 1fr",gap:"0 8px",padding:"6px 8px",fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1,borderBottom:"1px solid "+C.border,marginBottom:4}}>
             <span>Pos.</span><span>Técnica</span><span>Medida</span><span>Colores</span><span>Logotipos</span>
           </div>
           {POSICIONES.filter(p => form.posiciones[p.key]?.logoImg).length === 0 && (
@@ -1927,10 +1927,13 @@ await setDoc(doc(db, "solicitudesFirma", token), {
             const activa = pos.tecnica || pos.medida || pos.colores || pos.logotipos;
             const campoStyle = {background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,padding:"5px 8px",fontSize:12,outline:"none",width:"100%"};
             return (
-              <div key={p.key} style={{display:"grid",gridTemplateColumns:"90px 1fr 1fr 90px 1fr",gap:"4px 8px",padding:"5px 8px",borderRadius:7,background:C.accentGlow,border:"1px solid "+C.accent+"44",marginBottom:3,alignItems:"center"}}>
-                <div>
-                  <span style={{fontWeight:800,color:C.accent,fontSize:13,marginRight:4}}>{p.key}</span>
-                  <span style={{fontSize:10,color:C.muted}}>{p.label}</span>
+              <div key={p.key} style={{display:"grid",gridTemplateColumns:"130px 1fr 1fr 90px 1fr",gap:"4px 8px",padding:"5px 8px",borderRadius:7,background:C.accentGlow,border:"1px solid "+C.accent+"44",marginBottom:3,alignItems:"center"}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,minWidth:0}}>
+                  <img src={pos.logoImg} title={pos.logotipos||""} style={{width:30,height:30,objectFit:"contain",borderRadius:4,border:"1px solid "+C.border,background:"white",flexShrink:0}}/>
+                  <div style={{minWidth:0}}>
+                    <span style={{fontWeight:800,color:C.accent,fontSize:13,marginRight:4}}>{p.key}</span>
+                    <span style={{fontSize:10,color:C.muted}}>{p.label}</span>
+                  </div>
                 </div>
                 {["tecnica","medida","colores"].map(f => (
                   <input key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)} style={campoStyle}/>

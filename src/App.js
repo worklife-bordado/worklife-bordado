@@ -514,10 +514,10 @@ async function buildPdfHtml(orden) {
   // Prendas rows — only active talla groups
   const prendasRows = orden.prendas.filter(p => p.descripcion).map(p => {
     const cells = gruposActivos.map(g =>
-      `<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:10px;">${p.tallas[g.ropa]||""}</td>`
+      `<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:13px;">${p.tallas[g.ropa]||""}</td>`
     ).join("");
     const tot = gruposActivos.reduce((s,g)=>s+(parseInt(p.tallas[g.ropa])||0),0);
-    return `<tr><td style="border:1px solid #ccc;padding:3px 6px;font-size:10px;">${p.descripcion}</td>${cells}<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:10px;font-weight:700;">${tot||""}</td></tr>`;
+    return `<tr><td style="border:1px solid #ccc;padding:3px 6px;font-size:10px;">${p.descripcion}</td>${cells}<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:13px;font-weight:700;">${tot||""}</td></tr>`;
   }).join("");
 
   // Comentarios del logo: cada "-" inicia una nueva línea (formato lista)
@@ -538,9 +538,9 @@ async function buildPdfHtml(orden) {
     <td style="border:1px solid #ccc;padding:3px 6px;font-size:10px;font-weight:700;">TOTAL</td>
     ${gruposActivos.map(g => {
       const t = orden.prendas.reduce((s,p)=>s+(parseInt(p.tallas[g.ropa])||0),0);
-      return `<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:10px;font-weight:700;">${t||""}</td>`;
+      return `<td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:13px;font-weight:700;">${t||""}</td>`;
     }).join("")}
-    <td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:9px;font-weight:700;">${gruposActivos.reduce((s,g)=>s+orden.prendas.reduce((ss,p)=>ss+(parseInt(p.tallas[g.ropa])||0),0),0)||""}</td>
+    <td style="border:1px solid #ccc;padding:3px 4px;text-align:center;font-size:13px;font-weight:700;">${gruposActivos.reduce((s,g)=>s+orden.prendas.reduce((ss,p)=>ss+(parseInt(p.tallas[g.ropa])||0),0),0)||""}</td>
   </tr>`;
 
   // Position rows
@@ -675,7 +675,7 @@ async function buildPdfHtml(orden) {
       <div class="email-cell">Enviar autorización al correo:<br><a href="mailto:gerencia@worklife.com.mx">gerencia@worklife.com.mx</a></div>
     </div>
     <div class="meta-cell">
-      <div class="mrow"><span class="mlabel">No.</span><span class="mval">${orden.numero||""}</span></div>
+      <div class="mrow"><span class="mlabel">No.</span><span class="mval" style="font-size:13px;font-weight:800;">${orden.numero||""}</span></div>
       <div class="mrow"><span class="mlabel">FECHA:</span><span class="mval">${fmtDate(orden.fecha)}</span></div>
       <div class="mrow"><span class="mlabel">FECHA REQUERIDA:</span><span class="mval">${fmtDate(orden.fechaRequerida)}</span></div>
       <div class="mrow"><span class="mlabel">TIEMPO DE ENTREGA:</span><span class="mval">${
@@ -743,7 +743,7 @@ async function buildPdfHtml(orden) {
       </table>
 
       <!-- Comentarios variaciones -->
-      <div style="font-size:10px;color:#333;margin-top:4px;">
+      <div style="font-size:13px;color:#333;margin-top:4px;">
         <span style="font-weight:700;">Comentarios variaciones autorizadas del logotipo:</span>
         ${comentariosLogoHtml}
       </div>

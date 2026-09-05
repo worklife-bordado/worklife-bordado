@@ -5156,6 +5156,33 @@ const BONOS_DEF = {
   },
 };
 const BONOS_ORDEN = ["krisia","andres","isidra"];
+// Plantilla de bono para CUALQUIER chofer: usa las reglas de KPI de "andres" (a1..a6)
+// con el nombre del chofer. Todos los choferes comparten esta misma plantilla.
+function defChoferBono(nombre, cfg){
+  const base = bonosDefEfectiva("andres", cfg);
+  return { ...base, nombre: nombre || "Chofer", puesto: "Chofer · Aux. de Logística" };
+}
+// Personas del bono de un período, EN ORDEN: Krisia, luego los choferes, luego Isidra.
+// - Período ABIERTO: choferes = roster actual (llave de guardado = ID del roster).
+// - Período CERRADO: choferes = los congelados en ese mes (incluye la llave histórica
+//   "andres" de meses viejos), para NO alterar el pasado.
+// Cada entrada: { cl (llave), nombre, def (KPIs efectivos), choferId }.
+function personasBono(docp, choferes, cfg){
+  const lista = [{ cl:"krisia", nombre:BONOS_DEF.krisia.nombre, def:bonosDefEfectiva("krisia", cfg), choferId:null }];
+  const cerrado = docp && docp.estado === "cerrado";
+  if (cerrado){
+    const fuente = docp.calcSnapshot || docp.capturas || {};
+    Object.keys(fuente).filter(k => k!=="krisia" && k!=="isidra").forEach(k => {
+      const c = (choferes||[]).find(x => x.id === k);
+      const nombre = c ? c.nombre : (k === "andres" ? "Andrés" : k);
+      lista.push({ cl:k, nombre, def:defChoferBono(nombre, cfg), choferId: (k==="andres" ? null : k) });
+    });
+  } else {
+    (choferes||[]).forEach(c => lista.push({ cl:c.id, nombre:c.nombre, def:defChoferBono(c.nombre, cfg), choferId:c.id }));
+  }
+  lista.push({ cl:"isidra", nombre:BONOS_DEF.isidra.nombre, def:bonosDefEfectiva("isidra", cfg), choferId:null });
+  return lista;
+}
 
 // ── Objetivos de KPIs editables (config/bonosKpis) ──
 // Los KPIs con descriptor `umb` son de umbral porcentual y sus metas se pueden
@@ -5234,7 +5261,7 @@ function piezasOrden(o){
 function mermasOrden(o){
   return ((o && o.mermas) || []).reduce((s,m) => s + (parseInt(m.cantidad)||0), 0);
 }
-function autoValoresBonos(periodo, ordenes, rutas, choferBonoId){
+function autoValoresBonos(periodo, ordenes, rutas, choferes){
   const [Y, M] = periodo.split("-").map(Number);
   const desde = periodo + "-01";
   const hasta = periodo + "-" + String(new Date(Y, M, 0).getDate()).padStart(2, "0"); // último día real del mes
@@ -5250,40 +5277,30 @@ function autoValoresBonos(periodo, ordenes, rutas, choferBonoId){
   const entregadas = ordensFiltradas.filter(o => o.fechaRequerida && getFE(o, "entregada"));
   const aTiempo = entregadas.filter(o => getFE(o, "entregada") <= new Date(o.fechaRequerida + "T23:59:59"));
   const cumplPedidos = entregadas.length ? Number(((aTiempo.length / entregadas.length) * 100).toFixed(1)) : "";
-  // Andrés — a2 "entregas ejecutadas" = SOLO clientes; a1 "puntualidad" = cumplimiento de EXTERNOS
-  // Mismo criterio que los tableros y el cierre: las incidencias validadas por Krisia NO entran
-  // al denominador (base = total − incidencias). Lo que quedó sin marcar sí cuenta en contra.
-  // Solo las rutas de Andrés: con más choferes, cada quien lo suyo. El criterio es
-  // el nombre del responsable: cubre las rutas viejas (nacían con responsable
-  // "Andrés") y las nuevas que Krisia le asigne (el selector escribe el nombre).
-  // Una ruta SIN asignar no cuenta para nadie: bajo la regla actual ningún chofer
-  // puede trabajarla, y contarla sería castigar un olvido ajeno.
-  const rutasMes = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta)
-    .filter(r => choferBonoId ? (r.choferId === choferBonoId) : ((r.responsable||"").trim() === "Andrés"));
-  let entBase=0, entOk=0, extBase=0, extOk=0;
-  rutasMes.forEach(r => { const s=resumenRuta(r); entBase+=s.entregasBase; entOk+=s.entregasOk; extBase+=s.externosBase; extOk+=s.externosOk; });
-  const entregasEjec = entBase ? Math.round(entOk/entBase*100) : "";
-  const externosPct = extBase ? Math.round(extOk/extBase*100) : "";
-  // Andrés a4 — cumplimiento documental: por cada día (ruta) hay hasta 2 obligaciones
-  //  · si hay entrega a cliente (E): cumple si está palomeada factura O albarán
-  //  · si hay "llevar a externo" (B): cumple si está palomeada la orden de externos
-  let obTot=0, obOk=0;
-  rutasMes.forEach(r => {
-    const paradas = (r.paradas)||[];
-    const d = r.docsEntregados || {};
-    if (paradas.some(p => p.tipo === "E")) { obTot++; if (d.facturas || d.albaranes || d.remisiones || d.remisionesEntrega) obOk++; }
-    if (paradas.some(p => p.tipo === "B")) { obTot++; if (d.ordenes) obOk++; }
-  });
-  const docsPct = obTot ? Math.round(obOk/obTot*100) : "";
+  // KPIs de chofer — a2 "entregas ejecutadas" = SOLO clientes; a1 "puntualidad" = cumplimiento de
+  // EXTERNOS; a4 = documental. Se calcula por cada chofer con SUS rutas (por choferId), para que
+  // con varios choferes cada quien tenga lo suyo. Rutas sin choferId no cuentan para nadie.
+  const rutasMesTodas = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
+  const kpiChofer = (rs) => {
+    let entBase=0, entOk=0, extBase=0, extOk=0, obTot=0, obOk=0;
+    rs.forEach(r => {
+      const s=resumenRuta(r); entBase+=s.entregasBase; entOk+=s.entregasOk; extBase+=s.externosBase; extOk+=s.externosOk;
+      const paradas=(r.paradas)||[]; const d=r.docsEntregados||{};
+      if (paradas.some(p => p.tipo === "E")) { obTot++; if (d.facturas || d.albaranes || d.remisiones || d.remisionesEntrega) obOk++; }
+      if (paradas.some(p => p.tipo === "B")) { obTot++; if (d.ordenes) obOk++; }
+    });
+    return { a1: extBase?Math.round(extOk/extBase*100):"", a2: entBase?Math.round(entOk/entBase*100):"", a4: obTot?Math.round(obOk/obTot*100):"" };
+  };
   // Krisia k3 — mermas: piezas de merma del mes ÷ piezas producidas del mes × 100
   let piezasMes = 0, mermasMes = 0;
   ordensFiltradas.forEach(o => { piezasMes += piezasOrden(o); mermasMes += mermasOrden(o); });
   const mermasPct = piezasMes ? Number(((mermasMes / piezasMes) * 100).toFixed(2)) : "";
-  return { krisia:{ k2:cumplPedidos, k3:mermasPct }, andres:{ a1:externosPct, a2:entregasEjec, a4:docsPct }, isidra:{} };
+  const out = { krisia:{ k2:cumplPedidos, k3:mermasPct }, isidra:{} };
+  (choferes||[]).forEach(c => { out[c.id] = kpiChofer(rutasMesTodas.filter(r => r.choferId === c.id)); });
+  return out;
 }
 // Recibo imprimible (solo admin)
-function buildReciboBonoHtml(clave, capturas, sal, periodo, kpiCfg, snap){
-  const def = bonosDefEfectiva(clave, kpiCfg);
+function buildReciboBonoHtml(def, capturas, sal, periodo, snap){
   const bonoMax = (sal && sal.bonoMax) || 0;
   // Período CERRADO con foto congelada: el recibo se arma desde el snapshot y
   // NUNCA se recalcula — cambiar los objetivos después no reescribe recibos
@@ -5627,7 +5644,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
     return (((salarios||{})[cl]||{}).bonoMax) || 0;
   };
   const baseDe = (cl) => (((salarios||{})[cl]||{}).base) || 0;
-  const faltanSueldosBase = esAdmin && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
+  const faltanSueldosBase = esAdmin && personasBono(null, choferes, kpiCfg).some(per => { const s=(salarios||{})[per.cl]||{}; return !s.base || !s.bonoMax; });
   const PanelSueldos = () => !esAdmin ? null : (
     <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
       <div onClick={()=>setCfgOpen(o=>!o)} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
@@ -5637,11 +5654,11 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
       {cfgOpen && (
         <div style={{marginTop:12}}>
           <div style={{fontSize:12, color:C2.muted, marginBottom:10}}>Captura el sueldo base neto y el bono máximo mensual de cada colaborador. Los períodos <b>abiertos</b> siempre usan estos valores; los <b>cerrados</b> conservan los que tenían al cerrarse. Solo administración ve estos datos.</div>
-          {BONOS_ORDEN.map(cl => {
+          {personasBono(null, choferes, kpiCfg).map(per => { const cl = per.cl;
             const s = salLocal[cl] || {};
             return (
               <div key={cl} style={{display:"flex", alignItems:"center", gap:10, marginBottom:8, flexWrap:"wrap"}}>
-                <div style={{flex:"1 1 150px", fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</div>
+                <div style={{flex:"1 1 150px", fontSize:13, color:C2.text, fontWeight:600}}>{per.nombre}</div>
                 <input value={s.base==null?"":s.base} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),base:v}})); }} placeholder="Sueldo base"
                   style={{width:130, background:C2.surface, border:"1px solid "+C2.border, borderRadius:6, color:C2.text, padding:"7px 9px", fontSize:13, outline:"none"}}/>
                 <input value={s.bonoMax==null?"":s.bonoMax} inputMode="decimal" onChange={e=>{ const v=e.target.value.replace(/[^0-9.]/g,""); setSalLocal(p2=>({...p2,[cl]:{...(p2[cl]||{}),bonoMax:v}})); }} placeholder="Bono máximo"
@@ -5649,7 +5666,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
               </div>
             );
           })}
-          <button onClick={async()=>{ try{ const limpio={}; BONOS_ORDEN.forEach(cl=>{ const s=salLocal[cl]||{}; limpio[cl]={ base:Number(s.base)||0, bonoMax:Number(s.bonoMax)||0 }; }); await onGuardarSalarios(limpio); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
+          <button onClick={async()=>{ try{ const limpio={}; personasBono(null, choferes, kpiCfg).forEach(per=>{ const s=salLocal[per.cl]||{}; limpio[per.cl]={ base:Number(s.base)||0, bonoMax:Number(s.bonoMax)||0 }; }); await onGuardarSalarios(limpio); alert("Sueldos guardados."); }catch(e){ alert("Error: "+e.message); } }}
             style={{marginTop:6, border:"none", borderRadius:8, cursor:"pointer", background:C2.accent, color:"#1a1d27", padding:"9px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>Guardar sueldos</button>
         </div>
       )}
@@ -5695,21 +5712,6 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
     try { await onGuardarKpiCfg({ kpiPesos, kpiUmbrales }); setObjOpen(false); setObjLocal(null); }
     catch (e) { alert("No se pudo guardar: " + e.message); }
   };
-  const PanelChoferBono = () => !esAdmin ? null : (
-    <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
-      <div style={{display:"flex", alignItems:"center", gap:10, flexWrap:"wrap"}}>
-        <span style={{fontSize:14, fontWeight:700, color:C2.text}}>🚚 Chofer del bono</span>
-        <select value={(kpiCfg||{}).choferBonoId || ""}
-          onChange={async e => { const id = e.target.value; try { await onGuardarKpiCfg({ ...(kpiCfg||{}), choferBonoId: id }); } catch (err) { alert("No se pudo guardar: " + err.message); } }}
-          style={{background:C2.bg, border:"1px solid "+C2.border, borderRadius:9, color:C2.text, padding:"9px 12px", fontSize:13, fontFamily:"inherit"}}>
-          <option value="">— por nombre "Andrés" (respaldo) —</option>
-          {(choferes||[]).map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-          {(kpiCfg||{}).choferBonoId && !(choferes||[]).some(c => c.id === (kpiCfg||{}).choferBonoId) ? <option value={(kpiCfg||{}).choferBonoId}>(chofer dado de baja)</option> : null}
-        </select>
-      </div>
-      <div style={{fontSize:11.5, color:C2.muted, marginTop:8, lineHeight:1.5}}>Sus rutas cerradas del mes alimentan los KPIs de Andrés (entregas a clientes, externos y documentos). Se identifica por su ID del roster, así no depende de cómo esté escrito el nombre. En "respaldo" usa el nombre exacto "Andrés" como antes.</div>
-    </div>
-  );
   const PanelObjetivos = () => !esAdmin ? null : (
     <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"12px 16px", marginBottom:16}}>
       <div onClick={()=>{ setObjOpen(o=>{ const nv=!o; if (nv && !objLocal) iniciarObjetivos(); return nv; }); }} style={{cursor:"pointer", fontSize:14, fontWeight:700, color:C2.text, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
@@ -5726,7 +5728,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
             return (
               <div key={cl} style={{marginBottom:14}}>
                 <div style={{fontSize:13, fontWeight:800, color:C2.text, marginBottom:6}}>
-                  {BONOS_DEF[cl].nombre}
+                  {cl==="andres"?"Choferes":BONOS_DEF[cl].nombre}
                   <span style={{fontSize:11.5, fontWeight:700, marginLeft:10, color: Math.abs(suma-100)<=0.11 ? C2.success : "#c0392b"}}>pesos: {Math.round(suma*10)/10}%</span>
                 </div>
                 {BONOS_DEF[cl].kpis.map(k => (
@@ -5790,8 +5792,8 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
     const nuevo = (mes) => {
       mes = mes || mesActual();
       const existe = (bonos||[]).find(x => x.periodo===mes);
-      if (existe) { setP({ ...existe, capturas:{ krisia:{...((existe.capturas||{}).krisia||{})}, andres:{...((existe.capturas||{}).andres||{})}, isidra:{...((existe.capturas||{}).isidra||{})} } }); return; }
-      setP({ id:mes, periodo:mes, estado:"abierto", capturas:{ krisia:{}, andres:{}, isidra:{} } });
+      if (existe) { setP({ ...existe, capturas:{ ...((existe.capturas)||{}) } }); return; }
+      setP({ id:mes, periodo:mes, estado:"abierto", capturas:{} });
     };
     return (
       <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
@@ -5804,24 +5806,23 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
           </div>
         </div>
         <PanelSueldos />
-        <PanelChoferBono />
         <PanelObjetivos />
         {ordenados.length===0 && <div style={{color:C2.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay períodos. Crea el del mes actual para empezar.</div>}
         {ordenados.map(b => {
           let totalNomina = 0;
           if (esAdmin){
-            BONOS_ORDEN.forEach(cl => {
+            personasBono(b, choferes, kpiCfg).forEach(per => { const cl = per.cl;
               const bm = bonoMaxDeP(b, cl);
               const snap = (b.calcSnapshot || {})[cl];
               // Período cerrado con foto: el total sale del snapshot, no de recalcular.
               const total = (b.estado === "cerrado" && snap)
                 ? snap.filas.reduce((t, f) => t + ((f.esNAfila && esNAval(f.resultado)) ? 0 : f.pago * bm * f.peso), 0)
-                : calcColaborador(defDe(cl), (b.capturas||{})[cl], bm).totalBono;
+                : calcColaborador(per.def, (b.capturas||{})[cl], bm).totalBono;
               totalNomina += baseDe(cl) + total;
             });
           }
           return (
-            <div key={b.id} onClick={()=>setP({ ...b, capturas:{ krisia:{...((b.capturas||{}).krisia||{})}, andres:{...((b.capturas||{}).andres||{})}, isidra:{...((b.capturas||{}).isidra||{})} } })}
+            <div key={b.id} onClick={()=>setP({ ...b, capturas:{ ...((b.capturas)||{}) } })}
               style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"14px 16px", marginBottom:10, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12}}>
               <div>
                 <div style={{fontSize:16, fontWeight:800, color:C2.text}}>{nombreMesAnio(b.periodo)}</div>
@@ -5837,7 +5838,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
 
   // ── EDITOR ──
   const cerrado = p.estado === "cerrado";
-  const auto = autoValoresBonos(p.periodo, ordenes, rutas, (kpiCfg||{}).choferBonoId);
+  const auto = autoValoresBonos(p.periodo, ordenes, rutas, choferes);
   const setCap = (cl, kid, val) => { if (cerrado) return; setP(prev => ({ ...prev, capturas:{ ...prev.capturas, [cl]:{ ...(prev.capturas[cl]||{}), [kid]:val } } })); };
   const guardar = async (estado) => {
     setGuardando(true);
@@ -5850,8 +5851,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
           // Congela el RESULTADO calculado (niveles, pagos, pesos y umbrales usados):
           // los recibos de este período quedan inmunes a ediciones futuras de objetivos.
           payload.calcSnapshot = {};
-          BONOS_ORDEN.forEach(cl => {
-            const d = defDe(cl);
+          personasBono(p, choferes, kpiCfg).forEach(per => { const cl = per.cl; const d = per.def;
             const c = calcColaborador(d, (p.capturas||{})[cl] || {}, 0);
             payload.calcSnapshot[cl] = {
               filas: c.filas.map(f => ({ id:f.id, label:f.label, peso:f.peso, resultado:f.resultado, pago:f.pago, nivel:f.nivel, esNAfila:!!f.esNAfila })),
@@ -5860,7 +5860,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
           });
           payload.calcSnapshotFecha = new Date().toISOString();
           // Congela SOLO el tope de bono (no el sueldo) para que el recibo sea reproducible sin filtrar sueldos.
-          if(esAdmin && salarios) payload.bonoMaxSnapshot = { krisia:((salarios.krisia||{}).bonoMax)||0, andres:((salarios.andres||{}).bonoMax)||0, isidra:((salarios.isidra||{}).bonoMax)||0 };
+          if(esAdmin && salarios){ payload.bonoMaxSnapshot = {}; personasBono(p, choferes, kpiCfg).forEach(per => { payload.bonoMaxSnapshot[per.cl] = ((salarios[per.cl]||{}).bonoMax)||0; }); }
         }
       }
       await onGuardar(payload);
@@ -5877,7 +5877,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
   };
 
   const bonoMaxDe = (cl) => bonoMaxDeP(p, cl);
-  const faltanSueldos = esAdmin && !cerrado && BONOS_ORDEN.some(cl => { const s=(salarios||{})[cl]||{}; return !s.base || !s.bonoMax; });
+  const faltanSueldos = esAdmin && !cerrado && personasBono(p, choferes, kpiCfg).some(per => { const s=(salarios||{})[per.cl]||{}; return !s.base || !s.bonoMax; });
 
   return (
     <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
@@ -5899,8 +5899,8 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
       )}
 
       <div style={{opacity: cerrado?0.6:1, pointerEvents: cerrado?"none":"auto"}}>
-      {BONOS_ORDEN.map(cl => {
-        const def = defDe(cl);
+      {personasBono(p, choferes, kpiCfg).map(per => { const cl = per.cl;
+        const def = per.def;
         const caps = (p.capturas||{})[cl] || {};
         const bonoMax = bonoMaxDe(cl);
         const calc = esAdmin ? calcColaborador(def, caps, bonoMax) : null;
@@ -5950,13 +5950,13 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
         <div style={{fontSize:12, color:C2.muted, marginBottom:10}}>Imprime el recibo de cada colaborador para entregárselo. El recibo muestra solo el bono, no el sueldo.</div>
         {(!esAdmin && !cerrado) ? (
           <div style={{fontSize:13, color:C2.accent}}>Los recibos se podrán imprimir una vez que administración cierre el período.</div>
-        ) : BONOS_ORDEN.map(cl => {
+        ) : personasBono(p, choferes, kpiCfg).map(per => { const cl = per.cl;
           const bm = bonoMaxDe(cl);
           const listo = bm > 0;
           return (
             <div key={cl} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderTop:"1px solid "+C2.border}}>
-              <span style={{fontSize:13, color:C2.text, fontWeight:600}}>{BONOS_DEF[cl].nombre}</span>
-              <button disabled={!listo} onClick={()=>onImprimir(buildReciboBonoHtml(cl, (p.capturas||{})[cl]||{}, {bonoMax:bm}, p.periodo, kpiCfg, cerrado ? (p.calcSnapshot||{})[cl] : null), "Recibo bono "+BONOS_DEF[cl].nombre)}
+              <span style={{fontSize:13, color:C2.text, fontWeight:600}}>{per.nombre}</span>
+              <button disabled={!listo} onClick={()=>onImprimir(buildReciboBonoHtml(per.def, (p.capturas||{})[cl]||{}, {bonoMax:bm}, p.periodo, cerrado ? (p.calcSnapshot||{})[cl] : null), "Recibo bono "+per.nombre)}
                 style={{border:"none", borderRadius:8, cursor:listo?"pointer":"not-allowed", background:listo?"#5c8fe0":C2.surface, color:listo?"#fff":C2.muted, padding:"8px 16px", fontSize:12, fontWeight:800, fontFamily:"inherit"}}>🖨️ Imprimir</button>
             </div>
           );

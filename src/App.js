@@ -195,6 +195,8 @@ const TALLAS = TALLA_GRUPOS.flatMap(g => [g.ropa, g.num, g.idx]);
 const CLAVE_SALIDA_CHECADOR = "8006";
 // Token secreto del monitor de taller (enlace ?monitor=<token>, sin login). Cámbialo por el que quieras.
 const TOKEN_MONITOR = "wlmon-9f3k7q2x8w5t";
+// Técnicas de bordado/impresión disponibles (desplegable en Posiciones).
+const TECNICAS = ["Bordado", "Aplicación", "DTF", "Vinil", "Serigrafía", "Sublimado"];
 
 const ETAPAS = [
   {id:"nueva",     label:"Nueva",           color:"#8b90a7"},
@@ -1952,7 +1954,15 @@ await setDoc(doc(db, "solicitudesFirma", token), {
                   </div>
                 </div>
                 {["tecnica","medida","colores"].map(f => (
-                  <input key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)} style={campoStyle}/>
+                  f === "tecnica" ? (
+                    <select key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)} style={campoStyle}>
+                      <option value="">— Técnica —</option>
+                      {TECNICAS.map(t => <option key={t} value={t}>{t}</option>)}
+                      {pos.tecnica && !TECNICAS.includes(pos.tecnica) ? <option value={pos.tecnica}>{pos.tecnica}</option> : null}
+                    </select>
+                  ) : (
+                    <input key={f} value={pos[f]||""} onChange={e => updPos(p.key, f, e.target.value)} style={campoStyle}/>
+                  )
                 ))}
                 <div style={{position:"relative"}}>
                   <input value={pos.logotipos||""} onChange={e => updPos(p.key, "logotipos", e.target.value)}

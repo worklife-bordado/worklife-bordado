@@ -4554,17 +4554,18 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false });
       if (!rows.length) { alert("El archivo está vacío."); setImportando(false); return; }
-      let nameCol = 0, priceCol = 1, startRow = 0;
+      let nameCol = 0, priceCol = 1, tecCol = -1, startRow = 0;
       const header = rows[0].map(c => String(c==null?"":c).toLowerCase().trim());
       const ni = header.findIndex(h => /logo|nombre|logotipo/.test(h));
       const pi = header.findIndex(h => /precio|costo|price|importe|valor/.test(h));
-      if (ni !== -1 || pi !== -1) { nameCol = ni!==-1?ni:0; priceCol = pi!==-1?pi:(ni===1?0:1); startRow = 1; }
+      const ti = header.findIndex(h => /t[eé]cnica|tecnica/.test(h));
+      if (ni !== -1 || pi !== -1) { nameCol = ni!==-1?ni:0; priceCol = pi!==-1?pi:(ni===1?0:1); tecCol = ti; startRow = 1; }
       const filas = [];
       for (let i = startRow; i < rows.length; i++) {
         const r = rows[i]; if (!r) continue;
         const nombre = String(r[nameCol]==null?"":r[nameCol]).trim();
         if (!nombre) continue;
-        filas.push({ nombre, precio: r[priceCol] });
+        filas.push({ nombre, tecnica: tecCol!==-1 ? String(r[tecCol]==null?"":r[tecCol]).trim() : "", precio: r[priceCol] });
       }
       if (!filas.length) { alert("No encontré filas con nombre de logo. Revisa que la primera columna sea el nombre del logo."); setImportando(false); return; }
       const n = await onImportarLogos(filas);
@@ -4588,11 +4589,14 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
   const periodo = periodoDeMes(mes);
   const fechaPago = fechaPagoDeMes(mes);
 
-  const precioDe = (nombre) => {
+  const precioDe = (nombre, tecnica) => {
     const q=(nombre||"").trim().toLowerCase();
     if (!q) return null;
     const l=(catalogoLogos||[]).find(x => (x.nombreLower || (x.nombre||"").toLowerCase()) === q);
-    const p = l ? l.precio : undefined;
+    if (!l) return null;
+    const tk=(tecnica||"").trim();
+    // Precio por técnica; si no hay, respaldo al precio general (modelo viejo).
+    let p = (tk && l.precios && l.precios[tk]!==undefined && l.precios[tk]!==null && l.precios[tk]!=="") ? l.precios[tk] : l.precio;
     return (p===null||p===undefined||p==="") ? null : Number(p);
   };
 
@@ -4606,32 +4610,34 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
     Object.entries(o.posiciones||{}).forEach(([key,pos]) => {
       if (!pos || !pos.logoImg) return;
       const logoName=(pos.logotipos||"").trim();
+      const tecnica=(pos.tecnica||"").trim();
+      const medida=(pos.medida||"").trim();
       const tipo=KEY_TO_TIPO[key]||"";
       const lineId=o.id+":"+key;
       const cantDefault = tipo ? cantidadPorTipo(o, tipo) : totalPrendasOrden(o);
       const cantidad = overrides[lineId]!==undefined ? overrides[lineId] : cantDefault;
-      const precio = precioDe(logoName);
-      if (logoName) logosUsados[logoName.toLowerCase()] = logoName;
-      lineas.push({ lineId, key, logoName, posLabel: posLabelDe(key), prefijo: tipo, cantidad, precio });
+      const precio = precioDe(logoName, tecnica);
+      if (logoName) logosUsados[logoName.toLowerCase()+"||"+tecnica.toLowerCase()] = { logo:logoName, tecnica, medida };
+      lineas.push({ lineId, key, logoName, tecnica, medida, posLabel: posLabelDe(key), prefijo: tipo, cantidad, precio });
     });
     if (!lineas.length) return;
     if (!grupos[b]) grupos[b]=[];
     grupos[b].push({ id:o.id, numero:o.numero, cliente:o.cliente, fecha:fechaBordadoTerminado(o), etapa:o.etapa, lineas });
   });
 
-  const sinPrecio = Object.values(logosUsados).filter(n => precioDe(n)===null);
+  const sinPrecio = Object.values(logosUsados).filter(c => precioDe(c.logo, c.tecnica)===null);
 
-  // Exporta los logos sin precio a un Excel (columnas Logo | Precio) para llenarlos
-  // y volver a importarlos con el mismo botón de importar del catálogo.
+  // Exporta las combinaciones logo+técnica sin precio a un Excel (Logo | Técnica | Medida | Precio)
+  // para llenarlas y volver a importarlas con el mismo botón de importar del catálogo.
   const [exportandoSP, setExportandoSP] = useState(false);
   const exportarSinPrecio = async () => {
     if (!sinPrecio.length) { alert("No hay logos sin precio este mes."); return; }
     setExportandoSP(true);
     try {
       const XLSX = await cargarXLSX();
-      const filas = [...sinPrecio].sort((a,b)=>a.localeCompare(b)).map(n => ({ "Logo": n, "Precio": "" }));
-      const ws = XLSX.utils.json_to_sheet(filas, { header: ["Logo","Precio"] });
-      ws["!cols"] = [{wch:40},{wch:12}];
+      const filas = [...sinPrecio].sort((a,b)=>(a.logo+"|"+a.tecnica).localeCompare(b.logo+"|"+b.tecnica)).map(c => ({ "Logo": c.logo, "Técnica": c.tecnica, "Medida": c.medida, "Precio": "" }));
+      const ws = XLSX.utils.json_to_sheet(filas, { header: ["Logo","Técnica","Medida","Precio"] });
+      ws["!cols"] = [{wch:36},{wch:14},{wch:16},{wch:12}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Logos sin precio");
       XLSX.writeFile(wb, "Logos_sin_precio_" + mes + ".xlsx");
@@ -4707,7 +4713,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
                   <div key={(l.id||l.nombre)+"_"+(l.precio??"")} style={{display:"flex",alignItems:"center",gap:8,background:C.surface,border:"1px solid "+(sinP?C.accent+"55":C.border),borderRadius:8,padding:"7px 10px"}}>
                     <span style={{flex:1,minWidth:0,fontSize:13,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.nombre}</span>
                     <span style={{color:C.muted}}>$</span>
-                    <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); onSetPrecioLogo(l.id, v===""?null:Number(v)); }} style={priceInput}/>
+                    <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" title="Precio general (respaldo si no hay precio por técnica)" onBlur={e=>{ const v=e.target.value.trim(); onSetPrecioLogo(l.id, null, v===""?null:Number(v)); }} style={priceInput}/>
                     <button title="Renombrar" disabled={procesando} onClick={()=>renombrar(l)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"5px 9px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
                     <button title="Borrar" disabled={procesando} onClick={()=>borrar(l)} style={{background:"transparent",border:"1px solid #e06a6a66",borderRadius:6,color:"#e06a6a",padding:"5px 9px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                   </div>
@@ -4727,18 +4733,20 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
             <button onClick={exportarSinPrecio} disabled={exportandoSP} style={{border:"1px solid "+C.accent+"88",borderRadius:8,background:C.surface,color:C.accent,padding:"6px 12px",fontSize:12,fontWeight:800,cursor:exportandoSP?"default":"pointer",fontFamily:"inherit",opacity:exportandoSP?0.6:1}}>{exportandoSP?"Generando…":"⬇️ Exportar a Excel ("+sinPrecio.length+")"}</button>
           </div>
           <div style={{display:"flex",flexWrap:"wrap",gap:10}}>
-            {sinPrecio.map(n => {
-              const l=(catalogoLogos||[]).find(x => (x.nombreLower||(x.nombre||"").toLowerCase())===n.toLowerCase());
+            {sinPrecio.map(c => {
+              const l=(catalogoLogos||[]).find(x => (x.nombreLower||(x.nombre||"").toLowerCase())===c.logo.toLowerCase());
               return (
-                <div key={n} style={{display:"flex",alignItems:"center",gap:6,background:C.surface,border:"1px solid "+C.border,borderRadius:8,padding:"6px 10px"}}>
-                  <span style={{fontSize:12.5,color:C.text}}>{n}</span>
+                <div key={c.logo+"||"+c.tecnica} style={{display:"flex",alignItems:"center",gap:6,background:C.surface,border:"1px solid "+C.border,borderRadius:8,padding:"6px 10px"}}>
+                  <span style={{fontSize:12.5,color:C.text}}>{c.logo}</span>
+                  <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"2px 7px",borderRadius:10}}>{c.tecnica||"— sin técnica —"}</span>
+                  {c.medida && <span style={{fontSize:11,color:C.muted}}>({c.medida})</span>}
                   <span style={{color:C.muted}}>$</span>
-                  <input type="number" defaultValue="" placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); if(l) onSetPrecioLogo(l.id, v===""?null:Number(v)); }} style={priceInput}/>
+                  <input type="number" defaultValue="" placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); if(l) onSetPrecioLogo(l.id, c.tecnica, v===""?null:Number(v)); }} style={priceInput}/>
                 </div>
               );
             })}
           </div>
-          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Al capturar el precio queda guardado en el catálogo para los pagos siguientes.</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>El precio se guarda por logo y técnica. La medida es solo informativa.</div>
         </div>
       )}
 
@@ -8445,9 +8453,13 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       await setDoc(marcRef, { activo: true, efectivo, avisadoEl: new Date().toISOString() }, { merge: true });
     } catch (e) { console.log("avisarCajaBaja:", e); }
   };
-  const setPrecioLogo = async (logoId, precio) => {
+  const setPrecioLogo = async (logoId, tecnica, precio) => {
     if (!logoId) return;
-    try { await setDoc(doc(db, "logos", logoId), { precio: (precio===null||precio===undefined||isNaN(precio)) ? null : Number(precio) }, { merge: true }); }
+    const val = (precio===null||precio===undefined||isNaN(precio)) ? null : Number(precio);
+    try {
+      if (tecnica) await setDoc(doc(db, "logos", logoId), { precios: { [tecnica]: val } }, { merge: true });
+      else await setDoc(doc(db, "logos", logoId), { precio: val }, { merge: true });
+    }
     catch (e) { alert("Error al guardar precio: " + e.message); }
   };
   const guardarLiquidacion = async (mes, data) => {
@@ -8463,8 +8475,12 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       if (!id) continue;
       const limpio = String(f.precio ?? "").replace(/[^0-9.]/g, "");
       const precio = limpio === "" ? null : Number(limpio);
+      const tecnica = String(f.tecnica || "").trim();
       const datos = { nombre, nombreLower: nombre.toLowerCase(), creado: new Date().toISOString(), creadoPor: usuario.email };
-      if (precio !== null && !isNaN(precio)) datos.precio = precio; // solo sobrescribe precio si viene en el Excel
+      if (precio !== null && !isNaN(precio)) {
+        if (tecnica) datos.precios = { [tecnica]: precio }; // precio por técnica (merge en el mapa)
+        else datos.precio = precio;                          // sin técnica -> precio general (respaldo)
+      }
       try { await setDoc(doc(db, "logos", id), datos, { merge: true }); n++; } catch (e) {}
     }
     return n;

@@ -77,10 +77,12 @@ let db;
 try {
   db = initializeFirestore(firebaseApp, {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    ignoreUndefinedProperties: true,
   });
 } catch (e) {
   console.warn("Caché persistente no disponible, se usa la normal:", e && e.message);
-  db = getFirestore(firebaseApp);
+  try { db = initializeFirestore(firebaseApp, { ignoreUndefinedProperties: true }); }
+  catch (e2) { db = getFirestore(firebaseApp); }
 }
 const auth        = getAuth(firebaseApp);
 const provider    = new GoogleAuthProvider();

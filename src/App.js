@@ -4513,6 +4513,18 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
   const [guardando, setGuardando] = useState(false);
   const [verCat, setVerCat] = useState(false);
   const [importando, setImportando] = useState(false);
+  const [msgPrecio, setMsgPrecio] = useState("");
+  const [abiertos, setAbiertos] = useState({}); // qué bordadores están desplegados (por defecto: todos colapsados)
+  // Guarda un precio manual y muestra confirmación visible (con Enter o al salir del campo).
+  const guardarPrecioUI = async (logoId, tecnica, raw, etiqueta) => {
+    if (!logoId) return;
+    const v = String(raw==null?"":raw).trim();
+    try {
+      await onSetPrecioLogo(logoId, tecnica || null, v === "" ? null : Number(v));
+      setMsgPrecio("✓ Guardado — " + etiqueta + (v === "" ? " (sin precio)" : " · $" + v));
+      setTimeout(() => setMsgPrecio(""), 2500);
+    } catch (e) { setMsgPrecio("✕ No se pudo guardar el precio"); setTimeout(() => setMsgPrecio(""), 3000); }
+  };
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [nuevoPrecio, setNuevoPrecio] = useState("");
   const [procesando, setProcesando] = useState(false);
@@ -4682,6 +4694,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
 
   return (
     <div style={{maxWidth:900,margin:"0 auto",padding:"0 4px"}}>
+      {msgPrecio && <div style={{position:"fixed",bottom:20,right:20,zIndex:9999,background:msgPrecio[0]==="✓"?"#13351f":"#3a1520",border:"1px solid "+(msgPrecio[0]==="✓"?"#4caf7d":"#e06a6a"),color:msgPrecio[0]==="✓"?"#cdeed9":"#f3c9c9",padding:"11px 16px",borderRadius:10,fontSize:13,fontWeight:700,boxShadow:"0 6px 20px rgba(0,0,0,.45)",maxWidth:340}}>{msgPrecio}</div>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}}>
         <div style={{fontSize:22,fontWeight:800,color:C.text}}>💰 Pago a bordadores</div>
         <div style={{display:"flex",alignItems:"center",gap:14,background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"8px 14px"}}>
@@ -4715,7 +4728,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
                   <div key={(l.id||l.nombre)+"_"+(l.precio??"")} style={{display:"flex",alignItems:"center",gap:8,background:C.surface,border:"1px solid "+(sinP?C.accent+"55":C.border),borderRadius:8,padding:"7px 10px"}}>
                     <span style={{flex:1,minWidth:0,fontSize:13,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.nombre}</span>
                     <span style={{color:C.muted}}>$</span>
-                    <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" title="Precio general (respaldo si no hay precio por técnica)" onBlur={e=>{ const v=e.target.value.trim(); onSetPrecioLogo(l.id, null, v===""?null:Number(v)); }} style={priceInput}/>
+                    <input type="number" defaultValue={sinP?"":l.precio} placeholder="0.00" title="Precio general (respaldo si no hay precio por técnica)" onKeyDown={e=>{ if(e.key==="Enter") e.currentTarget.blur(); }} onBlur={e=>guardarPrecioUI(l.id, null, e.target.value, l.nombre)} style={priceInput}/>
                     <button title="Renombrar" disabled={procesando} onClick={()=>renombrar(l)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"5px 9px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
                     <button title="Borrar" disabled={procesando} onClick={()=>borrar(l)} style={{background:"transparent",border:"1px solid #e06a6a66",borderRadius:6,color:"#e06a6a",padding:"5px 9px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                   </div>
@@ -4743,7 +4756,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
                   <span style={{fontSize:11,fontWeight:800,color:C.accent,background:C.accent+"22",padding:"2px 7px",borderRadius:10}}>{c.tecnica||"— sin técnica —"}</span>
                   {c.medida && <span style={{fontSize:11,color:C.muted}}>({c.medida})</span>}
                   <span style={{color:C.muted}}>$</span>
-                  <input type="number" defaultValue="" placeholder="0.00" onBlur={e=>{ const v=e.target.value.trim(); if(l) onSetPrecioLogo(l.id, c.tecnica, v===""?null:Number(v)); }} style={priceInput}/>
+                  <input type="number" defaultValue="" placeholder="0.00" onKeyDown={e=>{ if(e.key==="Enter") e.currentTarget.blur(); }} onBlur={e=>{ if(l) guardarPrecioUI(l.id, c.tecnica, e.target.value, c.logo + " · " + (c.tecnica||"general")); }} style={priceInput}/>
                 </div>
               );
             })}
@@ -4761,12 +4774,16 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       {listaBordadores.map(b => {
         const lista=grupos[b];
         const sinB = b==="(sin bordador)";
+        const abierto = !!abiertos[b];
         return (
           <div key={b} style={card}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-              <div>
-                <div style={{fontSize:17,fontWeight:800,color:sinB?C.muted:C.text}}>{b}</div>
-                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{lista.length} {lista.length===1?"orden":"órdenes"} · {bordadosBordador(lista)} bordados</div>
+            <div onClick={()=>setAbiertos(a=>({...a,[b]:!a[b]}))} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:abierto?12:0,cursor:"pointer"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                <span style={{fontSize:16,color:C.muted,width:14,textAlign:"center",flexShrink:0}}>{abierto?"▾":"▸"}</span>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:17,fontWeight:800,color:sinB?C.muted:C.text}}>{b}</div>
+                  <div style={{fontSize:12,color:C.muted,marginTop:2}}>{lista.length} {lista.length===1?"orden":"órdenes"} · {bordadosBordador(lista)} bordados</div>
+                </div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:12,color:C.muted}}>Total a pagar</div>
@@ -4774,6 +4791,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
               </div>
             </div>
 
+            {abierto && (<>
             {sinB && <div style={{fontSize:12,color:C.accent,marginBottom:8}}>Estas órdenes no tienen bordador asignado; asígnalo en la orden para incluirlas en un pago.</div>}
 
             {lista.map(ord => (
@@ -4806,6 +4824,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
                 <button onClick={()=>imprimir(b, lista)} style={{border:"1px solid "+C.border,borderRadius:9,background:C.surface,color:C.text,padding:"9px 15px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨️ Imprimir recibo</button>
               </div>
             )}
+            </>)}
           </div>
         );
       })}

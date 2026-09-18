@@ -3307,6 +3307,7 @@ function nuevaParada(tipo){
 function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente, onEditarDireccion }) {
   const [r, setR] = useState(null);
   const [guardando, setGuardando] = useState(false);
+  const [mesesAbiertos, setMesesAbiertos] = useState({}); // meses desplegados en la lista de rutas
   const [dirOpen, setDirOpen] = useState(false);
   const [dirBusca, setDirBusca] = useState("");
   const [editDir, setEditDir] = useState(null);      // { id, direccion } — edición de dirección
@@ -3439,7 +3440,24 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
             </div>
           )}
         </div>
-        {ordenadas.map(ruta => {
+        {(() => {
+          // Rutas agrupadas por mes; cada mes colapsable. Por defecto solo el mes más reciente abierto.
+          const porMes = {};
+          ordenadas.forEach(rt => { const m = (rt.fecha||"").slice(0,7) || "sin-fecha"; (porMes[m] = porMes[m] || []).push(rt); });
+          const meses = Object.keys(porMes).sort((a,b)=>b.localeCompare(a));
+          const nombreMes = (m) => { if(m==="sin-fecha") return "Sin fecha"; const [y,mm]=m.split("-").map(Number); return new Date(y,mm-1,1).toLocaleDateString("es-MX",{month:"long",year:"numeric"}); };
+          return meses.map((m, iMes) => {
+            const abierto = mesesAbiertos[m] !== undefined ? mesesAbiertos[m] : (iMes===0);
+            const lista = porMes[m];
+            return (
+              <div key={m} style={{marginBottom:10}}>
+                <div onClick={()=>setMesesAbiertos(a=>({...a,[m]: !abierto}))} style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",padding:"10px 14px",background:C.surface,border:"1px solid "+C.border,borderRadius:10}}>
+                  <span style={{fontSize:15,color:C.muted,width:14,textAlign:"center",flexShrink:0}}>{abierto?"▾":"▸"}</span>
+                  <span style={{fontSize:15,fontWeight:800,color:C.text,textTransform:"capitalize",flex:1}}>{nombreMes(m)}</span>
+                  <span style={{fontSize:12,color:C.muted}}>{lista.length} {lista.length===1?"ruta":"rutas"}</span>
+                </div>
+                {abierto && <div style={{marginTop:8}}>
+                {lista.map(ruta => {
           const res = resumenRuta(ruta);
           const cerrada = ruta.estado === "cerrada";
           return (
@@ -3460,6 +3478,11 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
             </div>
           );
         })}
+                </div>}
+              </div>
+            );
+          });
+        })()}
       </div>
     );
   }

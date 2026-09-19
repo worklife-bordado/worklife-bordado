@@ -5208,20 +5208,24 @@ const BONOS_DEF = {
     ],
   },
   andres: {
-    nombre:"Andrés", puesto:"Aux. de Logística y Distribución", naKpi:"a6", naReparto:"equal",
+    nombre:"Andrés", puesto:"Chofer · Aux. de Logística", naKpi:"a6", naReparto:"prop",
     kpis: [
-      { id:"a1", label:"Cumplimiento de ruta", peso:0.20, auto:true, autoKey:"puntualidad", estim:true, umb:{tipo:"min",meta:97,parcial:94,pp:0.5}, cap:"% de actividades cumplidas (cumplimiento de externos — recolecciones/proveedores). Excluye incidencias validadas",
+      { id:"a1", label:"Cumplimiento de ruta", peso:0.12, auto:true, autoKey:"puntualidad", estim:true, na:true, grupo:"ruta", umb:{tipo:"min",meta:97,parcial:94,pp:0.5}, cap:"% de externos cumplidos (recolecciones/proveedores). Excluye incidencias validadas. NA = sin rutas este mes",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.25, auto:true, autoKey:"entregasEjec", umb:{tipo:"min",meta:97,parcial:94,pp:0.5}, cap:"% (entregas ejecutadas / entregas evaluables × 100). Excluye incidencias validadas",
+      { id:"a2", label:"Tasa de entregas ejecutadas", peso:0.12, auto:true, autoKey:"entregasEjec", na:true, grupo:"ruta", umb:{tipo:"min",meta:97,parcial:94,pp:0.5}, cap:"% (entregas ejecutadas / evaluables × 100). Excluye incidencias validadas. NA = sin rutas",
         ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=94?{p:0.5,n:"Parcial (94–96.9%)"}:{p:0,n:"No cumplido (<94%)"} },
-      { id:"a3", label:"Cuidado del vehículo y carga", peso:0.15, cap:"2 = ambos OK, 1 = uno, 0 = ninguno",
+      { id:"a3", label:"Cuidado del vehículo y carga", peso:0.12, na:true, grupo:"ruta", cap:"2 = ambos OK, 1 = uno, 0 = ninguno. NA = sin rutas",
         ev:v=> v==2?{p:1,n:"Sin daños ni reportes"}:v==1?{p:0.5,n:"Un criterio"}:{p:0,n:"Con daños/reportes"} },
-      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.20, auto:true, autoKey:"docs", umb:{tipo:"min",meta:100,parcial:50,parcialEstricto:true,pp:0.5}, cap:"% documentación entregada (factura/albarán/remisión en entregas + orden de trabajo en externos)",
-        ev:v=> v>=100?{p:1,n:"Meta cumplida (100%)"}:v>50?{p:0.5,n:"Parcial (51–99%)"}:{p:0,n:"No cumplido (≤50%)"} },
-      { id:"a5", label:"Relación con clientes y externos", peso:0.05, cap:"número de quejas (0 = meta)",
-        ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con quejas"} },
-      { id:"a6", label:"Desempeño apoyo almacén", peso:0.15, na:true, cap:"0 = sin quejas, ≥1 = con queja, NA = sin apoyo",
-        ev:v=> v==0?{p:1,n:"Sin quejas"}:{p:0,n:"Con queja"} },
+      { id:"a4", label:"Cumplimiento operativo y documental", peso:0.12, auto:true, autoKey:"docs", na:true, grupo:"ruta", umb:{tipo:"min",meta:98,parcial:85,pp:0.5}, cap:"% documentación entregada (factura/albarán/remisión en entregas + orden de trabajo en externos). NA = sin rutas",
+        ev:v=> v>98?{p:1,n:"Meta cumplida (>98%)"}:v>=85?{p:0.5,n:"Parcial (85–98%)"}:{p:0,n:"No cumplido (<85%)"} },
+      { id:"a5", label:"Calidad en el servicio", peso:0.12, na:true, grupo:"ruta", cap:"número de quejas (0 = meta). NA = sin rutas",
+        ev:v=> v==0?{p:1,n:"Sin quejas"}:v==1?{p:0.2,n:"1 queja (parcial)"}:{p:0,n:"2+ quejas"} },
+      { id:"a6", label:"Exactitud en recepción y acomodo", peso:0.15, na:true, grupo:"almacen", cap:"número de errores (0 = meta). NA = sin almacén este mes",
+        ev:v=> v==0?{p:1,n:"Sin errores"}:v==1?{p:0.35,n:"1 error (parcial)"}:{p:0,n:"2+ errores"} },
+      { id:"a7", label:"Calidad en revisión de prendas", peso:0.13, na:true, grupo:"almacen", cap:"prendas defectuosas no detectadas (0 = meta). NA = sin almacén",
+        ev:v=> v==0?{p:1,n:"Sin fallas"}:v==1?{p:0.35,n:"1 no detectada (parcial)"}:{p:0,n:"2+ no detectadas"} },
+      { id:"a8", label:"Orden, limpieza y check list", peso:0.12, na:true, grupo:"almacen", cap:"semanas con check list (ubicaciones, etiquetado, limpieza, PEPS). NA = sin almacén",
+        ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
     ],
   },
   isidra: {
@@ -5308,13 +5312,18 @@ function bonosDefEfectiva(clave, cfg){
 function esNAval(v){ return String(v==null?"":v).toUpperCase().trim()==="NA"; }
 function bonoPesosEfectivos(def, capturas){
   const pesos = {}; def.kpis.forEach(k => pesos[k.id]=k.peso);
-  const naId = def.naKpi;
-  const esNA = naId && esNAval((capturas||{})[naId]);
+  // Todos los KPIs marcados "No aplica" (na:true y valor NA) se apagan y su peso se reparte
+  // entre los que SÍ aplican. Soporta varios a la vez (ej. todo el bloque de ruta en la rotación).
+  const naIds = def.kpis.filter(k => k.na && esNAval((capturas||{})[k.id])).map(k => k.id);
+  const esNA = naIds.length > 0;
   if (esNA){
-    const extra = pesos[naId]; pesos[naId] = 0;
-    const otros = def.kpis.filter(k => k.id!==naId);
-    if (def.naReparto==="equal"){ otros.forEach(k => pesos[k.id]+=extra/otros.length); }
-    else { const s=otros.reduce((a,k)=>a+k.peso,0); otros.forEach(k => pesos[k.id]+=extra*(k.peso/s)); }
+    const extra = naIds.reduce((s,id)=>s+pesos[id],0);
+    naIds.forEach(id => pesos[id]=0);
+    const otros = def.kpis.filter(k => !naIds.includes(k.id));
+    if (otros.length){
+      if (def.naReparto==="equal"){ otros.forEach(k => pesos[k.id]+=extra/otros.length); }
+      else { const s=otros.reduce((a,k)=>a+k.peso,0)||1; otros.forEach(k => pesos[k.id]+=extra*(k.peso/s)); }
+    }
   }
   return { pesos, esNA };
 }
@@ -5365,6 +5374,8 @@ function autoValoresBonos(periodo, ordenes, rutas, choferes){
   // con varios choferes cada quien tenga lo suyo. Rutas sin choferId no cuentan para nadie.
   const rutasMesTodas = (rutas||[]).filter(r => (r.fecha||"")>=desde && (r.fecha||"")<=hasta);
   const kpiChofer = (rs) => {
+    // Sin rutas este mes: todo el bloque de ruta "No aplica" (su peso pasa a almacén — opción b).
+    if (!rs.length) return { a1:"NA", a2:"NA", a3:"NA", a4:"NA", a5:"NA" };
     let entBase=0, entOk=0, extBase=0, extOk=0, obTot=0, obOk=0;
     rs.forEach(r => {
       const s=resumenRuta(r); entBase+=s.entregasBase; entOk+=s.entregasOk; extBase+=s.externosBase; extOk+=s.externosOk;
@@ -5994,7 +6005,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
               {def.kpis.map(k => {
                 const autoVal = ((auto[cl]||{})[k.id]);
                 let val = caps[k.id];
-                const prell = (val===""||val==null) && k.auto && autoVal!=="" && autoVal!=null;
+                const prell = (val===""||val==null) && autoVal!=="" && autoVal!=null && (k.auto || autoVal==="NA");
                 if (prell) val = autoVal; // pre-llenado (Seguimiento lo confirma al guardar)
                 const fila = calc ? calc.filas.find(f=>f.id===k.id) : null;
                 return (

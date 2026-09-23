@@ -3761,6 +3761,7 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
   const [r, setR] = useState(null);
   const [tab, setTab] = useState("muestra");
   const [guardando, setGuardando] = useState(false);
+  const [busca, setBusca] = useState("");
   const iS = { background:C.bg, border:"1px solid "+C.border, borderRadius:8, color:C.text, padding:"9px 11px", fontSize:13, outline:"none", fontFamily:"inherit", width:"100%" };
   const lbl = { fontSize:11, color:C.muted, marginBottom:4, display:"block" };
 
@@ -3790,10 +3791,12 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
   // ── LISTA ──
   if(!r){
     const esRetTab = tab === "retrabajo";
-    const ordenadas = [...(remisiones||[])]
+    const q = busca.trim().toLowerCase();
+    const delTab = [...(remisiones||[])]
       .filter(x => (x.tipo||"muestra") === tab)
       .sort((a,b)=> (b.fecha||"").localeCompare(a.fecha||"") || (parseInt(b.numero)||0)-(parseInt(a.numero)||0));
-    const enPrestamo = ordenadas.filter(x=> resumenRemision(x).estado!=="devuelta");
+    const ordenadas = q ? delTab.filter(x => (x.cliente||"").toLowerCase().includes(q) || String(x.numero||"").toLowerCase().includes(q)) : delTab;
+    const enPrestamo = delTab.filter(x=> resumenRemision(x).estado!=="devuelta");
     const piezasFuera = enPrestamo.reduce((s,x)=> s + resumenRemision(x).pendPiezas, 0);
     return (
       <div style={{maxWidth:900, margin:"0 auto", padding:"0 4px"}}>
@@ -3805,6 +3808,11 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
           {[["muestra","Muestras (préstamo)"],["retrabajo","Retrabajos (no regresan)"]].map(([id,lblT]) => (
             <button key={id} onClick={()=>setTab(id)} style={{border:"1px solid "+(tab===id?C.accent:C.border), borderRadius:9, background:tab===id?C.accent:C.surface, color:tab===id?"#1a1d27":C.text, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{lblT}</button>
           ))}
+        </div>
+        <div style={{display:"flex", gap:8, marginBottom:16, flexWrap:"wrap", alignItems:"center"}}>
+          <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar por cliente o número de remisión…" style={{...iS, flex:1, minWidth:200, width:"auto"}}/>
+          {busca && <button onClick={()=>setBusca("")} style={{border:"1px solid "+C.border, borderRadius:9, background:C.surface, color:C.muted, padding:"9px 12px", fontSize:13, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>✕ Limpiar</button>}
+          {busca && <span style={{fontSize:12, color:C.muted}}>{ordenadas.length} resultado{ordenadas.length===1?"":"s"}</span>}
         </div>
         {!esRetTab && (
           <div style={{display:"flex", gap:10, marginBottom:16, flexWrap:"wrap"}}>
@@ -3818,7 +3826,7 @@ function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) 
             </div>
           </div>
         )}
-        {ordenadas.length===0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>Aún no hay remisiones {esRetTab?"de retrabajo":"de muestra"}. Crea la primera con el botón de arriba.</div>}
+        {ordenadas.length===0 && <div style={{color:C.muted, textAlign:"center", padding:"40px 0"}}>{busca.trim() ? "No hay remisiones que coincidan con la búsqueda." : ("Aún no hay remisiones "+(esRetTab?"de retrabajo":"de muestra")+". Crea la primera con el botón de arriba.")}</div>}
         {ordenadas.map(rem=>{
           const res = resumenRemision(rem);
           let col, txt;

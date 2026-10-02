@@ -3650,6 +3650,7 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
                 <input value={p.horaLlegada} onChange={e=>setP(i,"horaLlegada",e.target.value)} placeholder="Llegada" style={{...iS, width:80}}/>
                 <input value={p.horaReal} onChange={e=>setP(i,"horaReal",e.target.value)} placeholder="Fin" style={{...iS, width:80}}/>
                 {duracionEntreHoras(p.horaLlegada, p.horaReal) && <span style={{fontSize:11.5, color:C.accent, fontWeight:800, whiteSpace:"nowrap"}}>⏱ {duracionEntreHoras(p.horaLlegada, p.horaReal)}</span>}
+                {p.geo && typeof p.geo.lat === "number" && typeof p.geo.lng === "number" && <a href={"https://www.google.com/maps?q="+p.geo.lat+","+p.geo.lng} target="_blank" rel="noopener noreferrer" style={{fontSize:11.5, color:C.success, fontWeight:800, whiteSpace:"nowrap", textDecoration:"none"}}>📍 Ubicación{p.geo.acc?" (±"+p.geo.acc+" m)":""}</a>}
                 {esEntrega && (
                   <span style={{display:"flex", alignItems:"center", gap:6, marginLeft:4}}>
                     <span style={{fontSize:12, color:C.muted}}>Docs:</span>
@@ -6754,6 +6755,7 @@ function RutaMovil(){
   const [guardando, setGuardando] = useState(false);
   const [eligiendo, setEligiendo] = useState(null); // idx de la actividad nueva a la que se le está eligiendo lugar
   const [borrador, setBorrador] = useState({});   // { idx: texto } observación en edición
+  const [gpsMsg, setGpsMsg] = useState("");       // aviso mientras se obtiene la ubicación GPS
   const [abierto, setAbierto] = useState(null);   // idx con el campo de observación abierto
   const [pendInc, setPendInc] = useState(null);   // idx esperando el motivo para guardar la incidencia
   const [guardObs, setGuardObs] = useState(null); // idx que se está guardando
@@ -6867,12 +6869,24 @@ function RutaMovil(){
   };
   useEffect(() => { if (ruta && ruta.id) { setIncDia(ruta.incidencias || ""); setKmFin(ruta.kmFinal || ""); } }, [ruta && ruta.id]); // eslint-disable-line
 
+  // GPS del celular. No bloquea: si se niega el permiso o falla, resuelve null y se marca igual.
+  const obtenerGPS = () => new Promise(resolve => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, acc: Math.round(pos.coords.accuracy || 0) }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 }
+    );
+  });
   const marcar = async (idx, estatus) => {
     const actual = (ruta.paradas || []).find(x => x.idx === idx) || {};
     // La incidencia no se guarda hasta que escriba el motivo: es lo que la saca del cumplimiento.
     if (estatus === "inc") { setPendInc(idx); abrirObs(idx, actual.obs); return; }
     try {
-      const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus });
+      let geo = null;
+      // Entrega a cliente (tipo E) marcada como realizada: captura ubicación GPS como evidencia.
+      if (estatus === "ok" && actual.tipo === "E") { setGpsMsg("📍 Obteniendo ubicación…"); geo = await obtenerGPS(); setGpsMsg(""); }
+      const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus, ...(geo ? { lat: geo.lat, lng: geo.lng, acc: geo.acc } : {}) });
       setRuta(p => ({ ...p, paradas: p.paradas.map(x => x.idx === idx ? { ...x, ...r.parada } : x) }));
       setPendInc(pi => pi === idx ? null : pi);
       abrirObs(idx, r.parada.obs); // el campo de observación queda listo, pero es opcional
@@ -7156,6 +7170,7 @@ function RutaMovil(){
   const hechas = paradas.filter(p => p.estatus).length;
   return (
     <div style={wrap}><div style={card}>
+      {gpsMsg && <div style={{position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", zIndex:9999, background:"#13351f", border:"1px solid #4caf7d", color:"#cdeed9", padding:"11px 18px", borderRadius:12, fontSize:14, fontWeight:700, boxShadow:"0 6px 20px rgba(0,0,0,.45)"}}>{gpsMsg}</div>}
       <BandaChecada pin={pin}/>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, gap:10}}>
         <div style={{fontSize:19, fontWeight:800}}>🚚 Ruta de hoy</div>

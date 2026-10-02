@@ -64,6 +64,7 @@ function serializarRuta(ruta) {
       direccion: p.direccion || '', contacto: p.contacto || '',
       noPedido: p.noPedido || '', estatus: p.estatus || '', obs: p.obs || '',
       horaLlegada: p.horaLlegada || '', horaReal: p.horaReal || '',
+      geo: p.geo || null,
     })),
   };
 }
@@ -209,7 +210,7 @@ export default async function handler(req, res) {
 
     // 2.c) Marcar parada — requiere ruta iniciada
     if (accion === 'marcar') {
-      const { rutaId, idx, estatus, obs } = body;
+      const { rutaId, idx, estatus, obs, lat, lng, acc } = body;
       if (!rutaId || !['ok', 'x', 'inc'].includes(estatus)) return res.status(400).json({ error: 'Datos inválidos' });
 
       // Una incidencia sale del cálculo de cumplimiento: sin motivo escrito no se registra.
@@ -229,6 +230,12 @@ export default async function handler(req, res) {
 
       paradas[i] = { ...paradas[i], estatus, horaReal: paradas[i].horaReal || horaMX() };
       if (typeof obs === 'string') paradas[i].obs = obs;
+      // Ubicación GPS del chofer al marcar (si el celular la proporcionó). La hora sigue
+      // siendo de servidor; esto solo añade DÓNDE se marcó. No sobrescribe una ya guardada.
+      const la = Number(lat), lo = Number(lng);
+      if (!paradas[i].geo && isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180) {
+        paradas[i].geo = { lat: la, lng: lo, acc: (isFinite(Number(acc)) ? Math.round(Number(acc)) : null), hora: horaMX() };
+      }
 
       await ref.update({ paradas, actualizadoMovil: firma() });
       return res.status(200).json({ ok: true, parada: paradas[i] });

@@ -210,19 +210,19 @@ const ETAPAS = [
   {id:"cancelada", label:"Cancelada",       color:"#c0392b"},
 ];
 const VIEWS = [
-  {id:"playera_frente",label:"Playera Frente",ratio:0.8806,logoPct:26},
-    {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoPct:26},
-    {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoPct:22},
-    {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoPct:22},
-    {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoPct:18},
-    {id:"pantalon_trasero",label:"Pantalón Atrás",ratio:1.3631,logoPct:20},
-    {id:"gorra_frente",label:"Gorra Frente",ratio:0.9779,logoPct:30},
-    {id:"gorra_atras",label:"Gorra Atrás",ratio:0.9505,logoPct:26},
-    {id:"gorra_derecho",label:"Gorra Der.",ratio:1.1429,logoPct:24},
-    {id:"gorra_izquierdo",label:"Gorra Izq.",ratio:1.1834,logoSize:72},
-  {id:"costado_derecho_cuerpo",label:"Costado Der.",ratio:1.0,logoSize:110},
-  {id:"costado_izquierdo_cuerpo",label:"Costado Izq.",ratio:1.0,logoSize:110},
-  {id:"camisa_completa",label:"Camisa Completa",ratio:2.3353,logoSize:80},
+  {id:"playera_frente",label:"Playera Frente",ratio:0.8806,logoPct:23.4},
+  {id:"playera_atras",label:"Playera Atrás",ratio:0.8806,logoPct:32.5},
+  {id:"playera_derecho",label:"Manga Der.",ratio:0.9847,logoPct:22},
+  {id:"playera_izquierdo",label:"Manga Izq.",ratio:1.1679,logoPct:22},
+  {id:"pantalon_frente",label:"Pantalón Frente",ratio:1.4524,logoPct:18},
+  {id:"pantalon_trasero",label:"Pantalón Atrás",ratio:1.3631,logoPct:20},
+  {id:"gorra_frente",label:"Gorra Frente",ratio:0.9779,logoPct:30},
+  {id:"gorra_atras",label:"Gorra Atrás",ratio:0.9505,logoPct:26},
+  {id:"gorra_derecho",label:"Gorra Der.",ratio:1.1429,logoPct:24},
+  {id:"gorra_izquierdo",label:"Gorra Izq.",ratio:1.1834,logoPct:24},
+  {id:"costado_derecho_cuerpo",label:"Costado Der.",ratio:1.0,logoPct:24},
+  {id:"costado_izquierdo_cuerpo",label:"Costado Izq.",ratio:1.0,logoPct:24},
+  {id:"camisa_completa",label:"Camisa Completa",ratio:2.3353,logoPct:10},
 ];
 const C = {
   bg:"#0f1117",surface:"#1a1d27",card:"#21263a",border:"#2e3450",
@@ -254,7 +254,7 @@ const KEY_TO_TIPO = (() => {
   return m;
 })();
 function emptyPosicion() {
-  return { tecnica:"", medida:"", colores:"", logotipos:"", logoImg:null };
+  return { tecnica:"", medida:"", colores:"", logotipos:"", logoImg:null, escala:100 };
 }
 function nextNumero(ordenes) {
   if (!ordenes || !ordenes.length) return "5000";
@@ -497,7 +497,8 @@ async function buildPdfHtml(orden) {
       if (!proc) return '';
       const { dataUrl } = proc;
       // ancho del logo en % del marco de la silueta -> escala junto con la silueta
-      const w = pin.size || logoPct;
+      const esc = ((orden.posiciones[pin.key] || {}).escala || 100) / 100;
+      const w = (pin.size || logoPct) * esc;
       const tag = pin.tag ? `<div style="position:absolute;left:${pin.x}%;top:${pin.y+8}%;transform:translate(-50%,0);z-index:6;font-size:6px;font-weight:800;color:#c0392b;background:#fff;padding:0 2px;border-radius:2px;white-space:nowrap;line-height:1.3;">${pin.tag}</div>` : '';
       return `<img src="${dataUrl}" style="position:absolute;left:${pin.x}%;top:${pin.y}%;transform:translate(-50%,-50%);width:${w}%;height:auto;z-index:5;pointer-events:none;mix-blend-mode:multiply;display:block;" />${tag}`;
     }).join('');
@@ -880,17 +881,15 @@ function Btn({ children, onClick, variant="primary", size="md", style:ext={}, di
 }
 
 // ── GarmentVisualizer ─────────────────────────────────────────────────────────
-function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
+function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo, onSetEscala }) {
   const [view, setView] = useState("playera_frente");
   const [hovered, setHovered] = useState(null);
   const [pending, setPending] = useState(null);
   const fileRef = useRef(null);
   const pins = PINS[view] || [];
+  const vLogoPct = (VIEWS.find(x => x.id === view) || {}).logoPct || 20;
   const safePosiciones = posiciones && typeof posiciones === 'object' ? posiciones : {};
   
-  console.log("VIEW:", view);
-  console.log("PINS[view]:", PINS[view]);
-  console.log("IMGS[view]:", IMGS[view] ? "existe" : "NO EXISTE");
 
   const handlePin = key => { setPending(key); fileRef.current.click(); };
   const handleFile = e => {
@@ -906,13 +905,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
     <div>
       <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
         {VIEWS.map(v => (
-          <button key={v.id} onClick={() => {
-  try {
-    setView(v.id);
-  } catch(e) {
-    console.error("ERROR al cambiar vista:", v.id, e);
-  }
-}} style={{
+          <button key={v.id} onClick={() => setView(v.id)} style={{
             background:view===v.id?C.accent:"transparent",color:view===v.id?"#0f1117":C.muted,
             border:"1px solid "+(view===v.id?C.accent:C.border),borderRadius:20,
             padding:"5px 16px",fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .2s",
@@ -929,6 +922,8 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
             const hasLogo = !!pos.logoImg;
             const isHov = hovered === pin.key;
             const posLabel = POSICIONES.find(p => p.key === pin.key)?.label || pin.key;
+            const esc = (pos.escala || 100) / 100;
+            const logoW = Math.max(8, Math.round((pin.size || vLogoPct) / 100 * 220 * esc));
             return (
               <div key={pin.key}
                 onClick={() => handlePin(pin.key)}
@@ -936,7 +931,7 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
                 onMouseLeave={() => setHovered(null)}
                 style={{position:"absolute",left:pin.x+"%",top:pin.y+"%",transform:"translate(-50%,-50%)",cursor:"pointer",zIndex:10}}>
                 {hasLogo ? (
-                  <img src={pos.logoImg} style={{width:isHov?50:42,height:isHov?50:42,objectFit:"contain",display:"block",mixBlendMode:"multiply",transition:"all .15s"}}/>
+                  <img src={pos.logoImg} style={{width:logoW,height:"auto",objectFit:"contain",display:"block",mixBlendMode:"multiply",transition:"width .1s",outline:isHov?"2px solid "+C.accent:"none",outlineOffset:"2px"}}/>
                 ) : (
                   <div style={{width:isHov?24:20,height:isHov?24:20,background:isHov?C.accent:C.accentGlow,border:"2px solid "+C.accent,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,fontWeight:800,color:isHov?"#0f1117":C.accent,transition:"all .15s"}}>{pin.key}</div>
                 )}
@@ -957,18 +952,30 @@ function GarmentVisualizer({ posiciones, onLogoUpload, onClearLogo }) {
             {pins.map(pin => {
               const pos = safePosiciones[pin.key] || {};
               const posLabel = POSICIONES.find(p => p.key === pin.key)?.label || pin.key;
+              const esc = pos.escala || 100;
               return (
-                <div key={pin.key} style={{background:pos.logoImg?C.accentGlow:C.card,border:"1px solid "+(pos.logoImg?C.accent+"44":C.border),borderRadius:7,padding:"6px 10px",display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontWeight:800,color:C.accent,fontSize:13,minWidth:18}}>{pin.key}</span>
-                  <span style={{fontSize:11,color:C.muted,flex:1}}>{posLabel}</span>
-                  {pos.logoImg && <img src={pos.logoImg} style={{width:28,height:28,objectFit:"contain",borderRadius:3,border:"1px solid "+C.border,background:"white"}}/>}
-                  <button onClick={() => handlePin(pin.key)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:5,color:C.muted,fontSize:10,padding:"2px 7px",cursor:"pointer"}}>
-                    {pos.logoImg ? "Cambiar" : "+ Logo"}
-                  </button>
-                  {pos.logoImg && (
-                    <button onClick={() => onClearLogo(pin.key)} style={{background:"transparent",border:"1px solid #c0392b55",borderRadius:5,color:"#c0392b",fontSize:10,padding:"2px 7px",cursor:"pointer"}}>
-                      ✕ Borrar
+                <div key={pin.key} style={{background:pos.logoImg?C.accentGlow:C.card,border:"1px solid "+(pos.logoImg?C.accent+"44":C.border),borderRadius:7,padding:"6px 10px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontWeight:800,color:C.accent,fontSize:13,minWidth:18}}>{pin.key}</span>
+                    <span style={{fontSize:11,color:C.muted,flex:1}}>{posLabel}</span>
+                    {pos.logoImg && <img src={pos.logoImg} style={{width:28,height:28,objectFit:"contain",borderRadius:3,border:"1px solid "+C.border,background:"white"}}/>}
+                    <button onClick={() => handlePin(pin.key)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:5,color:C.muted,fontSize:10,padding:"2px 7px",cursor:"pointer"}}>
+                      {pos.logoImg ? "Cambiar" : "+ Logo"}
                     </button>
+                    {pos.logoImg && (
+                      <button onClick={() => onClearLogo(pin.key)} style={{background:"transparent",border:"1px solid #c0392b55",borderRadius:5,color:"#c0392b",fontSize:10,padding:"2px 7px",cursor:"pointer"}}>
+                        ✕ Borrar
+                      </button>
+                    )}
+                  </div>
+                  {pos.logoImg && onSetEscala && (
+                    <div style={{display:"flex",alignItems:"center",gap:7,marginTop:7}}>
+                      <span style={{fontSize:10,color:C.muted,minWidth:46}}>Tamaño</span>
+                      <button onClick={()=>onSetEscala(pin.key, Math.max(20, esc-5))} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,fontSize:14,fontWeight:800,width:24,height:24,cursor:"pointer",lineHeight:1,padding:0}}>−</button>
+                      <input type="range" min="20" max="250" step="5" value={esc} onChange={e=>onSetEscala(pin.key, Number(e.target.value))} style={{flex:1,accentColor:C.accent,cursor:"pointer"}}/>
+                      <button onClick={()=>onSetEscala(pin.key, Math.min(250, esc+5))} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:5,color:C.text,fontSize:14,fontWeight:800,width:24,height:24,cursor:"pointer",lineHeight:1,padding:0}}>+</button>
+                      <span style={{fontSize:11,fontWeight:800,color:C.accent,minWidth:40,textAlign:"right"}}>{esc}%</span>
+                    </div>
                   )}
                 </div>
               );
@@ -1927,7 +1934,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
       {tab === "viz" && (
         <div>
           <div style={{color:C.muted,fontSize:13,marginBottom:16}}>Selecciona la vista y haz clic en los pines para asignar el logotipo a cada posición.</div>
-          <GarmentVisualizer posiciones={form.posiciones} onLogoUpload={handleLogoUpload} onClearLogo={handleClearLogo}/>
+          <GarmentVisualizer posiciones={form.posiciones} onLogoUpload={handleLogoUpload} onClearLogo={handleClearLogo} onSetEscala={(k,v)=>updPos(k,"escala",v)}/>
         </div>
       )}
 

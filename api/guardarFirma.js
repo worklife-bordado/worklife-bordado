@@ -1,5 +1,5 @@
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 function getApp() {
   if (getApps().length === 0) {
@@ -39,12 +39,35 @@ module.exports = async function handler(req, res) {  if (req.method !== 'POST') 
       return res.status(410).json({ error: 'Link expirado' });
     }
 
-    // Guardar firma
+    // Guardar firma (ruta crítica)
     await docRef.update({
       firma,
       firmado: true,
       fechaFirma: new Date()
     });
+
+    // Avisar al vendedor que creó la orden para que la libere a producción.
+    // Va en try/catch aparte: si el aviso falla, la firma ya quedó guardada
+    // y la respuesta al cliente NO se ve afectada.
+    try {
+      // El doc de la orden en Firestore es ordenes/<ordenId>
+      const ordenSnap = await db.collection('ordenes').doc(String(data.ordenId)).get();
+      const vendedor = ordenSnap.exists ? ordenSnap.data().creadoPor : null;
+
+      if (vendedor) {
+        const num = data.numeroOrden || (ordenSnap.exists ? ordenSnap.data().numero : '') || '';
+        await db.collection('notificaciones').add({
+          para: vendedor,
+          titulo: `✍️ Orden #${num} firmada por el cliente`,
+          cuerpo: `El cliente autorizó la orden #${num}. Ábrela y márcala "Lista para trabajar" para enviarla a producción.`,
+          ordenId: String(data.ordenId),
+          leida: false,
+          fecha: FieldValue.serverTimestamp()
+        });
+      }
+    } catch (notifErr) {
+      console.error('No se pudo crear la notificacion de firma:', notifErr);
+    }
 
     return res.status(200).json({ success: true });
   } catch (error) {

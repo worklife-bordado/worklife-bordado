@@ -3311,7 +3311,7 @@ const RUTA_TIPOS = [
 ];
 function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
-  return { tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaLlegada:"", horaReal:"", docs:false, obs:"" };
+  return { id: "p_" + Math.random().toString(36).slice(2,10) + Date.now().toString(36), tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaLlegada:"", horaReal:"", docs:false, obs:"" };
 }
 function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente, onEditarDireccion }) {
   const [r, setR] = useState(null);
@@ -8241,12 +8241,28 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
         // hora) sí se respeta cuando su copia está al día.
         const movilCambio = (act.actualizadoMovil || "") !== (ruta.actualizadoMovil || "");
         const actP = act.paradas || [];
-        payload.paradas = (payload.paradas || []).map((pa, i) => {
-          const q = actP[i];
-          if (!q) return pa;
-          // Solo si es claramente la misma parada (misma posición, tipo, cliente y pedido).
-          const misma = pa.tipo === q.tipo && (pa.cliente || "") === (q.cliente || "") && (pa.noPedido || "") === (q.noPedido || "");
-          if (!misma) return pa;
+        // Se empareja cada parada con la guardada por IDENTIDAD (id estable o
+        // tipo+cliente+pedido+orden), buscando en TODA la ruta guardada — NO por
+        // posición. Así, aunque Krisia agregue o reordene actividades y los índices
+        // se recorran, la marca del chofer se reconcilia con la parada correcta y no
+        // se pierde. "usados" evita emparejar dos veces la misma parada guardada.
+        const usados = new Array(actP.length).fill(false);
+        const hallar = (pa) => {
+          if (pa.id) {
+            const j = actP.findIndex((q, k) => !usados[k] && q && q.id === pa.id);
+            if (j >= 0) return j;
+          }
+          return actP.findIndex((q, k) => !usados[k] && q &&
+            q.tipo === pa.tipo &&
+            (q.cliente || "") === (pa.cliente || "") &&
+            (q.noPedido || "") === (pa.noPedido || "") &&
+            (q.ordenId || null) === (pa.ordenId || null));
+        };
+        payload.paradas = (payload.paradas || []).map((pa) => {
+          const j = hallar(pa);
+          if (j < 0) return pa; // parada nueva de Krisia: se queda tal cual
+          usados[j] = true;
+          const q = actP[j];
           const r2 = { ...pa };
           if (!r2.orden && q.orden) r2.orden = q.orden; // el orden solo existe en el celular: siempre se rellena
           if (movilCambio) {

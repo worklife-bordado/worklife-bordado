@@ -3840,6 +3840,7 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
     setGuardando(false);
   };
   const marcarTerminado = async (a) => {
+    if (!window.confirm("¿Confirmas marcar como TERMINADA la orden #" + (a.folio||"") + " — " + (a.cliente||"") + "?\n\nDespués deberás marcar la calidad (Aceptado / Requirió corrección), que es lo que cuenta para los indicadores.")) return;
     const f = { ...a, estatus:"terminado", fechaTerminado: a.fechaTerminado || hoyISO() };
     try { await onGuardar(f); } catch(e){ alert("Error: " + e.message); }
   };
@@ -3851,11 +3852,13 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
   };
 
   const ind = indicadoresArreglos(arreglos, mesInd);
+  const nSinCal = (arreglos||[]).filter(a => (a.estatus==="terminado"||a.estatus==="entregado") && !a.calidad).length;
   const q = busca.trim().toLowerCase();
   const lista = (arreglos||[]).filter(a => {
     if (filtro === "abiertos" && !(a.estatus === "pendiente" || a.estatus === "proceso")) return false;
     if (filtro === "terminado" && a.estatus !== "terminado") return false;
     if (filtro === "entregado" && a.estatus !== "entregado") return false;
+    if (filtro === "sincalidad" && !((a.estatus === "terminado" || a.estatus === "entregado") && !a.calidad)) return false;
     if (q && !((a.cliente||"").toLowerCase().includes(q) || (a.descripcion||"").toLowerCase().includes(q) || String(a.folio||"").includes(q))) return false;
     return true;
   }).sort((x,y) => (y.fechaCreacion||"").localeCompare(x.fechaCreacion||""));
@@ -3961,9 +3964,13 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
 
       {/* Filtros */}
       <div style={{display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", marginBottom:10}}>
-        {[["abiertos","Abiertos"],["terminado","Terminados"],["entregado","Entregados"],["todos","Todos"]].map(([id,lbl])=>(
-          <button key={id} onClick={()=>setFiltro(id)} style={{border:"1px solid "+(filtro===id?C.accent:C.border), background:filtro===id?C.accentGlow:C.surface, color:filtro===id?C.accent:C.muted, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{lbl}</button>
-        ))}
+        {[["abiertos","Abiertos"],["terminado","Terminados"],["entregado","Entregados"],["sincalidad", nSinCal>0 ? ("⚠️ Sin calidad ("+nSinCal+")") : "Sin calidad"],["todos","Todos"]].map(([id,lbl])=>{
+          const warn = id==="sincalidad" && nSinCal>0;
+          const on = filtro===id;
+          return (
+          <button key={id} onClick={()=>setFiltro(id)} style={{border:"1px solid "+(on?(warn?C.danger:C.accent):(warn?C.danger+"88":C.border)), background:on?(warn?C.danger+"22":C.accentGlow):C.surface, color:on?(warn?C.danger:C.accent):(warn?C.danger:C.muted), borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{lbl}</button>
+          );
+        })}
         <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar cliente, folio…"
           style={{flex:"1 1 180px", background:C.surface, border:"1px solid "+C.border, borderRadius:7, color:C.text, padding:"6px 10px", fontSize:12, outline:"none"}}/>
       </div>
@@ -3995,10 +4002,11 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
               <div style={{display:"flex", gap:6, flexWrap:"wrap", marginTop:8}}>
                 {!terminado && <button onClick={()=>marcarTerminado(a)} style={{border:"1px solid "+C.success+"88", background:"transparent", color:C.success, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>✓ Marcar terminado</button>}
                 {terminado && (
-                  <>
-                    <button onClick={()=>setCalidad(a,"aceptado")} style={{border:"1px solid "+(a.calidad==="aceptado"?C.success:C.border), background:a.calidad==="aceptado"?C.success+"22":"transparent", color:a.calidad==="aceptado"?C.success:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Aceptado</button>
-                    <button onClick={()=>setCalidad(a,"correccion")} style={{border:"1px solid "+(a.calidad==="correccion"?C.danger:C.border), background:a.calidad==="correccion"?C.danger+"22":"transparent", color:a.calidad==="correccion"?C.danger:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Requirió corrección</button>
-                  </>
+                  <span style={{display:"inline-flex", alignItems:"center", gap:6, padding:"3px 8px", borderRadius:7, background: a.calidad?"transparent":C.danger+"1f", border: a.calidad?"none":"1px solid "+C.danger+"66"}}>
+                    <span style={{fontSize:11, fontWeight:800, color: a.calidad?C.muted:C.danger}}>{a.calidad?"Calidad:":"⚠️ Marca la calidad:"}</span>
+                    <button onClick={()=>setCalidad(a,"aceptado")} style={{border:"1px solid "+(a.calidad==="aceptado"?C.success:C.border), background:a.calidad==="aceptado"?C.success+"22":"transparent", color:a.calidad==="aceptado"?C.success:C.text, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Aceptado</button>
+                    <button onClick={()=>setCalidad(a,"correccion")} style={{border:"1px solid "+(a.calidad==="correccion"?C.danger:C.border), background:a.calidad==="correccion"?C.danger+"22":"transparent", color:a.calidad==="correccion"?C.danger:C.text, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Requirió corrección</button>
+                  </span>
                 )}
                 {a.estatus === "terminado" && <button onClick={()=>marcarEntregado(a)} style={{border:"1px solid "+C.info+"88", background:"transparent", color:C.info, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>📦 Entregado</button>}
                 <button onClick={()=>onImprimir && onImprimir(a)} style={{border:"1px solid "+C.info+"88", background:"transparent", color:C.info, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>🖨️ Orden de trabajo</button>

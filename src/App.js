@@ -3767,6 +3767,241 @@ function buildRemisionHtml(rem){
     </div>
   </div></body></html>`;
 }
+// ══════════════════════════════════════════════════════════════════════════
+// MÓDULO DE ARREGLOS / COSTURA (Isidra) — Krisia crea y da seguimiento.
+// Alimenta solos los KPIs i5 (cumplimiento de fechas) e i6 (calidad) del bono.
+// ══════════════════════════════════════════════════════════════════════════
+const ARREGLO_ESTATUS = [
+  { id:"pendiente", label:"Pendiente" },
+  { id:"proceso",   label:"En proceso" },
+  { id:"terminado", label:"Terminado" },
+  { id:"entregado", label:"Entregado" },
+];
+function emptyArreglo(){
+  return { cliente:"", pedidoOrigen:"", descripcion:"", cantidad:"", fechaCompromiso:"", estatus:"pendiente", fechaTerminado:"", calidad:"", obs:"" };
+}
+function hoyISO(){ return new Date().toISOString().slice(0,10); }
+function labelEstatusArreglo(id){ return (ARREGLO_ESTATUS.find(e=>e.id===id)||{}).label || id; }
+// Indicadores del mes "YYYY-MM" a partir de las órdenes TERMINADAS en ese mes.
+// Misma lógica que autoValoresBonos (i5/i6), para que lo que ve Krisia aquí
+// coincida con lo que se calcula para el bono de Isidra.
+function indicadoresArreglos(arreglos, periodo){
+  const desde = periodo + "-01";
+  const [Y, M] = periodo.split("-").map(Number);
+  const hasta = periodo + "-" + String(new Date(Y, M, 0).getDate()).padStart(2, "0");
+  const term = (arreglos||[]).filter(a => (a.fechaTerminado||"") >= desde && (a.fechaTerminado||"") <= hasta);
+  const aTiempo = term.filter(a => a.fechaCompromiso && a.fechaTerminado <= a.fechaCompromiso).length;
+  const evald = term.filter(a => a.calidad === "aceptado" || a.calidad === "correccion");
+  const acept = term.filter(a => a.calidad === "aceptado").length;
+  return {
+    nTerm: term.length,
+    fechas: term.length ? Number(((aTiempo / term.length) * 100).toFixed(1)) : null,
+    calidad: evald.length ? Number(((acept / evald.length) * 100).toFixed(1)) : null,
+    sinCalidad: term.filter(a => !a.calidad).length,
+  };
+}
+function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, puedeEditar }){
+  const [edit, setEdit] = useState(null);           // arreglo en alta/edición
+  const [guardando, setGuardando] = useState(false);
+  const [filtro, setFiltro] = useState("abiertos");  // abiertos | terminado | entregado | todos
+  const [busca, setBusca] = useState("");
+  const [mesInd, setMesInd] = useState(hoyISO().slice(0,7));
+
+  const semaforo = (a) => {
+    if (a.estatus === "terminado" || a.estatus === "entregado") {
+      const ok = a.fechaCompromiso && a.fechaTerminado && a.fechaTerminado <= a.fechaCompromiso;
+      return ok ? { c:C.success, t:"A tiempo" } : { c:C.danger, t:"Fuera de fecha" };
+    }
+    if (!a.fechaCompromiso) return { c:C.muted, t:"Sin fecha" };
+    const hoy = hoyISO();
+    if (a.fechaCompromiso < hoy) return { c:C.danger, t:"Vencido" };
+    const d = Math.round((new Date(a.fechaCompromiso) - new Date(hoy)) / 86400000);
+    if (d <= 2) return { c:C.accent, t:"Por vencer" };
+    return { c:C.info, t:"En tiempo" };
+  };
+
+  const guardar = async (imprimir) => {
+    if (!edit.cliente || !edit.cliente.trim()) { alert("Indica el cliente."); return; }
+    if (!edit.descripcion || !edit.descripcion.trim()) { alert("Describe el arreglo a realizar."); return; }
+    if (!edit.fechaCompromiso) { alert("Indica la fecha compromiso de entrega."); return; }
+    setGuardando(true);
+    try {
+      const saved = await onGuardar(edit);
+      setEdit(null);
+      if (imprimir && onImprimir) onImprimir(saved);
+    }
+    catch(e){ alert("Error al guardar: " + e.message); }
+    setGuardando(false);
+  };
+  const marcarTerminado = async (a) => {
+    const f = { ...a, estatus:"terminado", fechaTerminado: a.fechaTerminado || hoyISO() };
+    try { await onGuardar(f); } catch(e){ alert("Error: " + e.message); }
+  };
+  const setCalidad = async (a, v) => {
+    try { await onGuardar({ ...a, calidad:v }); } catch(e){ alert("Error: " + e.message); }
+  };
+  const marcarEntregado = async (a) => {
+    try { await onGuardar({ ...a, estatus:"entregado" }); } catch(e){ alert("Error: " + e.message); }
+  };
+
+  const ind = indicadoresArreglos(arreglos, mesInd);
+  const q = busca.trim().toLowerCase();
+  const lista = (arreglos||[]).filter(a => {
+    if (filtro === "abiertos" && !(a.estatus === "pendiente" || a.estatus === "proceso")) return false;
+    if (filtro === "terminado" && a.estatus !== "terminado") return false;
+    if (filtro === "entregado" && a.estatus !== "entregado") return false;
+    if (q && !((a.cliente||"").toLowerCase().includes(q) || (a.descripcion||"").toLowerCase().includes(q) || String(a.folio||"").includes(q))) return false;
+    return true;
+  }).sort((x,y) => (y.fechaCreacion||"").localeCompare(x.fechaCreacion||""));
+
+  const campoStyle = { width:"100%", background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"8px 10px", fontSize:13, outline:"none", boxSizing:"border-box" };
+  const pct = (v) => v==null ? "s/d" : v+"%";
+
+  return (
+    <div style={{padding:"20px 16px", maxWidth:960, margin:"0 auto"}}>
+      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:14}}>
+        <div style={{fontSize:20, fontWeight:800, color:C.text}}>✂️ Arreglos y costura</div>
+        {puedeEditar && !edit && <Btn onClick={() => setEdit(emptyArreglo())} size="sm">+ Nueva orden</Btn>}
+      </div>
+
+      {/* Indicadores del mes (los que alimentan el bono de Isidra) */}
+      <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"12px 14px", marginBottom:16}}>
+        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:8}}>
+          <div style={{fontSize:13, fontWeight:800, color:C.text}}>Indicadores del mes · Isidra</div>
+          <input type="month" value={mesInd} onChange={e=>setMesInd(e.target.value)}
+            style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"5px 8px", fontSize:12, outline:"none"}}/>
+        </div>
+        <div style={{display:"flex", gap:12, flexWrap:"wrap"}}>
+          <div style={{flex:"1 1 150px", background:C.surface, borderRadius:10, padding:"10px 12px", border:"1px solid "+C.border}}>
+            <div style={{fontSize:11, color:C.muted}}>Cumplimiento de fechas</div>
+            <div style={{fontSize:22, fontWeight:800, color:C.accent}}>{pct(ind.fechas)}</div>
+            <div style={{fontSize:10, color:C.muted}}>terminadas a tiempo</div>
+          </div>
+          <div style={{flex:"1 1 150px", background:C.surface, borderRadius:10, padding:"10px 12px", border:"1px solid "+C.border}}>
+            <div style={{fontSize:11, color:C.muted}}>Calidad (sin retrabajo)</div>
+            <div style={{fontSize:22, fontWeight:800, color:C.success}}>{pct(ind.calidad)}</div>
+            <div style={{fontSize:10, color:C.muted}}>aceptadas sin corrección</div>
+          </div>
+          <div style={{flex:"1 1 150px", background:C.surface, borderRadius:10, padding:"10px 12px", border:"1px solid "+C.border}}>
+            <div style={{fontSize:11, color:C.muted}}>Terminadas en el mes</div>
+            <div style={{fontSize:22, fontWeight:800, color:C.text}}>{ind.nTerm}</div>
+            {ind.sinCalidad>0 ? <div style={{fontSize:10, color:C.danger}}>{ind.sinCalidad} sin marcar calidad</div> : <div style={{fontSize:10, color:C.muted}}>todas evaluadas</div>}
+          </div>
+        </div>
+        <div style={{fontSize:11, color:C.muted, marginTop:8}}>Estos dos porcentajes se pasan solos al bono de Isidra (KPIs i5 y i6) para el mes seleccionado.</div>
+      </div>
+
+      {/* Alta / edición */}
+      {edit && (
+        <div style={{background:C.card, border:"1px solid "+C.accent+"66", borderRadius:12, padding:"14px 16px", marginBottom:16}}>
+          <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:10}}>{edit.id ? "Editar orden "+(edit.folio?("#"+edit.folio):"") : "Nueva orden de arreglo"}</div>
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Cliente</div>
+              <input value={edit.cliente} onChange={e=>setEdit({...edit, cliente:e.target.value})} style={campoStyle}/></div>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Pedido / Origen</div>
+              <input value={edit.pedidoOrigen||""} onChange={e=>setEdit({...edit, pedidoOrigen:e.target.value})} style={campoStyle} placeholder="No. de pedido o de dónde viene"/></div>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Cantidad (prendas)</div>
+              <input type="number" min="0" value={edit.cantidad} onChange={e=>setEdit({...edit, cantidad:e.target.value})} style={campoStyle}/></div>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Fecha compromiso</div>
+              <input type="date" value={edit.fechaCompromiso} onChange={e=>setEdit({...edit, fechaCompromiso:e.target.value})} style={campoStyle}/></div>
+            <div style={{gridColumn:"1 / -1"}}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Descripción del arreglo</div>
+              <input value={edit.descripcion} onChange={e=>setEdit({...edit, descripcion:e.target.value})} style={campoStyle} placeholder="Ej. ajustar basta, cambiar cierre, bordar logo…"/></div>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Estatus</div>
+              <select value={edit.estatus} onChange={e=>setEdit({...edit, estatus:e.target.value})} style={campoStyle}>
+                {ARREGLO_ESTATUS.map(e=> <option key={e.id} value={e.id}>{e.label}</option>)}
+              </select></div>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Observaciones</div>
+              <input value={edit.obs} onChange={e=>setEdit({...edit, obs:e.target.value})} style={campoStyle}/></div>
+          </div>
+          <div style={{display:"flex", gap:8, marginTop:12, justifyContent:"flex-end", flexWrap:"wrap"}}>
+            <Btn onClick={()=>setEdit(null)} variant="ghost" size="sm">Cancelar</Btn>
+            <Btn onClick={()=>guardar(false)} variant="ghost" size="sm" disabled={guardando}>{guardando?"Guardando…":"Guardar"}</Btn>
+            <Btn onClick={()=>guardar(true)} size="sm" disabled={guardando}>🖨️ Guardar e imprimir</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div style={{display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", marginBottom:10}}>
+        {[["abiertos","Abiertos"],["terminado","Terminados"],["entregado","Entregados"],["todos","Todos"]].map(([id,lbl])=>(
+          <button key={id} onClick={()=>setFiltro(id)} style={{border:"1px solid "+(filtro===id?C.accent:C.border), background:filtro===id?C.accentGlow:C.surface, color:filtro===id?C.accent:C.muted, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{lbl}</button>
+        ))}
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar cliente, folio…"
+          style={{flex:"1 1 180px", background:C.surface, border:"1px solid "+C.border, borderRadius:7, color:C.text, padding:"6px 10px", fontSize:12, outline:"none"}}/>
+      </div>
+
+      {/* Lista */}
+      {lista.length === 0 ? (
+        <div style={{background:C.card, borderRadius:10, padding:24, textAlign:"center", color:C.muted, border:"1px dashed "+C.border}}>No hay órdenes en este filtro.</div>
+      ) : lista.map(a => {
+        const s = semaforo(a);
+        const terminado = a.estatus === "terminado" || a.estatus === "entregado";
+        return (
+          <div key={a.id} style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8}}>
+            <div style={{display:"flex", alignItems:"center", gap:10, flexWrap:"wrap"}}>
+              <span style={{width:10, height:10, borderRadius:"50%", background:s.c, flexShrink:0}} title={s.t}/>
+              <span style={{fontWeight:800, color:C.accent, fontSize:13}}>#{a.folio||"—"}</span>
+              <span style={{fontWeight:700, color:C.text, fontSize:13}}>{a.cliente}</span>
+              <span style={{fontSize:12, color:C.muted, flex:"1 1 200px", minWidth:120}}>{a.descripcion}{a.cantidad?(" · "+a.cantidad+" pz"):""}</span>
+              <span style={{fontSize:11, color:s.c, fontWeight:700}}>{s.t}</span>
+              <span style={{fontSize:11, color:C.muted}}>{labelEstatusArreglo(a.estatus)}</span>
+            </div>
+            <div style={{display:"flex", alignItems:"center", gap:14, flexWrap:"wrap", marginTop:6, fontSize:11, color:C.muted}}>
+              {a.pedidoOrigen ? <span>Pedido/Origen: <b style={{color:C.text}}>{a.pedidoOrigen}</b></span> : null}
+              <span>Compromiso: <b style={{color:C.text}}>{a.fechaCompromiso?fmtDate(a.fechaCompromiso):"—"}</b></span>
+              {terminado && <span>Terminado: <b style={{color:C.text}}>{a.fechaTerminado?fmtDate(a.fechaTerminado):"—"}</b></span>}
+              {terminado && <span>Calidad: <b style={{color: a.calidad==="aceptado"?C.success:(a.calidad==="correccion"?C.danger:C.muted)}}>{a.calidad==="aceptado"?"Aceptado":(a.calidad==="correccion"?"Requirió corrección":"sin marcar")}</b></span>}
+            </div>
+            {puedeEditar && (
+              <div style={{display:"flex", gap:6, flexWrap:"wrap", marginTop:8}}>
+                {!terminado && <button onClick={()=>marcarTerminado(a)} style={{border:"1px solid "+C.success+"88", background:"transparent", color:C.success, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>✓ Marcar terminado</button>}
+                {terminado && (
+                  <>
+                    <button onClick={()=>setCalidad(a,"aceptado")} style={{border:"1px solid "+(a.calidad==="aceptado"?C.success:C.border), background:a.calidad==="aceptado"?C.success+"22":"transparent", color:a.calidad==="aceptado"?C.success:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Aceptado</button>
+                    <button onClick={()=>setCalidad(a,"correccion")} style={{border:"1px solid "+(a.calidad==="correccion"?C.danger:C.border), background:a.calidad==="correccion"?C.danger+"22":"transparent", color:a.calidad==="correccion"?C.danger:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Requirió corrección</button>
+                  </>
+                )}
+                {a.estatus === "terminado" && <button onClick={()=>marcarEntregado(a)} style={{border:"1px solid "+C.info+"88", background:"transparent", color:C.info, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>📦 Entregado</button>}
+                <button onClick={()=>onImprimir && onImprimir(a)} style={{border:"1px solid "+C.info+"88", background:"transparent", color:C.info, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>🖨️ Orden de trabajo</button>
+                <button onClick={()=>setEdit(a)} style={{border:"1px solid "+C.border, background:"transparent", color:C.muted, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Editar</button>
+                {esAdmin && <button onClick={()=>{ if(window.confirm("¿Eliminar la orden #"+(a.folio||"")+"?")) onEliminar(a.id); }} style={{border:"1px solid "+C.danger+"55", background:"transparent", color:C.danger, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Eliminar</button>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Orden de trabajo imprimible para Isidra (acompaña las prendas / la tela).
+function buildOrdenArregloHtml(a){
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><div><h1>ORDEN DE TRABAJO · ARREGLO</h1></div><div class="folio">No. ${escHtml(String(a.folio||""))}<br/>Fecha: ${escHtml(a.fechaCreacion?fmtDate(a.fechaCreacion.slice(0,10)):"")}</div></div>
+    <div class="body">
+      <div class="sec">DATOS DE LA ORDEN</div>
+      <table>
+        <tr><th style="width:130px">Cliente</th><td>${escHtml(a.cliente||"")}</td><th style="width:130px">Pedido / Origen</th><td>${escHtml(a.pedidoOrigen||"")}</td></tr>
+        <tr><th>Cantidad (prendas)</th><td>${escHtml(String(a.cantidad||""))}</td><th>Fecha compromiso</th><td>${escHtml(a.fechaCompromiso?fmtDate(a.fechaCompromiso):"")}</td></tr>
+        <tr><th>Responsable</th><td colspan="3">Isidra — Costura</td></tr>
+      </table>
+      <div class="sec">TRABAJO A REALIZAR</div>
+      <div style="font-size:12px;border:1px solid #999;padding:10px;min-height:60px">${escHtml(a.descripcion||"")}</div>
+      ${a.obs ? `<div class="sec">OBSERVACIONES</div><div style="font-size:11px;border:1px solid #999;padding:8px;min-height:38px">${escHtml(a.obs)}</div>` : ""}
+      <div class="sec">CONTROL DE ENTREGA / CALIDAD</div>
+      <table>
+        <tr><th style="width:130px">Fecha de inicio</th><td></td><th style="width:130px">Fecha terminado</th><td></td></tr>
+        <tr><th>Revisión de calidad</th><td colspan="3">☐ Aceptado &nbsp;&nbsp;&nbsp; ☐ Requirió corrección</td></tr>
+      </table>
+      <div class="leg" style="margin-top:8px">Esta orden ampara la entrega de prendas o tela a costura para su arreglo. Favor de firmar de recibido el material y, al terminar, registrar la fecha y el resultado de la revisión de calidad.</div>
+      <div class="firmas">
+        <div class="firma">Entregó — WORK-LIFE</div>
+        <div class="firma">Recibió — Isidra (nombre y firma)</div>
+      </div>
+    </div>
+  </div></body></html>`;
+}
 function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) {
   const [r, setR] = useState(null);
   const [tab, setTab] = useState("muestra");
@@ -5249,14 +5484,18 @@ const BONOS_DEF = {
   isidra: {
     nombre:"Isidra", puesto:"Aux. de Almacén y Costura", naKpi:"i4", naReparto:"prop",
     kpis: [
-      { id:"i1", label:"Exactitud en recepción y acomodo", peso:0.30, cap:"número de errores",
+      { id:"i1", label:"Exactitud en recepción y acomodo", peso:0.20, cap:"número de errores",
         ev:v=> v==0?{p:1,n:"Sin errores"}:v<=2?{p:0.5,n:"1–2 errores"}:{p:0,n:"3+ errores"} },
-      { id:"i2", label:"Calidad en revisión de prendas", peso:0.25, cap:"prendas no detectadas",
+      { id:"i2", label:"Calidad en revisión de prendas", peso:0.15, cap:"prendas no detectadas",
         ev:v=> v==0?{p:1,n:"Sin fallas"}:v==1?{p:0.5,n:"1 no detectada"}:{p:0,n:"2+ no detectadas"} },
-      { id:"i3", label:"Orden, limpieza y checklist", peso:0.25, cap:"semanas con checklist (0–4)",
+      { id:"i3", label:"Orden, limpieza y checklist", peso:0.15, cap:"semanas con checklist (0–4)",
         ev:v=> v==4?{p:1,n:"Meta cumplida (4/4)"}:v>=2?{p:0.5,n:"Parcial (2–3/4)"}:{p:0,n:"No cumplido (0–1/4)"} },
-      { id:"i4", label:"Calidad en trabajos de costura", peso:0.20, na:true, cap:"0 = conformes, 1 = corrección, NA = sin costura",
+      { id:"i4", label:"Calidad en trabajos de costura", peso:0.15, na:true, cap:"0 = conformes, 1 = corrección, NA = sin costura",
         ev:v=> v==0?{p:1,n:"Todos conformes"}:v==1?{p:0.5,n:"Corrección requerida"}:{p:0,n:"Defectos graves"} },
+      { id:"i5", label:"Cumplimiento de fechas (arreglos)", peso:0.20, auto:true, autoKey:"cumplFechas", na:true, umb:{tipo:"min",meta:95,parcial:85,pp:0.5}, cap:"% de arreglos terminados en o antes de la fecha compromiso (módulo Arreglos). NA = sin arreglos este mes",
+        ev:v=> v>=95?{p:1,n:"Meta cumplida (≥95%)"}:v>=85?{p:0.5,n:"Parcial (85–94.9%)"}:{p:0,n:"No cumplido (<85%)"} },
+      { id:"i6", label:"Calidad de arreglos (sin retrabajo)", peso:0.15, auto:true, autoKey:"calidadArreglos", na:true, umb:{tipo:"min",meta:97,parcial:90,pp:0.5}, cap:"% de arreglos aceptados sin corrección (módulo Arreglos). NA = sin arreglos evaluados",
+        ev:v=> v>=97?{p:1,n:"Meta cumplida (≥97%)"}:v>=90?{p:0.5,n:"Parcial (90–96.9%)"}:{p:0,n:"No cumplido (<90%)"} },
     ],
   },
 };
@@ -5371,7 +5610,7 @@ function piezasOrden(o){
 function mermasOrden(o){
   return ((o && o.mermas) || []).reduce((s,m) => s + (parseInt(m.cantidad)||0), 0);
 }
-function autoValoresBonos(periodo, ordenes, rutas, choferes){
+function autoValoresBonos(periodo, ordenes, rutas, choferes, arreglos){
   const [Y, M] = periodo.split("-").map(Number);
   const desde = periodo + "-01";
   const hasta = periodo + "-" + String(new Date(Y, M, 0).getDate()).padStart(2, "0"); // último día real del mes
@@ -5407,7 +5646,20 @@ function autoValoresBonos(periodo, ordenes, rutas, choferes){
   let piezasMes = 0, mermasMes = 0;
   ordensFiltradas.forEach(o => { piezasMes += piezasOrden(o); mermasMes += mermasOrden(o); });
   const mermasPct = piezasMes ? Number(((mermasMes / piezasMes) * 100).toFixed(2)) : "";
-  const out = { krisia:{ k2:cumplPedidos, k3:mermasPct }, isidra:{} };
+  // Isidra — arreglos/costura: cumplimiento de fechas (i5) y calidad (i6) del mes.
+  // Base = órdenes TERMINADAS dentro del mes (por fechaTerminado). "NA" cuando no hubo.
+  const arrMes = (arreglos||[]).filter(a => (a.fechaTerminado||"") >= desde && (a.fechaTerminado||"") <= hasta);
+  let iCumpl = "NA", iCalidad = "NA";
+  if (arrMes.length) {
+    const aTiempo = arrMes.filter(a => a.fechaCompromiso && a.fechaTerminado <= a.fechaCompromiso).length;
+    iCumpl = Number(((aTiempo / arrMes.length) * 100).toFixed(1));
+    const evaluadas = arrMes.filter(a => a.calidad === "aceptado" || a.calidad === "correccion");
+    if (evaluadas.length) {
+      const aceptadas = arrMes.filter(a => a.calidad === "aceptado").length;
+      iCalidad = Number(((aceptadas / evaluadas.length) * 100).toFixed(1));
+    }
+  }
+  const out = { krisia:{ k2:cumplPedidos, k3:mermasPct }, isidra:{ i5:iCumpl, i6:iCalidad } };
   (choferes||[]).forEach(c => { out[c.id] = kpiChofer(rutasMesTodas.filter(r => r.choferId === c.id)); });
   return out;
 }
@@ -5739,7 +5991,7 @@ function Paqueteria({ rol, onBuscar, onGuardar, onImprimir, onUltimos, envioInic
   );
 }
 
-function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, onGuardar, onImprimir, onGuardarSalarios, kpiCfg, onGuardarKpiCfg }){
+function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], arreglos = [], esAdmin, onGuardar, onImprimir, onGuardarSalarios, kpiCfg, onGuardarKpiCfg }){
   // Definición vigente (con objetivos editados). Con kpiCfg vacío = reglas de siempre.
   const defDe = (cl) => bonosDefEfectiva(cl, kpiCfg);
   const [p, setP] = useState(null);
@@ -5950,7 +6202,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], esAdmin, 
 
   // ── EDITOR ──
   const cerrado = p.estado === "cerrado";
-  const auto = autoValoresBonos(p.periodo, ordenes, rutas, choferes);
+  const auto = autoValoresBonos(p.periodo, ordenes, rutas, choferes, arreglos);
   const setCap = (cl, kid, val) => { if (cerrado) return; setP(prev => ({ ...prev, capturas:{ ...prev.capturas, [cl]:{ ...(prev.capturas[cl]||{}), [kid]:val } } })); };
   const guardar = async (estado) => {
     setGuardando(true);
@@ -7824,7 +8076,9 @@ function AppInner() {
   const [clientesDir, setClientesDir] = useState([]);
   const [rutaPdf, setRutaPdf] = useState(null);
   const [remisiones, setRemisiones] = useState([]);
+  const [arreglos, setArreglos] = useState([]);
   const [remisionPdf, setRemisionPdf] = useState(null);
+  const [arregloPdf, setArregloPdf] = useState(null);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);
@@ -8360,6 +8614,39 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   };
   const eliminarRemision = async (id) => { try { await deleteDoc(doc(db, "remisiones", String(id))); } catch (e) { alert("Error al eliminar: " + e.message); } };
   const imprimirRemision = (rem) => setRemisionPdf({ html: buildRemisionHtml(rem), titulo: "Remisión No. " + (rem.numero || ""), archivo: "Remision_" + (rem.numero || "nueva") + ".html" });
+  const imprimirArreglo = (a) => setArregloPdf({ html: buildOrdenArregloHtml(a), titulo: "Orden de trabajo #" + (a.folio || ""), archivo: "OrdenArreglo_" + (a.folio || "nueva") + ".html" });
+
+  // ── Arreglos / costura (Isidra) ────────────────────────────────────────────
+  useEffect(() => {
+    if (!usuario?.email) return;
+    if (!(rol === "admin" || rol === "seguimiento")) return;
+    if (!escuchasActivas) return;
+    const unsub = onSnapshot(collection(db, "arreglos"), snap => {
+      setArreglos(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+    });
+    return unsub;
+  }, [usuario, rol, escuchasActivas]);
+  const obtenerSiguienteFolioArreglo = async () => {
+    const ref = doc(db, "config", "contadorArreglos");
+    const nuevo = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const actual = snap.exists() ? (snap.data().valor || 0) : 0;
+      const sig = actual + 1;
+      tx.set(ref, { valor: sig }, { merge: true });
+      return sig;
+    });
+    return String(nuevo);
+  };
+  const guardarArreglo = async (arr) => {
+    let a = { ...arr };
+    if (!a.id) a.id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    if (!a.folio) a.folio = await obtenerSiguienteFolioArreglo();
+    if (!a.fechaCreacion) a.fechaCreacion = new Date().toISOString();
+    a = { ...a, creadoPor: a.creadoPor || usuario.email, creadoPorNombre: a.creadoPorNombre || (usuario.displayName || usuario.email), actualizadoPor: usuario.email, actualizado: new Date().toISOString() };
+    await setDoc(doc(db, "arreglos", String(a.id)), a, { merge: true });
+    return a;
+  };
+  const eliminarArreglo = async (id) => { try { await deleteDoc(doc(db, "arreglos", String(id))); } catch (e) { alert("Error al eliminar: " + e.message); } };
 
   // ── Bonos mensuales ──
   useEffect(() => {
@@ -9243,6 +9530,21 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {puedeEditarSeguimiento && (
+            <ModTile onClick={() => setVista("arreglos")} label="Arreglos"
+              stat={<span style={{color:C.muted}}>{(() => { const ab = arreglos.filter(x => x.estatus==="pendiente"||x.estatus==="proceso").length; return ab>0 ? ab+" en proceso" : (arreglos.length>0 ? "Al día" : "Crear orden"); })()}</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gArr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c084fc"/><stop offset="1" stopColor="#7c3aed"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gArr)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.2" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <circle cx="33" cy="33" r="5"/><circle cx="33" cy="55" r="5"/>
+                  <path d="M37 36 L62 59 M37 52 L62 29"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
             {(rol === "admin" || puedeEditarSeguimiento) && (
             <ModTile onClick={() => setVista("caja")} label="Caja chica"
               stat={<span style={{color:C.muted}}>Control de gastos</span>}>
@@ -9537,6 +9839,17 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "arreglos" && puedeEditarSeguimiento && (
+        <Arreglos
+          arreglos={arreglos}
+          onGuardar={guardarArreglo}
+          onEliminar={eliminarArreglo}
+          onImprimir={imprimirArreglo}
+          esAdmin={rol === "admin"}
+          puedeEditar={puedeEditarSeguimiento}
+        />
+      )}
+
       {vista === "caja" && (rol === "admin" || rol === "seguimiento") && (
         <div style={{padding:"20px 16px"}}>
           <button onClick={() => setVista("home")} style={{border:"none", background:"transparent", color:C.accent, fontSize:14, cursor:"pointer", marginBottom:12, fontFamily:"inherit"}}>← Volver</button>
@@ -9583,6 +9896,7 @@ const cancelar = async (id) => {
           ordenes={ordenes}
           rutas={rutas}
           choferes={choferes}
+          arreglos={arreglos}
           esAdmin={rol === "admin"}
           onGuardar={guardarBono}
           onImprimir={imprimirBono}
@@ -9679,6 +9993,7 @@ const cancelar = async (id) => {
         </div>
       )}
       {remisionPdf && <PdfModal html={remisionPdf.html} titulo={remisionPdf.titulo} archivo={remisionPdf.archivo} onClose={() => setRemisionPdf(null)}/>}
+      {arregloPdf && <PdfModal html={arregloPdf.html} titulo={arregloPdf.titulo} archivo={arregloPdf.archivo} onClose={() => setArregloPdf(null)}/>}
       {pagoPdf && <PdfModal html={pagoPdf.html} titulo={pagoPdf.titulo} archivo={pagoPdf.archivo} onClose={() => setPagoPdf(null)}/>}
     </div>
   );

@@ -3778,7 +3778,7 @@ const ARREGLO_ESTATUS = [
   { id:"entregado", label:"Entregado" },
 ];
 function emptyArreglo(){
-  return { cliente:"", pedidoOrigen:"", descripcion:"", cantidad:"", fechaCompromiso:"", estatus:"pendiente", fechaTerminado:"", calidad:"", obs:"" };
+  return { tipo:"arreglo", cliente:"", pedidoOrigen:"", descripcion:"", renglones:[], cantidad:"", fechaCompromiso:"", estatus:"pendiente", fechaTerminado:"", calidad:"", obs:"" };
 }
 function hoyISO(){ return new Date().toISOString().slice(0,10); }
 function labelEstatusArreglo(id){ return (ARREGLO_ESTATUS.find(e=>e.id===id)||{}).label || id; }
@@ -3820,13 +3820,19 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
     return { c:C.info, t:"En tiempo" };
   };
 
+  const totalRenglones = (rs) => (rs||[]).reduce((s,r)=>s+(parseInt(r.cantidad)||0),0);
   const guardar = async (imprimir) => {
     if (!edit.cliente || !edit.cliente.trim()) { alert("Indica el cliente."); return; }
-    if (!edit.descripcion || !edit.descripcion.trim()) { alert("Describe el arreglo a realizar."); return; }
+    if (!edit.descripcion || !edit.descripcion.trim()) { alert("Indica la descripción o el producto a fabricar."); return; }
     if (!edit.fechaCompromiso) { alert("Indica la fecha compromiso de entrega."); return; }
+    const esMaquila = edit.tipo === "maquila";
+    const rs = esMaquila ? (edit.renglones||[]).filter(r => (r.talla||"").trim() || (parseInt(r.cantidad)||0)>0) : [];
+    if (esMaquila && rs.length === 0) { alert("Agrega al menos un renglón de talla a fabricar."); return; }
+    // En maquila la cantidad total sale de la suma de los renglones de talla.
+    const payload = { ...edit, renglones: rs, cantidad: esMaquila ? totalRenglones(rs) : edit.cantidad };
     setGuardando(true);
     try {
-      const saved = await onGuardar(edit);
+      const saved = await onGuardar(payload);
       setEdit(null);
       if (imprimir && onImprimir) onImprimir(saved);
     }
@@ -3894,25 +3900,57 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
       {/* Alta / edición */}
       {edit && (
         <div style={{background:C.card, border:"1px solid "+C.accent+"66", borderRadius:12, padding:"14px 16px", marginBottom:16}}>
-          <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:10}}>{edit.id ? "Editar orden "+(edit.folio?("#"+edit.folio):"") : "Nueva orden de arreglo"}</div>
+          <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:10}}>{edit.id ? "Editar orden "+(edit.folio?("#"+edit.folio):"") : "Nueva orden"}</div>
+          {(() => {
+            const esMaquila = edit.tipo === "maquila";
+            const totR = (edit.renglones||[]).reduce((s,r)=>s+(parseInt(r.cantidad)||0),0);
+            const setRows = (rs) => setEdit({...edit, renglones:rs});
+            return (
           <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
             <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Cliente</div>
               <input value={edit.cliente} onChange={e=>setEdit({...edit, cliente:e.target.value})} style={campoStyle}/></div>
             <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Pedido / Origen</div>
               <input value={edit.pedidoOrigen||""} onChange={e=>setEdit({...edit, pedidoOrigen:e.target.value})} style={campoStyle} placeholder="No. de pedido o de dónde viene"/></div>
-            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Cantidad (prendas)</div>
-              <input type="number" min="0" value={edit.cantidad} onChange={e=>setEdit({...edit, cantidad:e.target.value})} style={campoStyle}/></div>
+            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Tipo de trabajo</div>
+              <select value={edit.tipo||"arreglo"} onChange={e=>setEdit({...edit, tipo:e.target.value})} style={campoStyle}>
+                <option value="arreglo">Arreglo</option>
+                <option value="maquila">Maquila (fabricación)</option>
+              </select></div>
             <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Fecha compromiso</div>
               <input type="date" value={edit.fechaCompromiso} onChange={e=>setEdit({...edit, fechaCompromiso:e.target.value})} style={campoStyle}/></div>
-            <div style={{gridColumn:"1 / -1"}}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Descripción del arreglo</div>
-              <input value={edit.descripcion} onChange={e=>setEdit({...edit, descripcion:e.target.value})} style={campoStyle} placeholder="Ej. ajustar basta, cambiar cierre, bordar logo…"/></div>
+            <div style={{gridColumn:"1 / -1"}}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>{esMaquila ? "Producto a fabricar" : "Descripción del arreglo"}</div>
+              <input value={edit.descripcion} onChange={e=>setEdit({...edit, descripcion:e.target.value})} style={campoStyle} placeholder={esMaquila ? "Ej. Conjunto pants Colegio Latino" : "Ej. ajustar basta, cambiar cierre, bordar logo…"}/></div>
+
+            {esMaquila ? (
+              <div style={{gridColumn:"1 / -1"}}>
+                <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}>
+                  <div style={{fontSize:11, color:C.muted}}>Tallas a fabricar (una por renglón)</div>
+                  <button onClick={()=>setRows([...(edit.renglones||[]), {talla:"", cantidad:""}])} style={{border:"1px solid "+C.accent+"88", background:"transparent", color:C.accent, borderRadius:6, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>+ Agregar talla</button>
+                </div>
+                {(edit.renglones||[]).length === 0 && <div style={{fontSize:11, color:C.muted, fontStyle:"italic", marginBottom:4}}>Sin renglones. Agrega una talla por renglón.</div>}
+                {(edit.renglones||[]).map((r,i)=>(
+                  <div key={i} style={{display:"flex", gap:8, marginBottom:6, alignItems:"center"}}>
+                    <input value={r.talla} onChange={e=>{const rs=[...edit.renglones]; rs[i]={...rs[i], talla:e.target.value}; setRows(rs);}} placeholder="Talla (ej. T-6, CH, 28)" style={{...campoStyle, flex:2}}/>
+                    <input type="number" min="0" value={r.cantidad} onChange={e=>{const rs=[...edit.renglones]; rs[i]={...rs[i], cantidad:e.target.value}; setRows(rs);}} placeholder="Cant." style={{...campoStyle, flex:1}}/>
+                    <button onClick={()=>setRows(edit.renglones.filter((_,idx)=>idx!==i))} style={{border:"1px solid "+C.danger+"66", background:"transparent", color:C.danger, borderRadius:6, width:30, height:34, fontSize:13, fontWeight:800, cursor:"pointer", flexShrink:0, fontFamily:"inherit"}}>✕</button>
+                  </div>
+                ))}
+                {(edit.renglones||[]).length>0 && <div style={{fontSize:12, color:C.accent, fontWeight:700, textAlign:"right"}}>Total: {totR} pz</div>}
+              </div>
+            ) : (
+              <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Cantidad (prendas)</div>
+                <input type="number" min="0" value={edit.cantidad} onChange={e=>setEdit({...edit, cantidad:e.target.value})} style={campoStyle}/></div>
+            )}
+
             <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Estatus</div>
               <select value={edit.estatus} onChange={e=>setEdit({...edit, estatus:e.target.value})} style={campoStyle}>
                 {ARREGLO_ESTATUS.map(e=> <option key={e.id} value={e.id}>{e.label}</option>)}
               </select></div>
-            <div><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Observaciones</div>
+            <div style={{gridColumn: esMaquila ? "1 / -1" : "auto"}}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Observaciones</div>
               <input value={edit.obs} onChange={e=>setEdit({...edit, obs:e.target.value})} style={campoStyle}/></div>
           </div>
+            );
+          })()}
           <div style={{display:"flex", gap:8, marginTop:12, justifyContent:"flex-end", flexWrap:"wrap"}}>
             <Btn onClick={()=>setEdit(null)} variant="ghost" size="sm">Cancelar</Btn>
             <Btn onClick={()=>guardar(false)} variant="ghost" size="sm" disabled={guardando}>{guardando?"Guardando…":"Guardar"}</Btn>
@@ -3942,7 +3980,8 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
               <span style={{width:10, height:10, borderRadius:"50%", background:s.c, flexShrink:0}} title={s.t}/>
               <span style={{fontWeight:800, color:C.accent, fontSize:13}}>#{a.folio||"—"}</span>
               <span style={{fontWeight:700, color:C.text, fontSize:13}}>{a.cliente}</span>
-              <span style={{fontSize:12, color:C.muted, flex:"1 1 200px", minWidth:120}}>{a.descripcion}{a.cantidad?(" · "+a.cantidad+" pz"):""}</span>
+              {a.tipo==="maquila" && <span style={{fontSize:10, fontWeight:800, color:"#c084fc", border:"1px solid #c084fc55", borderRadius:5, padding:"1px 6px"}}>MAQUILA</span>}
+              <span style={{fontSize:12, color:C.muted, flex:"1 1 200px", minWidth:120}}>{a.descripcion}{a.cantidad?(" · "+a.cantidad+" pz"):""}{a.tipo==="maquila"&&(a.renglones||[]).length?(" · "+a.renglones.length+" tallas"):""}</span>
               <span style={{fontSize:11, color:s.c, fontWeight:700}}>{s.t}</span>
               <span style={{fontSize:11, color:C.muted}}>{labelEstatusArreglo(a.estatus)}</span>
             </div>
@@ -3976,25 +4015,38 @@ function Arreglos({ arreglos = [], onGuardar, onEliminar, onImprimir, esAdmin, p
 
 // Orden de trabajo imprimible para Isidra (acompaña las prendas / la tela).
 function buildOrdenArregloHtml(a){
+  const esMaquila = a.tipo === "maquila";
+  const rs = (a.renglones||[]).filter(r => (r.talla||"").trim() || (parseInt(r.cantidad)||0)>0);
+  const totR = rs.reduce((s,r)=>s+(parseInt(r.cantidad)||0),0);
+  const bloqueTrabajo = esMaquila
+    ? `<div class="sec">PRODUCTO A FABRICAR</div>
+      <div style="font-size:12px;border:1px solid #999;padding:10px;margin-bottom:8px">${escHtml(a.descripcion||"")}</div>
+      <div class="sec">TALLAS A FABRICAR</div>
+      <table>
+        <tr><th style="width:55%">Talla</th><th>Cantidad</th></tr>
+        ${rs.map(r=>`<tr><td>${escHtml(r.talla||"")}</td><td style="text-align:center">${escHtml(String(r.cantidad||""))}</td></tr>`).join("")}
+        <tr><th style="text-align:right">TOTAL</th><th style="text-align:center">${totR}</th></tr>
+      </table>`
+    : `<div class="sec">TRABAJO A REALIZAR</div>
+      <div style="font-size:12px;border:1px solid #999;padding:10px;min-height:60px">${escHtml(a.descripcion||"")}</div>`;
   return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
   <div class="page">
-    <div class="hd"><img src="${LOGO_WL}"/><div><h1>ORDEN DE TRABAJO · ARREGLO</h1></div><div class="folio">No. ${escHtml(String(a.folio||""))}<br/>Fecha: ${escHtml(a.fechaCreacion?fmtDate(a.fechaCreacion.slice(0,10)):"")}</div></div>
+    <div class="hd"><img src="${LOGO_WL}"/><div><h1>ORDEN DE TRABAJO · ${esMaquila ? "MAQUILA" : "ARREGLO"}</h1></div><div class="folio">No. ${escHtml(String(a.folio||""))}<br/>Fecha: ${escHtml(a.fechaCreacion?fmtDate(a.fechaCreacion.slice(0,10)):"")}</div></div>
     <div class="body">
       <div class="sec">DATOS DE LA ORDEN</div>
       <table>
         <tr><th style="width:130px">Cliente</th><td>${escHtml(a.cliente||"")}</td><th style="width:130px">Pedido / Origen</th><td>${escHtml(a.pedidoOrigen||"")}</td></tr>
-        <tr><th>Cantidad (prendas)</th><td>${escHtml(String(a.cantidad||""))}</td><th>Fecha compromiso</th><td>${escHtml(a.fechaCompromiso?fmtDate(a.fechaCompromiso):"")}</td></tr>
+        <tr><th>${esMaquila ? "Total a fabricar" : "Cantidad (prendas)"}</th><td>${escHtml(String(a.cantidad||(esMaquila?totR:"")))}</td><th>Fecha compromiso</th><td>${escHtml(a.fechaCompromiso?fmtDate(a.fechaCompromiso):"")}</td></tr>
         <tr><th>Responsable</th><td colspan="3">Isidra — Costura</td></tr>
       </table>
-      <div class="sec">TRABAJO A REALIZAR</div>
-      <div style="font-size:12px;border:1px solid #999;padding:10px;min-height:60px">${escHtml(a.descripcion||"")}</div>
+      ${bloqueTrabajo}
       ${a.obs ? `<div class="sec">OBSERVACIONES</div><div style="font-size:11px;border:1px solid #999;padding:8px;min-height:38px">${escHtml(a.obs)}</div>` : ""}
       <div class="sec">CONTROL DE ENTREGA / CALIDAD</div>
       <table>
         <tr><th style="width:130px">Fecha de inicio</th><td></td><th style="width:130px">Fecha terminado</th><td></td></tr>
         <tr><th>Revisión de calidad</th><td colspan="3">☐ Aceptado &nbsp;&nbsp;&nbsp; ☐ Requirió corrección</td></tr>
       </table>
-      <div class="leg" style="margin-top:8px">Esta orden ampara la entrega de prendas o tela a costura para su arreglo. Favor de firmar de recibido el material y, al terminar, registrar la fecha y el resultado de la revisión de calidad.</div>
+      <div class="leg" style="margin-top:8px">Esta orden ampara la entrega de prendas o tela para su ${esMaquila ? "fabricación (maquila)" : "arreglo"}. Favor de firmar de recibido el material y, al terminar, registrar la fecha y el resultado de la revisión de calidad.</div>
       <div class="firmas">
         <div class="firma">Entregó — WORK-LIFE</div>
         <div class="firma">Recibió — Isidra (nombre y firma)</div>

@@ -2687,6 +2687,13 @@ function Calendario({ ordenes, onBack, onSelect }) {
 
   const opcionesFiltro = filtroCampo === "cliente" ? clientes : filtroCampo === "vendedor" ? vendedores : filtroCampo === "bordador" ? bordadores : [];
 
+  // ── Órdenes atrasadas (vencidas): etapa aún activa y fecha requerida ya pasó ──
+  const pad2 = n => String(n).padStart(2, "0");
+  const hoyISO = `${hoy.getFullYear()}-${pad2(hoy.getMonth()+1)}-${pad2(hoy.getDate())}`;
+  const etapasActivasCal = ["nueva","bordado","calidad","espera","retrabajo"];
+  const esVencida = (o) => etapasActivasCal.includes(o.etapa) && o.fechaRequerida && o.fechaRequerida < hoyISO;
+  const ROJO_VENCIDA = "#e11d1d";
+
   return (
     <div style={{maxWidth:900,margin:"0 auto",padding:"0 16px 40px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
@@ -2757,16 +2764,26 @@ function Calendario({ ordenes, onBack, onSelect }) {
             {d && (
               <>
                 <div style={{fontSize:11,fontWeight:esHoy(d)?800:600,color:esHoy(d)?C.accent:C.text,marginBottom:2}}>{d}</div>
-                {(ordensPorDia[d]||[]).map(o => (
+                {(ordensPorDia[d]||[]).map(o => {
+                  const venc = esVencida(o);
+                  return (
                   <div key={o.id} onClick={() => onSelect(o.id)}
-                    style={{background:etapaInfo(o.etapa).color,color:"#fff",borderRadius:4,padding:"2px 3px",fontSize:9,fontWeight:600,marginBottom:2,cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",width:"100%",boxSizing:"border-box"}}>
-                    #{o.numero} · {etapaInfo(o.etapa).label}
+                    title={venc ? "Atrasada — "+etapaInfo(o.etapa).label : etapaInfo(o.etapa).label}
+                    style={{background: venc ? ROJO_VENCIDA : etapaInfo(o.etapa).color, color:"#fff", border: venc ? "1px solid #ff8a8a" : "none", borderRadius:4, padding:"2px 3px", fontSize:9, fontWeight:venc?800:600, marginBottom:2, cursor:"pointer", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", width:"100%", boxSizing:"border-box"}}>
+                    {venc ? "⚠ " : ""}#{o.numero} · {etapaInfo(o.etapa).label}
                   </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>
         ))}
+      </div>
+
+      {/* Leyenda: atrasadas en rojo */}
+      <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,fontSize:11,color:C.muted}}>
+        <span style={{display:"inline-block",width:12,height:12,borderRadius:3,background:ROJO_VENCIDA,border:"1px solid #ff8a8a"}}/>
+        <span>⚠ Atrasada (pasó su fecha requerida y sigue en proceso). Entregadas y canceladas no se marcan.</span>
       </div>
     </div>
   );

@@ -2765,11 +2765,12 @@ function Calendario({ ordenes, onBack, onSelect }) {
               <>
                 <div style={{fontSize:11,fontWeight:esHoy(d)?800:600,color:esHoy(d)?C.accent:C.text,marginBottom:2}}>{d}</div>
                 {(ordensPorDia[d]||[]).map(o => {
+                  const canc = o.etapa === "cancelada";
                   const venc = esVencida(o);
                   return (
                   <div key={o.id} onClick={() => onSelect(o.id)}
-                    title={venc ? "Atrasada — "+etapaInfo(o.etapa).label : etapaInfo(o.etapa).label}
-                    style={{background: venc ? ROJO_VENCIDA : etapaInfo(o.etapa).color, color:"#fff", border: venc ? "1px solid #ff8a8a" : "none", borderRadius:4, padding:"2px 3px", fontSize:9, fontWeight:venc?800:600, marginBottom:2, cursor:"pointer", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", width:"100%", boxSizing:"border-box"}}>
+                    title={canc ? "Cancelada" : (venc ? "Atrasada — "+etapaInfo(o.etapa).label : etapaInfo(o.etapa).label)}
+                    style={{background: canc ? "transparent" : (venc ? ROJO_VENCIDA : etapaInfo(o.etapa).color), color: canc ? C.muted : "#fff", border: canc ? "1px dashed "+C.border : (venc ? "1px solid #ff8a8a" : "none"), textDecoration: canc ? "line-through" : "none", opacity: canc ? 0.55 : 1, borderRadius:4, padding:"2px 3px", fontSize:9, fontWeight:venc?800:600, marginBottom:2, cursor:"pointer", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", width:"100%", boxSizing:"border-box"}}>
                     {venc ? "⚠ " : ""}#{o.numero} · {etapaInfo(o.etapa).label}
                   </div>
                   );
@@ -2783,7 +2784,9 @@ function Calendario({ ordenes, onBack, onSelect }) {
       {/* Leyenda: atrasadas en rojo */}
       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12,fontSize:11,color:C.muted}}>
         <span style={{display:"inline-block",width:12,height:12,borderRadius:3,background:ROJO_VENCIDA,border:"1px solid #ff8a8a"}}/>
-        <span>⚠ Atrasada (pasó su fecha requerida y sigue en proceso). Entregadas y canceladas no se marcan.</span>
+        <span>⚠ Atrasada (pasó su fecha requerida y sigue en proceso).</span>
+        <span style={{display:"inline-block",width:12,height:12,borderRadius:3,background:"transparent",border:"1px dashed "+C.border,marginLeft:10}}/>
+        <span style={{textDecoration:"line-through",opacity:0.7}}>Cancelada</span>
       </div>
     </div>
   );

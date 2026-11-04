@@ -4082,6 +4082,327 @@ function buildOrdenArregloHtml(a){
     </div>
   </div></body></html>`;
 }
+// ══════════════════════════════════════════════════════════════════════════
+// EVALUACIÓN DE PROVEEDORES — kardex mensual (datos de Odoo + captura manual)
+// ══════════════════════════════════════════════════════════════════════════
+const PROV_MESES_ES = {enero:"01",febrero:"02",marzo:"03",abril:"04",mayo:"05",junio:"06",julio:"07",agosto:"08",septiembre:"09",setiembre:"09",octubre:"10",noviembre:"11",diciembre:"12"};
+function periodoDeEtiqueta(lbl){
+  const p = String(lbl).trim().toLowerCase().split(/\s+/);
+  if (p.length !== 2) return null;
+  const mm = PROV_MESES_ES[p[0]]; const yy = p[1];
+  if (!mm || !/^\d{4}$/.test(yy)) return null;
+  return yy + "-" + mm;
+}
+function slugProv(n){ return "p_" + String(n).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,60); }
+function mesNombreLargo(periodo){ const [y,m]=String(periodo).split("-"); const M=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]; return (M[+m]||"")+" "+y; }
+const PROV_TIPOS = [{id:"maquila",label:"Maquila"},{id:"materiales",label:"Materiales"},{id:"servicios",label:"Servicios"},{id:"otro",label:"Otro"}];
+const PROV_DIMS = [
+  {id:"entregas",   label:"Entregas (puntualidad + completitud)", peso:0.25, auto:true},
+  {id:"calidad",    label:"Calidad del producto",                 peso:0.25, manual:true},
+  {id:"precio",     label:"Precio (estabilidad)",                 peso:0.15, auto:true},
+  {id:"compromiso", label:"Compromiso y prioridad",               peso:0.15, manual:true},
+  {id:"valor",      label:"Valor agregado",                       peso:0.10, manual:true},
+  {id:"admin",      label:"Administrativo y comunicación",        peso:0.10, manual:true},
+];
+function provPesosEf(cfg){ const p={}; PROV_DIMS.forEach(d=> p[d.id]= (cfg&&cfg.pesos&&cfg.pesos[d.id]!=null&&cfg.pesos[d.id]!=="")? Number(cfg.pesos[d.id]) : d.peso); return p; }
+function scComplet(c){ if(c>=99) return 100; if(c<=70) return 0; return Math.round(Math.max(0,Math.min(100,(c-80)/19*80+20))); }
+function scPuntual(ef){ if(ef==null) return null; const t=[[1,100],[3,95],[7,80],[15,60],[25,40],[40,25]]; for(const pair of t){ if(ef<=pair[0]) return pair[1]; } return 10; }
+function scPrecioTend(pct){ if(pct==null) return null; if(pct<=0) return 100; if(pct<=5) return 90; if(pct<=10) return 75; if(pct<=20) return 55; if(pct<=40) return 35; return 20; }
+function tendenciaPrecioProv(meses, periodo, ventana){
+  ventana = ventana || 12;
+  const keys = Object.keys(meses||{}).filter(k=> k<=periodo && (meses[k].ped||0)>0).sort();
+  const ult = keys.slice(-ventana);
+  if (ult.length < 2) return null;
+  const up = k => meses[k].monto / meses[k].ped;
+  const ini = up(ult[0]), fin = up(ult[ult.length-1]);
+  if (!(ini>0)) return null;
+  return (fin-ini)/ini*100;
+}
+function gradoProv(score){
+  if(score==null) return {l:"—",t:"Sin datos",c:"#8b90a7"};
+  if(score>=90) return {l:"A",t:"Preferente",c:"#2e7d52"};
+  if(score>=80) return {l:"B",t:"Confiable",c:"#5c8fe0"};
+  if(score>=70) return {l:"C",t:"Condicionado",c:"#f5a623"};
+  return {l:"D",t:"Crítico",c:"#e05c5c"};
+}
+// Agrega los meses del rango [desde,hasta]: suma montos/piezas, promedia días
+// ponderando por piezas pedidas. Un rango de un solo mes = ese mes.
+function aggMesesProv(meses, desde, hasta){
+  const ks = Object.keys(meses||{}).filter(k=> k>=desde && k<=hasta).sort();
+  if(!ks.length) return null;
+  let monto=0,ped=0,rec=0,efW=0,efWs=0,rcW=0,rcWs=0;
+  ks.forEach(k=>{ const m=meses[k]; monto+=m.monto||0; ped+=m.ped||0; rec+=m.rec||0; const w=(m.ped||1);
+    if(m.ef!=null){ efW+=m.ef*w; efWs+=w; } if(m.rc!=null){ rcW+=m.rc*w; rcWs+=w; } });
+  return { monto, ped, rec, ef: efWs?efW/efWs:null, rc: rcWs?rcW/rcWs:null, nMeses:ks.length, keys:ks };
+}
+// Promedio de las capturas manuales de los meses del rango (ignora meses sin captura).
+function manualRangeProv(p, desde, hasta){
+  const em=p.evalManual||{}; const ks=Object.keys(em).filter(k=> k>=desde && k<=hasta).sort();
+  const out={};
+  ["calidad","compromiso","valor","admin"].forEach(f=>{ const v=ks.map(k=>em[k][f]).filter(x=> x!=null && x!==""); out[f]= v.length? v.reduce((a,b)=>a+Number(b),0)/v.length : null; });
+  const coms=ks.map(k=>em[k].comentarios).filter(Boolean); out.comentarios= coms.length? coms[coms.length-1] : "";
+  return out;
+}
+function rangoProvLabel(desde,hasta){ return desde===hasta ? mesNombreLargo(desde) : (mesNombreLargo(desde)+" – "+mesNombreLargo(hasta)); }
+
+function calcProvEval(p, desde, hasta, cfg){
+  const pesos = provPesosEf(cfg);
+  const agg = aggMesesProv(p.meses, desde, hasta);
+  const man = manualRangeProv(p, desde, hasta);
+  const scMan = v => (v==null||v==="")?null:Math.max(0,Math.min(100,Number(v)*20));
+  const dims = [];
+  let comp=null, sE=null;
+  if(agg && agg.ped>0){ comp = agg.rec/agg.ped*100; const sc=scComplet(comp); const sp=scPuntual(agg.ef); sE = sp==null? sc : Math.round(0.5*sc+0.5*sp); }
+  dims.push({id:"entregas", label:"Entregas (puntualidad + completitud)", valor: comp!=null? (comp.toFixed(1)+"% · "+(agg.ef==null?"s/d":agg.ef.toFixed(1)+"d")) : "s/d", puntaje:sE, peso:pesos.entregas, auto:true});
+  dims.push({id:"calidad", label:"Calidad del producto", valor: man.calidad!=null? (man.calidad.toFixed(1)+"/5") : "—", puntaje:scMan(man.calidad), peso:pesos.calidad, manual:true});
+  const tend = tendenciaPrecioProv(p.meses, hasta, 12);
+  dims.push({id:"precio", label:"Precio (estabilidad)", valor: tend==null?"s/d":((tend>=0?"+":"")+tend.toFixed(0)+"%"), puntaje:scPrecioTend(tend), peso:pesos.precio, auto:true});
+  dims.push({id:"compromiso", label:"Compromiso y prioridad", valor: man.compromiso!=null? (man.compromiso.toFixed(1)+"/5") : "—", puntaje:scMan(man.compromiso), peso:pesos.compromiso, manual:true});
+  dims.push({id:"valor", label:"Valor agregado", valor: man.valor!=null? (man.valor.toFixed(1)+"/5") : "—", puntaje:scMan(man.valor), peso:pesos.valor, manual:true});
+  dims.push({id:"admin", label:"Administrativo y comunicación", valor: man.admin!=null? (man.admin.toFixed(1)+"/5") : "—", puntaje:scMan(man.admin), peso:pesos.admin, manual:true});
+  let wsum=0, acc=0; const faltan=[];
+  dims.forEach(d=>{ if(d.puntaje==null){ faltan.push(d.label); } else { wsum+=d.peso; acc+=d.puntaje*d.peso; } d.ponderado = (d.puntaje==null)?null:Math.round(d.puntaje*d.peso*10)/10; });
+  const global = wsum>0? Math.round(acc/wsum) : null;
+  return { dims, global, grado:gradoProv(global), faltan, agg, comentarios: man.comentarios||"", pesos, desde, hasta };
+}
+function buildKardexProvHtml(p, calc){
+  const g = calc.grado, mes = calc.agg; const periodo = calc.hasta;
+  const money = x => "$" + Math.round(x||0).toLocaleString("es-MX");
+  const filas = calc.dims.map(d=> `<tr><td>${escHtml(d.label)}</td><td style="text-align:center">${escHtml(String(d.valor))}</td><td style="text-align:center">${d.puntaje==null?"—":d.puntaje}</td><td style="text-align:center">${Math.round(d.peso*100)}%</td><td style="text-align:center">${d.ponderado==null?"—":d.ponderado}</td></tr>`).join("");
+  let stat = "";
+  if(mes){ const comp = mes.ped? mes.rec/mes.ped*100 : 0; const falt = (mes.ped||0)-(mes.rec||0); const up = mes.ped? mes.monto/mes.ped : 0;
+    stat = `<table>
+      <tr><th style="width:140px">Monto comprado</th><td>${money(mes.monto)}</td><th style="width:140px">Precio unit. prom.</th><td>${money(up)}</td></tr>
+      <tr><th>Piezas pedidas</th><td>${(mes.ped||0).toLocaleString("es-MX")}</td><th>Piezas recibidas</th><td>${(mes.rec||0).toLocaleString("es-MX")}</td></tr>
+      <tr><th>Completitud</th><td>${comp.toFixed(1)}% ${falt>0?("· faltaron "+falt.toLocaleString("es-MX")+" pz"):"· completo"}</td><th>Puntualidad</th><td>${mes.ef==null?"s/d":mes.ef.toFixed(1)+" días de retraso prom."}</td></tr>
+      <tr><th>Tiempo de surtido</th><td>${mes.rc==null?"s/d":mes.rc.toFixed(1)+" días"}</td><th>Tendencia de precio (12m)</th><td>${(()=>{const t=tendenciaPrecioProv(p.meses,periodo);return t==null?"s/d":((t>=0?"+":"")+t.toFixed(0)+"%");})()}</td></tr>
+    </table>`;
+  } else { stat = `<div class="leg">Sin datos de compras de Odoo para este periodo (no se importó o no hubo movimiento).</div>`; }
+  // historial 6 meses
+  const hk = Object.keys(p.meses||{}).filter(k=> k<=periodo).sort().slice(-6);
+  const hist = hk.length? `<div class="sec">HISTORIAL (ÚLTIMOS ${hk.length} MESES)</div><table>
+    <tr><th>Mes</th><th style="text-align:center">Completitud</th><th style="text-align:center">Retraso (d)</th><th style="text-align:right">Monto</th></tr>
+    ${hk.map(k=>{const m=p.meses[k];const c=m.ped?(m.rec/m.ped*100).toFixed(0)+"%":"—";return `<tr><td>${mesNombreLargo(k)}</td><td style="text-align:center">${c}</td><td style="text-align:center">${m.ef==null?"—":m.ef.toFixed(1)}</td><td style="text-align:right">${money(m.monto)}</td></tr>`;}).join("")}
+  </table>` : "";
+  const prov = calc.faltan.length? ` · <b style="color:#b26a00">provisional: faltan ${calc.faltan.length} dimensión(es) por capturar</b>` : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
+  <div class="page">
+    <div class="hd"><img src="${LOGO_WL}"/><div><h1>KARDEX DE PROVEEDOR · EVALUACIÓN</h1></div><div class="folio">${escHtml(rangoProvLabel(calc.desde, calc.hasta))}</div></div>
+    <div class="body">
+      <div class="sec">PROVEEDOR</div>
+      <table><tr><th style="width:140px">Nombre</th><td>${escHtml(p.nombre||"")}</td><th style="width:120px">Tipo</th><td>${escHtml((PROV_TIPOS.find(t=>t.id===p.tipo)||{}).label||p.tipo||"")}</td></tr>
+      <tr><th>Puntaje global</th><td><b style="font-size:15px">${calc.global==null?"—":calc.global}</b> / 100${prov}</td><th>Grado</th><td><b style="color:${g.c}">${g.l} · ${g.t}</b></td></tr></table>
+      <div class="sec">EVALUACIÓN POR DIMENSIÓN</div>
+      <table>
+        <tr><th>Dimensión</th><th style="width:120px;text-align:center">Valor</th><th style="width:60px;text-align:center">Puntaje</th><th style="width:50px;text-align:center">Peso</th><th style="width:70px;text-align:center">Ponderado</th></tr>
+        ${filas}
+        <tr><th colspan="4" style="text-align:right">PUNTAJE GLOBAL</th><th style="text-align:center;font-size:13px">${calc.global==null?"—":calc.global}</th></tr>
+      </table>
+      <div class="sec">ESTADÍSTICAS ${calc.desde===calc.hasta?"DEL MES":("DEL PERIODO · "+(mes?mes.nMeses:0)+" meses")}</div>
+      ${stat}
+      ${hist}
+      <div class="sec">COMENTARIOS Y PLAN DE ACCIÓN</div>
+      <div style="font-size:11px;border:1px solid #999;padding:8px;min-height:40px">${escHtml(calc.comentarios||"")}</div>
+      <div class="firmas">
+        <div class="firma">Evaluó — WORK-LIFE</div>
+        <div class="firma">Revisó — Gerencia</div>
+      </div>
+    </div>
+  </div></body></html>`;
+}
+
+function Proveedores({ esAdmin, onImprimir }){
+  const [provs, setProvs] = useState(null);
+  const [cfg, setCfg] = useState(null);
+  const [desde, setDesde] = useState(() => new Date().toISOString().slice(0,7));
+  const [hasta, setHasta] = useState(() => new Date().toISOString().slice(0,7));
+  const d0 = desde<=hasta?desde:hasta, d1 = desde<=hasta?hasta:desde;
+  const esRango = d0!==d1;
+  const [tipoF, setTipoF] = useState("todos");
+  const [busca, setBusca] = useState("");
+  const [edit, setEdit] = useState(null);
+  const [pesosOpen, setPesosOpen] = useState(false);
+  const [pesosLocal, setPesosLocal] = useState(null);
+  const [importando, setImportando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const fileRef = useRef(null);
+
+  const cargar = async () => {
+    try { const snap = await getDocs(collection(db,"proveedores")); setProvs(snap.docs.map(d=>({...d.data(), id:d.id}))); }
+    catch(e){ setProvs([]); }
+  };
+  useEffect(()=>{ (async()=>{
+    await cargar();
+    try{ const c = await getDoc(doc(db,"config","provCfg")); setCfg(c.exists()?c.data():{}); }catch(e){ setCfg({}); }
+  })(); }, []);
+
+  const importar = async (ev) => {
+    const file = ev.target.files && ev.target.files[0]; if(ev.target) ev.target.value=""; if(!file) return;
+    setImportando(true);
+    try{
+      const XLSX = await cargarXLSX(); const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, {type:"array"});
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, blankrows:false});
+      const sp = s => typeof s==="string" ? s.length - s.trimStart().length : -1;
+      const data = {}; let cur=null;
+      rows.forEach(r=>{ const a = r && r[0]; if(typeof a!=="string") return; const ind = sp(a); const name = a.trim();
+        if(!name || name==="Total") return;
+        const B=Number(r[1])||0, C=Number(r[2])||0, D=Number(r[3])||0, E=(r[4]==null||r[4]==="")?null:Number(r[4]), F=(r[5]==null||r[5]==="")?null:Number(r[5]);
+        if(ind>=10){ if(!cur) return; const per = periodoDeEtiqueta(name); if(per) data[cur].meses[per] = {monto:B, ped:C, rec:D, ef:E, rc:F}; }
+        else { cur = name; data[cur] = data[cur] || {nombre:name, meses:{}}; }
+      });
+      const nombres = Object.keys(data);
+      if(!nombres.length){ alert("No se reconocieron proveedores. Verifica que sea el reporte 'Análisis de compra' de Odoo (columna A con el proveedor y sus meses)."); setImportando(false); return; }
+      const existentes = {}; (provs||[]).forEach(x=> existentes[x.id] = x);
+      let nuevos=0, act=0;
+      for(const n of nombres){
+        const id = slugProv(n); const prev = existentes[id];
+        const payload = { nombre:n, meses:data[n].meses, actualizado:new Date().toISOString() };
+        if(!prev){ payload.tipo = "maquila"; payload.evalManual = {}; nuevos++; } else act++;
+        await setDoc(doc(db,"proveedores",id), payload, {merge:true});
+      }
+      await cargar();
+      alert("Importación lista: "+nombres.length+" proveedores ("+nuevos+" nuevos, "+act+" actualizados).");
+    }catch(e){ alert("Error al importar: "+e.message); }
+    setImportando(false);
+  };
+
+  const abrirCaptura = (p) => { if(esRango){ alert("La captura manual es por mes. Pon la misma fecha en Desde y Hasta (un solo mes) para capturar."); return; } const man=((p.evalManual||{})[d1])||{}; setEdit({ id:p.id, nombre:p.nombre, tipo:p.tipo||"maquila", calidad:man.calidad||"", compromiso:man.compromiso||"", valor:man.valor||"", admin:man.admin||"", comentarios:man.comentarios||"" }); };
+  const guardarCaptura = async (imprimir) => {
+    setGuardando(true);
+    try{
+      const man = { calidad:edit.calidad||"", compromiso:edit.compromiso||"", valor:edit.valor||"", admin:edit.admin||"", comentarios:edit.comentarios||"" };
+      await setDoc(doc(db,"proveedores",edit.id), { tipo:edit.tipo, evalManual: { [d1]: man } }, {merge:true});
+      const prev = (provs||[]).find(x=>x.id===edit.id) || {nombre:edit.nombre, meses:{}};
+      const updated = { ...prev, tipo:edit.tipo, evalManual:{ ...(prev.evalManual||{}), [d1]:man } };
+      await cargar();
+      setEdit(null);
+      if(imprimir) kardex(updated);
+    }catch(e){ alert("Error al guardar: "+e.message); }
+    setGuardando(false);
+  };
+  const kardex = (p) => { const calc = calcProvEval(p, d0, d1, cfg); onImprimir({ html: buildKardexProvHtml(p, calc), titulo:"Kardex "+p.nombre+" "+rangoProvLabel(d0,d1), archivo:"Kardex_"+slugProv(p.nombre)+"_"+d0+(esRango?("_"+d1):"")+".html" }); };
+
+  const abrirPesos = () => { const pe=provPesosEf(cfg); const l={}; PROV_DIMS.forEach(d=> l[d.id]=Math.round(pe[d.id]*100)); setPesosLocal(l); setPesosOpen(true); };
+  const guardarPesos = async () => {
+    const suma = PROV_DIMS.reduce((s,d)=> s + (Number(pesosLocal[d.id])||0), 0);
+    if(suma!==100){ alert("Los pesos deben sumar 100%. Ahora suman "+suma+"%."); return; }
+    const pesos={}; PROV_DIMS.forEach(d=> pesos[d.id]=(Number(pesosLocal[d.id])||0)/100);
+    try{ await setDoc(doc(db,"config","provCfg"), { pesos }, {merge:true}); setCfg({...(cfg||{}), pesos}); setPesosOpen(false); }
+    catch(e){ alert("Error al guardar pesos: "+e.message); }
+  };
+
+  const campoStyle = { width:"100%", background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"7px 9px", fontSize:13, outline:"none", boxSizing:"border-box" };
+  if(provs===null) return <div style={{padding:"40px 16px", textAlign:"center", color:C.muted}}>Cargando proveedores…</div>;
+
+  const q = busca.trim().toLowerCase();
+  const lista = provs.map(p=> ({ p, calc: calcProvEval(p, d0, d1, cfg) }))
+    .filter(x=> (tipoF==="todos" || (x.p.tipo||"maquila")===tipoF) && (!q || x.p.nombre.toLowerCase().includes(q)))
+    .sort((a,b)=> (b.calc.global==null?-1:b.calc.global) - (a.calc.global==null?-1:a.calc.global) || a.p.nombre.localeCompare(b.p.nombre));
+  const money = x => "$"+Math.round(x||0).toLocaleString("es-MX");
+
+  return (
+    <div style={{padding:"20px 16px", maxWidth:1000, margin:"0 auto"}}>
+      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:10, marginBottom:6}}>
+        <div style={{fontSize:20, fontWeight:800, color:C.text}}>🏭 Evaluación de proveedores</div>
+        <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={importar}/>
+          <Btn onClick={()=>fileRef.current&&fileRef.current.click()} variant="ghost" size="sm" disabled={importando}>{importando?"Importando…":"⬆️ Importar Excel de Odoo"}</Btn>
+          <Btn onClick={abrirPesos} variant="ghost" size="sm">⚖️ Pesos</Btn>
+        </div>
+      </div>
+      <div style={{fontSize:12, color:C.muted, marginBottom:14}}>Scorecard mensual · puntaje 0–100 · grado A/B/C/D. Entregas y precio salen de Odoo; calidad, compromiso, valor y administrativo se capturan (1–5).</div>
+
+      <div style={{display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", marginBottom:12}}>
+        <span style={{fontSize:11,color:C.muted}}>Desde</span>
+        <input type="month" value={desde} onChange={e=>setDesde(e.target.value)} style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"6px 9px", fontSize:12}}/>
+        <span style={{fontSize:11,color:C.muted}}>Hasta</span>
+        <input type="month" value={hasta} onChange={e=>setHasta(e.target.value)} style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"6px 9px", fontSize:12}}/>
+        {esRango && <span style={{fontSize:11,color:C.accent,fontWeight:700}}>periodo consolidado</span>}
+        <select value={tipoF} onChange={e=>setTipoF(e.target.value)} style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"6px 9px", fontSize:12}}>
+          <option value="todos">Todos los tipos</option>
+          {PROV_TIPOS.map(t=> <option key={t.id} value={t.id}>{t.label}</option>)}
+        </select>
+        <input value={busca} onChange={e=>setBusca(e.target.value)} placeholder="Buscar proveedor…" style={{flex:"1 1 180px", background:C.surface, border:"1px solid "+C.border, borderRadius:7, color:C.text, padding:"6px 10px", fontSize:12}}/>
+      </div>
+
+      {pesosOpen && pesosLocal && (
+        <div style={{background:C.card, border:"1px solid "+C.accent+"66", borderRadius:12, padding:"12px 14px", marginBottom:14}}>
+          <div style={{fontSize:13, fontWeight:800, color:C.text, marginBottom:8}}>⚖️ Pesos de las dimensiones (deben sumar 100%)</div>
+          <div style={{display:"flex", gap:10, flexWrap:"wrap"}}>
+            {PROV_DIMS.map(d=> (
+              <div key={d.id} style={{flex:"1 1 150px"}}>
+                <div style={{fontSize:11, color:C.muted, marginBottom:3}}>{d.label}</div>
+                <input type="number" min="0" max="100" value={pesosLocal[d.id]} onChange={e=>setPesosLocal({...pesosLocal, [d.id]:e.target.value})} style={campoStyle}/>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:10}}>
+            <span style={{fontSize:12, color: PROV_DIMS.reduce((s,d)=>s+(Number(pesosLocal[d.id])||0),0)===100?C.success:C.danger, fontWeight:700}}>Suma: {PROV_DIMS.reduce((s,d)=>s+(Number(pesosLocal[d.id])||0),0)}%</span>
+            <div style={{display:"flex", gap:8}}><Btn onClick={()=>setPesosOpen(false)} variant="ghost" size="sm">Cancelar</Btn><Btn onClick={guardarPesos} size="sm">Guardar pesos</Btn></div>
+          </div>
+        </div>
+      )}
+
+      {edit && (() => { const p = provs.find(x=>x.id===edit.id)||{meses:{}}; const calc = calcProvEval({...p, tipo:edit.tipo, evalManual:{...(p.evalManual||{}), [d1]:{calidad:edit.calidad,compromiso:edit.compromiso,valor:edit.valor,admin:edit.admin,comentarios:edit.comentarios}}}, d1, d1, cfg); const mes=calc.agg;
+        return (
+        <div style={{background:C.card, border:"1px solid "+C.accent+"66", borderRadius:12, padding:"14px 16px", marginBottom:16}}>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8, marginBottom:10}}>
+            <div style={{fontSize:14, fontWeight:800, color:C.text}}>{edit.nombre} <span style={{fontSize:12, color:C.muted, fontWeight:400}}>· captura de {mesNombreLargo(d1)}</span></div>
+            <select value={edit.tipo} onChange={e=>setEdit({...edit, tipo:e.target.value})} style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"5px 8px", fontSize:12}}>
+              {PROV_TIPOS.map(t=> <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </div>
+          <div style={{background:C.surface, borderRadius:8, padding:"8px 10px", marginBottom:12, fontSize:12, color:C.muted}}>
+            <b style={{color:C.text}}>De Odoo:</b> {mes? ("Completitud "+(mes.ped?(mes.rec/mes.ped*100).toFixed(1):0)+"% · Retraso "+(mes.ef==null?"s/d":mes.ef.toFixed(1)+"d")+" · "+money(mes.monto)) : "sin datos este mes (importa el Excel)"}
+          </div>
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+            {[["calidad","Calidad del producto (1–5)"],["compromiso","Compromiso y prioridad (1–5)"],["valor","Valor agregado (1–5)"],["admin","Administrativo y comunicación (1–5)"]].map(([k,lbl])=>(
+              <div key={k}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>{lbl}</div>
+                <input type="number" min="1" max="5" value={edit[k]} onChange={e=>setEdit({...edit, [k]:e.target.value})} style={campoStyle}/></div>
+            ))}
+            <div style={{gridColumn:"1 / -1"}}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>Comentarios y plan de acción</div>
+              <input value={edit.comentarios} onChange={e=>setEdit({...edit, comentarios:e.target.value})} style={campoStyle}/></div>
+          </div>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:12, flexWrap:"wrap", gap:10}}>
+            <div>Puntaje: <b style={{color:calc.grado.c, fontSize:18}}>{calc.global==null?"—":calc.global}</b> <span style={{background:calc.grado.c, color:"#fff", borderRadius:6, padding:"2px 9px", fontSize:12, fontWeight:800}}>{calc.grado.l} · {calc.grado.t}</span>{calc.faltan.length?<span style={{fontSize:11, color:C.accent, marginLeft:8}}>faltan {calc.faltan.length} por capturar</span>:null}</div>
+            <div style={{display:"flex", gap:8}}>
+              <Btn onClick={()=>setEdit(null)} variant="ghost" size="sm">Cancelar</Btn>
+              <Btn onClick={()=>guardarCaptura(false)} variant="ghost" size="sm" disabled={guardando}>{guardando?"Guardando…":"Guardar"}</Btn>
+              <Btn onClick={()=>guardarCaptura(true)} size="sm" disabled={guardando}>🖨️ Guardar y kardex</Btn>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {lista.length===0 ? (
+        <div style={{background:C.card, borderRadius:10, padding:24, textAlign:"center", color:C.muted, border:"1px dashed "+C.border}}>
+          No hay proveedores. Importa tu Excel de Odoo (reporte "Análisis de compra") para empezar.
+        </div>
+      ) : lista.map(({p, calc})=>{
+        const g = calc.grado; const mes = calc.mes;
+        return (
+          <div key={p.id} style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8}}>
+            <div style={{display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
+              <span style={{background:g.c, color:"#fff", borderRadius:6, padding:"2px 9px", fontSize:12, fontWeight:800, minWidth:20, textAlign:"center"}}>{g.l}</span>
+              <span style={{fontWeight:700, color:C.text, fontSize:13, flex:"1 1 200px", minWidth:140}}>{p.nombre}</span>
+              <span style={{fontSize:11, color:C.muted}}>{(PROV_TIPOS.find(t=>t.id===p.tipo)||{}).label||"Maquila"}</span>
+              {mes ? <span style={{fontSize:11, color:C.muted}}>Compl <b style={{color:C.text}}>{mes.ped?(mes.rec/mes.ped*100).toFixed(0):0}%</b> · Retraso <b style={{color:C.text}}>{mes.ef==null?"s/d":mes.ef.toFixed(0)+"d"}</b> · {money(mes.monto)}</span> : <span style={{fontSize:11, color:C.muted}}>sin datos del mes</span>}
+              <span style={{fontSize:20, fontWeight:800, color:g.c, minWidth:34, textAlign:"right"}}>{calc.global==null?"—":calc.global}</span>
+            </div>
+            <div style={{display:"flex", gap:6, flexWrap:"wrap", marginTop:8}}>
+              <button onClick={()=>abrirCaptura(p)} style={{border:"1px solid "+C.border, background:"transparent", color:C.text, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>📝 Capturar / editar</button>
+              <button onClick={()=>kardex(p)} style={{border:"1px solid "+C.info+"88", background:"transparent", color:C.info, borderRadius:6, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>🖨️ Kardex del mes</button>
+              {calc.faltan.length>0 && mes ? <span style={{fontSize:10.5, color:C.accent, alignSelf:"center"}}>⚠ faltan {calc.faltan.length} dim. por capturar</span> : null}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Remisiones({ remisiones, onGuardar, onImprimir, onEliminar, esAdmin }) {
   const [r, setR] = useState(null);
   const [tab, setTab] = useState("muestra");
@@ -8159,6 +8480,7 @@ function AppInner() {
   const [arreglos, setArreglos] = useState([]);
   const [remisionPdf, setRemisionPdf] = useState(null);
   const [arregloPdf, setArregloPdf] = useState(null);
+  const [provPdf, setProvPdf] = useState(null);
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);
@@ -9625,6 +9947,21 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {puedeEditarSeguimiento && (
+            <ModTile onClick={() => setVista("proveedores")} label="Proveedores"
+              stat={<span style={{color:C.muted}}>Evaluación mensual</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gProv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#38bdf8"/><stop offset="1" stopColor="#0369a1"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gProv)"/>
+                <circle cx="44" cy="44" r="31" fill="#ffffff" fillOpacity="0.14"/>
+                <g stroke="#fff" strokeWidth="3.2" fill="none" strokeLinejoin="round" strokeLinecap="round">
+                  <path d="M26 60 V44 M38 60 V34 M50 60 V40 M62 60 V28"/>
+                  <path d="M24 62 h40"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
             {(rol === "admin" || puedeEditarSeguimiento) && (
             <ModTile onClick={() => setVista("caja")} label="Caja chica"
               stat={<span style={{color:C.muted}}>Control de gastos</span>}>
@@ -9930,6 +10267,13 @@ const cancelar = async (id) => {
         />
       )}
 
+      {vista === "proveedores" && puedeEditarSeguimiento && (
+        <Proveedores
+          esAdmin={rol === "admin"}
+          onImprimir={(pl)=>setProvPdf(pl)}
+        />
+      )}
+
       {vista === "caja" && (rol === "admin" || rol === "seguimiento") && (
         <div style={{padding:"20px 16px"}}>
           <button onClick={() => setVista("home")} style={{border:"none", background:"transparent", color:C.accent, fontSize:14, cursor:"pointer", marginBottom:12, fontFamily:"inherit"}}>← Volver</button>
@@ -10074,6 +10418,7 @@ const cancelar = async (id) => {
       )}
       {remisionPdf && <PdfModal html={remisionPdf.html} titulo={remisionPdf.titulo} archivo={remisionPdf.archivo} onClose={() => setRemisionPdf(null)}/>}
       {arregloPdf && <PdfModal html={arregloPdf.html} titulo={arregloPdf.titulo} archivo={arregloPdf.archivo} onClose={() => setArregloPdf(null)}/>}
+      {provPdf && <PdfModal html={provPdf.html} titulo={provPdf.titulo} archivo={provPdf.archivo} onClose={() => setProvPdf(null)}/>}
       {pagoPdf && <PdfModal html={pagoPdf.html} titulo={pagoPdf.titulo} archivo={pagoPdf.archivo} onClose={() => setPagoPdf(null)}/>}
     </div>
   );

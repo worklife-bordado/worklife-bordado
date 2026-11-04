@@ -3635,12 +3635,12 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
       </div>
       )}
       {r.paradas.length === 0 && <div style={{color:C.muted, fontSize:13, padding:"10px 0 16px"}}>Sin paradas todavía. Usa los botones de arriba para agregarlas.</div>}
-      {r.paradas.map((p,i) => {
+      {r.paradas.map((p,i)=>({p,i})).sort((a,b)=>(a.p.orden||9999)-(b.p.orden||9999)||a.i-b.i).map(({p,i}) => {
         const ti = tipoInfo(p.tipo);
         return (
           <div key={i} style={{background:C.card, border:"1px solid "+C.border, borderRadius:11, padding:"12px 14px", marginBottom:10}}>
             <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:10}}>
-              <span style={{fontSize:13, fontWeight:800, color:C.muted}}>{i+1}</span>
+              <span style={{fontSize:13, fontWeight:800, color: p.orden>0?C.accent:C.muted}}>{p.orden>0 ? p.orden : i+1}</span>
               <select value={p.tipo} onChange={e=>setP(i,"tipo",e.target.value)} style={{...iS, width:"auto", borderColor:ti.col, color:ti.col, fontWeight:700}}>
                 {RUTA_TIPOS.map(t => <option key={t.v} value={t.v} style={{color:C.text}}>{t.v} · {t.lbl}</option>)}
               </select>
@@ -3665,13 +3665,13 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
         {/* Resultado por parada */}
         <div style={{fontSize:14, fontWeight:800, color:C.text, marginBottom:10}}>Resultado de cada parada</div>
         {r.paradas.length === 0 && <div style={{color:C.muted, fontSize:13, marginBottom:14}}>Agrega paradas arriba para registrar su resultado.</div>}
-        {r.paradas.map((p,i) => {
+        {r.paradas.map((p,i)=>({p,i})).sort((a,b)=>(a.p.orden||9999)-(b.p.orden||9999)||a.i-b.i).map(({p,i}) => {
           const ti = tipoInfo(p.tipo);
           const esEntrega = p.tipo === "E";
           return (
             <div key={i} style={{background:C.card, border:"1px solid "+C.border, borderRadius:11, padding:"12px 14px", marginBottom:10}}>
               <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:10, flexWrap:"wrap"}}>
-                <span style={{fontSize:12, fontWeight:800, color:C.muted}}>{i+1}</span>
+                <span style={{fontSize:12, fontWeight:800, color: p.orden>0?C.accent:C.muted}}>{p.orden>0 ? p.orden : i+1}</span>
                 <span style={{fontSize:10.5, fontWeight:700, color:"#fff", background:ti.col, borderRadius:10, padding:"2px 9px"}}>{p.tipo}</span>
                 <span style={{fontSize:13.5, fontWeight:700, color:C.text}}>{p.cliente||"(sin nombre)"}</span>
                 {p.noPedido && <span style={{fontSize:12, color:C.accent}}>#{p.noPedido}</span>}

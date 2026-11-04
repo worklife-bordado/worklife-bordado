@@ -3308,10 +3308,14 @@ function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministr
 }
 
 // ── Ficha de módulo estilo Odoo (ícono + badge + etiqueta + mini-dato) ──────
-function ModTile({ onClick, children, label, stat, badge, badgeColor }) {
+const HOME_TILES_ORDEN_DEF = ["lista","calendario","dashboard","kanban","carga","rutas","remisiones","arreglos","proveedores","caja","paqueteria","pagos","bonos","clasificacion","checador","cfgsemaforo","usuarios","abrir-checador"];
+function ModTile({ onClick, children, label, stat, badge, badgeColor, order, reordenando, dnd }) {
   const mob = typeof window !== "undefined" && window.innerWidth < 600;
   return (
-    <div onClick={onClick} style={{textAlign:"center",cursor:"pointer"}}>
+    <div onClick={reordenando ? undefined : onClick}
+      draggable={reordenando || undefined}
+      onDragStart={dnd && dnd.onDragStart} onDragOver={dnd && dnd.onDragOver} onDrop={dnd && dnd.onDrop} onDragEnd={dnd && dnd.onDragEnd}
+      style={{textAlign:"center", cursor: reordenando?"grab":"pointer", order: order!=null?order:0, outline: reordenando?"2px dashed "+C.border:"none", outlineOffset:4, borderRadius:12, userSelect: reordenando?"none":undefined, transition:"outline .1s"}}>
       <div className="modtile-ico" style={{position:"relative",width:"100%",maxWidth:72,aspectRatio:"1 / 1",margin:"0 auto"}}>
         {children}
         {badge>0 && <span style={{position:"absolute",top:-6,right:-6,minWidth:22,height:22,padding:"0 5px",borderRadius:11,background:badgeColor,color:"#fff",fontSize:12,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",border:"2px solid "+C.bg,boxSizing:"border-box"}}>{badge}</span>}
@@ -4095,7 +4099,7 @@ function periodoDeEtiqueta(lbl){
 }
 function slugProv(n){ return "p_" + String(n).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,60); }
 function mesNombreLargo(periodo){ const [y,m]=String(periodo).split("-"); const M=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]; return (M[+m]||"")+" "+y; }
-const PROV_TIPOS = [{id:"maquila",label:"Maquila"},{id:"materiales",label:"Materiales"},{id:"servicios",label:"Servicios"},{id:"otro",label:"Otro"}];
+const PROV_TIPOS = [{id:"bordador",label:"Bordador"},{id:"maquila",label:"Maquila"},{id:"materiales",label:"Materiales"},{id:"servicios",label:"Servicios"},{id:"otro",label:"Otro"}];
 const PROV_DIMS = [
   {id:"entregas",   label:"Entregas (puntualidad + completitud)", peso:0.25, auto:true},
   {id:"calidad",    label:"Calidad del producto",                 peso:0.25, manual:true},
@@ -4145,7 +4149,50 @@ function manualRangeProv(p, desde, hasta){
 }
 function rangoProvLabel(desde,hasta){ return desde===hasta ? mesNombreLargo(desde) : (mesNombreLargo(desde)+" – "+mesNombreLargo(hasta)); }
 
+// Métricas de bordadores DESDE LA APP (sin lecturas extra: usa las órdenes ya cargadas).
+// Por bordador y mes de entrega: entregadas, a tiempo (entregada ≤ fecha requerida),
+// con retrabajo (pasó por la etapa "retrabajo") y piezas.
+function calcBordMeses(ordenes){
+  const out={};
+  (ordenes||[]).forEach(o=>{
+    const b=(o.bordador||"").trim(); if(!b) return;
+    const ent=((o.historial)||[]).find(h=>h.etapa==="entregada"); if(!ent||!o.fechaRequerida) return;
+    const fe=new Date(ent.fecha); if(isNaN(fe)) return; const per=fe.toISOString().slice(0,7);
+    const rec=out[b]||(out[b]={}); const m=rec[per]||(rec[per]={entregadas:0,aTiempo:0,nRetra:0,piezas:0});
+    m.entregadas++;
+    if(fe <= new Date(o.fechaRequerida+"T23:59:59")) m.aTiempo++;
+    if(((o.historial)||[]).some(h=>h.etapa==="retrabajo")||o.etapa==="retrabajo") m.nRetra++;
+    m.piezas += piezasOrden(o);
+  });
+  return out;
+}
+function aggMesesApp(meses, desde, hasta){
+  const ks=Object.keys(meses||{}).filter(k=>k>=desde && k<=hasta).sort();
+  if(!ks.length) return null;
+  let e=0,a=0,r=0,p=0; ks.forEach(k=>{const m=meses[k]; e+=m.entregadas; a+=m.aTiempo; r+=m.nRetra; p+=m.piezas;});
+  return {entregadas:e,aTiempo:a,nRetra:r,piezas:p,nMeses:ks.length,keys:ks};
+}
+function calcProvEvalApp(p, desde, hasta, cfg){
+  const pesos = provPesosEf(cfg);
+  const a = aggMesesApp(p.mesesApp, desde, hasta);
+  const man = manualRangeProv(p, desde, hasta);
+  const scMan = v => (v==null||v==="")?null:Math.max(0,Math.min(100,Number(v)*20));
+  const dims=[];
+  let onTime=null, cal=null, sE=null, sC=null;
+  if(a && a.entregadas>0){ onTime=a.aTiempo/a.entregadas*100; cal=100-(a.nRetra/a.entregadas*100); sE=scComplet(onTime); sC=scComplet(cal); }
+  dims.push({id:"entregas", label:"Entregas (a tiempo)", valor: onTime!=null?onTime.toFixed(1)+"%":"s/d", puntaje:sE, peso:pesos.entregas, auto:true});
+  dims.push({id:"calidad", label:"Calidad (sin retrabajo)", valor: cal!=null?cal.toFixed(1)+"%":"s/d", puntaje:sC, peso:pesos.calidad, auto:true});
+  dims.push({id:"precio", label:"Precio (no aplica · interno)", valor:"N/A", puntaje:null, peso:pesos.precio, na:true});
+  dims.push({id:"compromiso", label:"Compromiso y prioridad", valor: man.compromiso!=null?(man.compromiso.toFixed(1)+"/5"):"—", puntaje:scMan(man.compromiso), peso:pesos.compromiso, manual:true});
+  dims.push({id:"valor", label:"Valor agregado", valor: man.valor!=null?(man.valor.toFixed(1)+"/5"):"—", puntaje:scMan(man.valor), peso:pesos.valor, manual:true});
+  dims.push({id:"admin", label:"Administrativo y comunicación", valor: man.admin!=null?(man.admin.toFixed(1)+"/5"):"—", puntaje:scMan(man.admin), peso:pesos.admin, manual:true});
+  let ws=0, acc=0; const faltan=[];
+  dims.forEach(d=>{ if(d.puntaje==null){ if(!d.na) faltan.push(d.label); } else { ws+=d.peso; acc+=d.puntaje*d.peso; } d.ponderado = (d.puntaje==null)?null:Math.round(d.puntaje*d.peso*10)/10; });
+  const global = ws>0? Math.round(acc/ws) : null;
+  return { dims, global, grado:gradoProv(global), faltan, aggApp:a, comentarios: man.comentarios||"", pesos, desde, hasta, fuente:"app" };
+}
 function calcProvEval(p, desde, hasta, cfg){
+  if(p.fuente==="app") return calcProvEvalApp(p, desde, hasta, cfg);
   const pesos = provPesosEf(cfg);
   const agg = aggMesesProv(p.meses, desde, hasta);
   const man = manualRangeProv(p, desde, hasta);
@@ -4166,11 +4213,18 @@ function calcProvEval(p, desde, hasta, cfg){
   return { dims, global, grado:gradoProv(global), faltan, agg, comentarios: man.comentarios||"", pesos, desde, hasta };
 }
 function buildKardexProvHtml(p, calc){
-  const g = calc.grado, mes = calc.agg; const periodo = calc.hasta;
+  const g = calc.grado; const esApp = calc.fuente==="app"; const mes = esApp ? calc.aggApp : calc.agg; const periodo = calc.hasta;
   const money = x => "$" + Math.round(x||0).toLocaleString("es-MX");
   const filas = calc.dims.map(d=> `<tr><td>${escHtml(d.label)}</td><td style="text-align:center">${escHtml(String(d.valor))}</td><td style="text-align:center">${d.puntaje==null?"—":d.puntaje}</td><td style="text-align:center">${Math.round(d.peso*100)}%</td><td style="text-align:center">${d.ponderado==null?"—":d.ponderado}</td></tr>`).join("");
   let stat = "";
-  if(mes){ const comp = mes.ped? mes.rec/mes.ped*100 : 0; const falt = (mes.ped||0)-(mes.rec||0); const up = mes.ped? mes.monto/mes.ped : 0;
+  if(esApp){
+    if(mes && mes.entregadas>0){ const onT=mes.aTiempo/mes.entregadas*100; const ret=mes.nRetra/mes.entregadas*100;
+      stat = `<table>
+        <tr><th style="width:150px">Órdenes entregadas</th><td>${mes.entregadas}</td><th style="width:150px">Piezas</th><td>${(mes.piezas||0).toLocaleString("es-MX")}</td></tr>
+        <tr><th>A tiempo</th><td>${mes.aTiempo} de ${mes.entregadas} (${onT.toFixed(1)}%)</td><th>Con retrabajo</th><td>${mes.nRetra} (${ret.toFixed(1)}%)</td></tr>
+      </table>`;
+    } else { stat = `<div class="leg">Sin órdenes entregadas de este bordador en el periodo.</div>`; }
+  } else if(mes){ const comp = mes.ped? mes.rec/mes.ped*100 : 0; const falt = (mes.ped||0)-(mes.rec||0); const up = mes.ped? mes.monto/mes.ped : 0;
     stat = `<table>
       <tr><th style="width:140px">Monto comprado</th><td>${money(mes.monto)}</td><th style="width:140px">Precio unit. prom.</th><td>${money(up)}</td></tr>
       <tr><th>Piezas pedidas</th><td>${(mes.ped||0).toLocaleString("es-MX")}</td><th>Piezas recibidas</th><td>${(mes.rec||0).toLocaleString("es-MX")}</td></tr>
@@ -4179,11 +4233,20 @@ function buildKardexProvHtml(p, calc){
     </table>`;
   } else { stat = `<div class="leg">Sin datos de compras de Odoo para este periodo (no se importó o no hubo movimiento).</div>`; }
   // historial 6 meses
-  const hk = Object.keys(p.meses||{}).filter(k=> k<=periodo).sort().slice(-6);
-  const hist = hk.length? `<div class="sec">HISTORIAL (ÚLTIMOS ${hk.length} MESES)</div><table>
-    <tr><th>Mes</th><th style="text-align:center">Completitud</th><th style="text-align:center">Retraso (d)</th><th style="text-align:right">Monto</th></tr>
-    ${hk.map(k=>{const m=p.meses[k];const c=m.ped?(m.rec/m.ped*100).toFixed(0)+"%":"—";return `<tr><td>${mesNombreLargo(k)}</td><td style="text-align:center">${c}</td><td style="text-align:center">${m.ef==null?"—":m.ef.toFixed(1)}</td><td style="text-align:right">${money(m.monto)}</td></tr>`;}).join("")}
-  </table>` : "";
+  let hist = "";
+  if(esApp){
+    const hk = Object.keys(p.mesesApp||{}).filter(k=> k<=periodo).sort().slice(-6);
+    hist = hk.length? `<div class="sec">HISTORIAL (ÚLTIMOS ${hk.length} MESES)</div><table>
+      <tr><th>Mes</th><th style="text-align:center">A tiempo</th><th style="text-align:center">Retrabajo</th><th style="text-align:right">Órdenes</th></tr>
+      ${hk.map(k=>{const m=p.mesesApp[k];const ot=m.entregadas?(m.aTiempo/m.entregadas*100).toFixed(0)+"%":"—";const rt=m.entregadas?(m.nRetra/m.entregadas*100).toFixed(0)+"%":"—";return `<tr><td>${mesNombreLargo(k)}</td><td style="text-align:center">${ot}</td><td style="text-align:center">${rt}</td><td style="text-align:right">${m.entregadas}</td></tr>`;}).join("")}
+    </table>` : "";
+  } else {
+    const hk = Object.keys(p.meses||{}).filter(k=> k<=periodo).sort().slice(-6);
+    hist = hk.length? `<div class="sec">HISTORIAL (ÚLTIMOS ${hk.length} MESES)</div><table>
+      <tr><th>Mes</th><th style="text-align:center">Completitud</th><th style="text-align:center">Retraso (d)</th><th style="text-align:right">Monto</th></tr>
+      ${hk.map(k=>{const m=p.meses[k];const c=m.ped?(m.rec/m.ped*100).toFixed(0)+"%":"—";return `<tr><td>${mesNombreLargo(k)}</td><td style="text-align:center">${c}</td><td style="text-align:center">${m.ef==null?"—":m.ef.toFixed(1)}</td><td style="text-align:right">${money(m.monto)}</td></tr>`;}).join("")}
+    </table>` : "";
+  }
   const prov = calc.faltan.length? ` · <b style="color:#b26a00">provisional: faltan ${calc.faltan.length} dimensión(es) por capturar</b>` : "";
   return `<!doctype html><html><head><meta charset="utf-8"><style>${RUTA_PDF_CSS}</style></head><body>
   <div class="page">
@@ -4211,7 +4274,7 @@ function buildKardexProvHtml(p, calc){
   </div></body></html>`;
 }
 
-function Proveedores({ esAdmin, onImprimir }){
+function Proveedores({ esAdmin, onImprimir, ordenes }){
   const [provs, setProvs] = useState(null);
   const [cfg, setCfg] = useState(null);
   const [desde, setDesde] = useState(() => new Date().toISOString().slice(0,7));
@@ -4295,8 +4358,15 @@ function Proveedores({ esAdmin, onImprimir }){
   const campoStyle = { width:"100%", background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"7px 9px", fontSize:13, outline:"none", boxSizing:"border-box" };
   if(provs===null) return <div style={{padding:"40px 16px", textAlign:"center", color:C.muted}}>Cargando proveedores…</div>;
 
+  // Bordadores desde la app (sin lecturas extra): se calculan de las órdenes ya cargadas
+  // y se fusionan con su captura manual guardada (doc "bord_<slug>" en la colección).
+  const bordData = calcBordMeses(ordenes||[]);
+  const bordList = Object.keys(bordData).map(nombre=>{ const id="bord_"+slugProv(nombre); const st=(provs||[]).find(x=>x.id===id); return { id, nombre, tipo:"bordador", fuente:"app", mesesApp:bordData[nombre], evalManual: st? (st.evalManual||{}) : {} }; });
+  const odooProvs = (provs||[]).filter(x=> !String(x.id).startsWith("bord_"));
+  const allProvs = [...odooProvs, ...bordList];
+
   const q = busca.trim().toLowerCase();
-  const lista = provs.map(p=> ({ p, calc: calcProvEval(p, d0, d1, cfg) }))
+  const lista = allProvs.map(p=> ({ p, calc: calcProvEval(p, d0, d1, cfg) }))
     .filter(x=> (tipoF==="todos" || (x.p.tipo||"maquila")===tipoF) && (!q || x.p.nombre.toLowerCase().includes(q)))
     .sort((a,b)=> (b.calc.global==null?-1:b.calc.global) - (a.calc.global==null?-1:a.calc.global) || a.p.nombre.localeCompare(b.p.nombre));
   const money = x => "$"+Math.round(x||0).toLocaleString("es-MX");
@@ -4344,20 +4414,20 @@ function Proveedores({ esAdmin, onImprimir }){
         </div>
       )}
 
-      {edit && (() => { const p = provs.find(x=>x.id===edit.id)||{meses:{}}; const calc = calcProvEval({...p, tipo:edit.tipo, evalManual:{...(p.evalManual||{}), [d1]:{calidad:edit.calidad,compromiso:edit.compromiso,valor:edit.valor,admin:edit.admin,comentarios:edit.comentarios}}}, d1, d1, cfg); const mes=calc.agg;
+      {edit && (() => { const p = allProvs.find(x=>x.id===edit.id)||{meses:{}}; const esAppEdit=p.fuente==="app"; const calc = calcProvEval({...p, tipo:edit.tipo, evalManual:{...(p.evalManual||{}), [d1]:{calidad:edit.calidad,compromiso:edit.compromiso,valor:edit.valor,admin:edit.admin,comentarios:edit.comentarios}}}, d1, d1, cfg); const mes=calc.agg; const aApp=calc.aggApp;
         return (
         <div style={{background:C.card, border:"1px solid "+C.accent+"66", borderRadius:12, padding:"14px 16px", marginBottom:16}}>
           <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8, marginBottom:10}}>
-            <div style={{fontSize:14, fontWeight:800, color:C.text}}>{edit.nombre} <span style={{fontSize:12, color:C.muted, fontWeight:400}}>· captura de {mesNombreLargo(d1)}</span></div>
-            <select value={edit.tipo} onChange={e=>setEdit({...edit, tipo:e.target.value})} style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:C.text, padding:"5px 8px", fontSize:12}}>
+            <div style={{fontSize:14, fontWeight:800, color:C.text}}>{esAppEdit?"🧵 ":""}{edit.nombre} <span style={{fontSize:12, color:C.muted, fontWeight:400}}>· captura de {mesNombreLargo(d1)}</span></div>
+            <select value={edit.tipo} disabled={esAppEdit} onChange={e=>setEdit({...edit, tipo:e.target.value})} style={{background:C.surface, border:"1px solid "+C.border, borderRadius:6, color:esAppEdit?C.muted:C.text, padding:"5px 8px", fontSize:12}}>
               {PROV_TIPOS.map(t=> <option key={t.id} value={t.id}>{t.label}</option>)}
             </select>
           </div>
           <div style={{background:C.surface, borderRadius:8, padding:"8px 10px", marginBottom:12, fontSize:12, color:C.muted}}>
-            <b style={{color:C.text}}>De Odoo:</b> {mes? ("Completitud "+(mes.ped?(mes.rec/mes.ped*100).toFixed(1):0)+"% · Retraso "+(mes.ef==null?"s/d":mes.ef.toFixed(1)+"d")+" · "+money(mes.monto)) : "sin datos este mes (importa el Excel)"}
+            <b style={{color:C.text}}>{esAppEdit?"De la app:":"De Odoo:"}</b> {esAppEdit ? (aApp && aApp.entregadas>0 ? ("A tiempo "+(aApp.aTiempo/aApp.entregadas*100).toFixed(0)+"% · Calidad "+(100-aApp.nRetra/aApp.entregadas*100).toFixed(0)+"% · "+aApp.entregadas+" órdenes") : "sin órdenes entregadas este mes") : (mes? ("Completitud "+(mes.ped?(mes.rec/mes.ped*100).toFixed(1):0)+"% · Retraso "+(mes.ef==null?"s/d":mes.ef.toFixed(1)+"d")+" · "+money(mes.monto)) : "sin datos este mes (importa el Excel)")}
           </div>
           <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
-            {[["calidad","Calidad del producto (1–5)"],["compromiso","Compromiso y prioridad (1–5)"],["valor","Valor agregado (1–5)"],["admin","Administrativo y comunicación (1–5)"]].map(([k,lbl])=>(
+            {(esAppEdit ? [["compromiso","Compromiso y prioridad (1–5)"],["valor","Valor agregado (1–5)"],["admin","Administrativo y comunicación (1–5)"]] : [["calidad","Calidad del producto (1–5)"],["compromiso","Compromiso y prioridad (1–5)"],["valor","Valor agregado (1–5)"],["admin","Administrativo y comunicación (1–5)"]]).map(([k,lbl])=>(
               <div key={k}><div style={{fontSize:11, color:C.muted, marginBottom:3}}>{lbl}</div>
                 <input type="number" min="1" max="5" value={edit[k]} onChange={e=>setEdit({...edit, [k]:e.target.value})} style={campoStyle}/></div>
             ))}
@@ -4381,14 +4451,16 @@ function Proveedores({ esAdmin, onImprimir }){
           No hay proveedores. Importa tu Excel de Odoo (reporte "Análisis de compra") para empezar.
         </div>
       ) : lista.map(({p, calc})=>{
-        const g = calc.grado; const mes = calc.mes;
+        const g = calc.grado; const esApp = calc.fuente==="app"; const mes = esApp?calc.aggApp:calc.agg;
         return (
           <div key={p.id} style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 12px", marginBottom:8}}>
             <div style={{display:"flex", alignItems:"center", gap:12, flexWrap:"wrap"}}>
               <span style={{background:g.c, color:"#fff", borderRadius:6, padding:"2px 9px", fontSize:12, fontWeight:800, minWidth:20, textAlign:"center"}}>{g.l}</span>
               <span style={{fontWeight:700, color:C.text, fontSize:13, flex:"1 1 200px", minWidth:140}}>{p.nombre}</span>
-              <span style={{fontSize:11, color:C.muted}}>{(PROV_TIPOS.find(t=>t.id===p.tipo)||{}).label||"Maquila"}</span>
-              {mes ? <span style={{fontSize:11, color:C.muted}}>Compl <b style={{color:C.text}}>{mes.ped?(mes.rec/mes.ped*100).toFixed(0):0}%</b> · Retraso <b style={{color:C.text}}>{mes.ef==null?"s/d":mes.ef.toFixed(0)+"d"}</b> · {money(mes.monto)}</span> : <span style={{fontSize:11, color:C.muted}}>sin datos del mes</span>}
+              <span style={{fontSize:11, color: esApp?"#4caf7d":C.muted, fontWeight: esApp?700:400}}>{esApp?"🧵 Bordador":((PROV_TIPOS.find(t=>t.id===p.tipo)||{}).label||"Maquila")}</span>
+              {esApp
+                ? (mes && mes.entregadas>0 ? <span style={{fontSize:11, color:C.muted}}>A tiempo <b style={{color:C.text}}>{(mes.aTiempo/mes.entregadas*100).toFixed(0)}%</b> · Calidad <b style={{color:C.text}}>{(100-mes.nRetra/mes.entregadas*100).toFixed(0)}%</b> · {mes.entregadas} órd.</span> : <span style={{fontSize:11, color:C.muted}}>sin órdenes del mes</span>)
+                : (mes ? <span style={{fontSize:11, color:C.muted}}>Compl <b style={{color:C.text}}>{mes.ped?(mes.rec/mes.ped*100).toFixed(0):0}%</b> · Retraso <b style={{color:C.text}}>{mes.ef==null?"s/d":mes.ef.toFixed(0)+"d"}</b> · {money(mes.monto)}</span> : <span style={{fontSize:11, color:C.muted}}>sin datos del mes</span>)}
               <span style={{fontSize:20, fontWeight:800, color:g.c, minWidth:34, textAlign:"right"}}>{calc.global==null?"—":calc.global}</span>
             </div>
             <div style={{display:"flex", gap:6, flexWrap:"wrap", marginTop:8}}>
@@ -8481,6 +8553,22 @@ function AppInner() {
   const [remisionPdf, setRemisionPdf] = useState(null);
   const [arregloPdf, setArregloPdf] = useState(null);
   const [provPdf, setProvPdf] = useState(null);
+  // ── Orden de mosaicos del inicio (general para todos; lo edita admin) ──
+  const [ordenHome, setOrdenHome] = useState(HOME_TILES_ORDEN_DEF);
+  const [reordm, setReordm] = useState(false);
+  const [ordenDraft, setOrdenDraft] = useState(null);
+  const dragId = useRef(null);
+  const mezclarOrden = (saved) => { const base = Array.isArray(saved) ? saved.filter(x=>HOME_TILES_ORDEN_DEF.includes(x)) : []; HOME_TILES_ORDEN_DEF.forEach(id=>{ if(!base.includes(id)) base.push(id); }); return base; };
+  const ordHome = (id) => { const arr = reordm ? (ordenDraft||ordenHome) : ordenHome; const i = arr.indexOf(id); return i<0 ? 900 : i; };
+  const dndFor = (id) => ({
+    onDragStart: () => { dragId.current = id; },
+    onDragOver: (e) => { e.preventDefault(); },
+    onDrop: (e) => { e.preventDefault(); const from = dragId.current; if(!from || from===id) return; const arr = [...(ordenDraft||ordenHome)]; const fi = arr.indexOf(from); if(fi>=0) arr.splice(fi,1); const ti = arr.indexOf(id); arr.splice(ti<0?arr.length:ti, 0, from); setOrdenDraft(arr); },
+    onDragEnd: () => { dragId.current = null; },
+  });
+  const iniciarReorden = () => { setOrdenDraft([...ordenHome]); setReordm(true); };
+  const guardarReorden = async () => { const nuevo = ordenDraft || ordenHome; try { await setDoc(doc(db,"config","homeOrden"), { orden: nuevo, actualizadoPor: usuario?.email, actualizado: new Date().toISOString() }, {merge:true}); setOrdenHome(nuevo); } catch(e){ alert("No se pudo guardar el orden: "+e.message); } setReordm(false); setOrdenDraft(null); };
+  const cancelarReorden = () => { setReordm(false); setOrdenDraft(null); };
   const [liquidaciones, setLiquidaciones] = useState([]);
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);
@@ -9084,6 +9172,11 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       () => setKpiCfg({}));
     return un;
   }, [usuario, rol]);
+  // Orden de mosaicos del inicio: lectura puntual al entrar (no listener, para no gastar).
+  useEffect(() => {
+    if (!usuario?.email) return;
+    (async () => { try { const s = await getDoc(doc(db,"config","homeOrden")); setOrdenHome(mezclarOrden(s.exists()? s.data().orden : null)); } catch(e){} })();
+  }, [usuario]);
   const guardarBonosKpis = async (data) => {
     const prev = kpiCfg || {};
     const log = [{ fecha: new Date().toISOString(), por: usuario.email }, ...(prev.log || [])].slice(0, 30);
@@ -9824,9 +9917,22 @@ const cancelar = async (id) => {
               <div style={{fontSize:13,color:C.accent,fontWeight:800,whiteSpace:"nowrap"}}>Revisar →</div>
             </div>
           )}
+          {rol === "admin" && (
+            <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:8,marginTop:14,flexWrap:"wrap"}}>
+              {!reordm ? (
+                <button onClick={iniciarReorden} style={{border:"1px solid "+C.border,background:C.surface,color:C.muted,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>↕️ Reordenar módulos</button>
+              ) : (
+                <>
+                  <span style={{fontSize:12,color:C.accent,fontWeight:700,marginRight:"auto"}}>Arrastra los módulos con el mouse para reacomodarlos</span>
+                  <button onClick={cancelarReorden} style={{border:"1px solid "+C.border,background:C.surface,color:C.muted,borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+                  <button onClick={guardarReorden} style={{border:"none",background:C.accent,color:"#1a1d27",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:800,cursor:"pointer",fontFamily:"inherit"}}>Guardar orden</button>
+                </>
+              )}
+            </div>
+          )}
           <div style={{display:"grid",gridTemplateColumns: window.innerWidth < 600 ? "repeat(4,1fr)" : "repeat(5,1fr)",gap: window.innerWidth < 600 ? 10 : 18,marginTop:10}}>
 
-            <ModTile onClick={() => setVista("lista")} label="Órdenes" badge={homeVencidas} badgeColor="#c0392b"
+            <ModTile order={ordHome("lista")} reordenando={reordm} dnd={dndFor("lista")} onClick={() => setVista("lista")} label="Órdenes" badge={homeVencidas} badgeColor="#c0392b"
               stat={homeVencenHoy>0 ? <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeVencenHoy} vencen hoy</span>
                   : homeVencidas>0 ? <span style={{color:"#c0392b",fontWeight:700}}>🔴 {homeVencidas} vencidas</span>
                   : <span style={{color:"#4caf7d",fontWeight:700}}>✅ Sin atrasos</span>}>
@@ -9839,7 +9945,7 @@ const cancelar = async (id) => {
               </svg>
             </ModTile>
 
-            <ModTile onClick={() => setVista("calendario")} label="Calendario"
+            <ModTile order={ordHome("calendario")} reordenando={reordm} dnd={dndFor("calendario")} onClick={() => setVista("calendario")} label="Calendario"
               stat={<span style={{color:C.muted}}>{homeEntregasSemana>0 ? homeEntregasSemana+" esta semana" : (homeProxima ? "Próx. "+homeProxima : "Sin entregas")}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gCal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#3aa0ff"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
@@ -9859,7 +9965,7 @@ const cancelar = async (id) => {
               </svg>
             </ModTile>
 
-            <ModTile onClick={() => setVista("dashboard")} label="Indicadores"
+            <ModTile order={ordHome("dashboard")} reordenando={reordm} dnd={dndFor("dashboard")} onClick={() => setVista("dashboard")} label="Indicadores"
               stat={homeCumplimiento!==null ? <span style={{color: homeCumplimiento>=95?"#4caf7d":homeCumplimiento>=90?"#f5a623":"#c0392b",fontWeight:700}}>{homeCumplimiento}% cumpl.</span> : <span style={{color:C.muted}}>Sin datos</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gInd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5bd49a"/><stop offset="1" stopColor="#2e9e6b"/></linearGradient></defs>
@@ -9871,7 +9977,7 @@ const cancelar = async (id) => {
               </svg>
             </ModTile>
 
-            <ModTile onClick={() => setVista("kanban")} label="Tablero"
+            <ModTile order={ordHome("kanban")} reordenando={reordm} dnd={dndFor("kanban")} onClick={() => setVista("kanban")} label="Tablero"
               stat={<span style={{color:C.muted}}>{homeActivasCount} activa{homeActivasCount===1?"":"s"}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gTab" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c084fc"/><stop offset="1" stopColor="#7c3aed"/></linearGradient></defs>
@@ -9888,7 +9994,7 @@ const cancelar = async (id) => {
               </svg>
             </ModTile>
 
-            <ModTile onClick={() => setVista("carga")} label="Bordadores" badge={homeSinAsignar} badgeColor="#f57c00"
+            <ModTile order={ordHome("carga")} reordenando={reordm} dnd={dndFor("carga")} onClick={() => setVista("carga")} label="Bordadores" badge={homeSinAsignar} badgeColor="#f57c00"
               stat={homeSinAsignar>0 ? <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeSinAsignar} sin asignar</span> : <span style={{color:C.muted}}>{bordadores.length} bordador{bordadores.length===1?"":"es"}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gBor" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#2dd4bf"/><stop offset="1" stopColor="#0d9488"/></linearGradient></defs>
@@ -9900,7 +10006,7 @@ const cancelar = async (id) => {
             </ModTile>
 
             {puedeEditarSeguimiento && (
-            <ModTile onClick={() => setVista("rutas")} label="Rutas"
+            <ModTile order={ordHome("rutas")} reordenando={reordm} dnd={dndFor("rutas")} onClick={() => setVista("rutas")} label="Rutas"
               stat={<span style={{color:C.muted}}>{rutas.length>0 ? rutas.length+" registrada"+(rutas.length===1?"":"s") : "Crear ruta"}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gRut" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#818cf8"/><stop offset="1" stopColor="#4f46e5"/></linearGradient></defs>
@@ -9917,7 +10023,7 @@ const cancelar = async (id) => {
             )}
 
             {puedeEditarSeguimiento && (
-            <ModTile onClick={() => setVista("remisiones")} label="Remisiones"
+            <ModTile order={ordHome("remisiones")} reordenando={reordm} dnd={dndFor("remisiones")} onClick={() => setVista("remisiones")} label="Remisiones"
               stat={<span style={{color:C.muted}}>{(() => { const n = remisiones.filter(x => resumenRemision(x).estado !== "devuelta").length; return n>0 ? n+" en préstamo" : (remisiones.length>0 ? "Todo en bodega" : "Crear remisión"); })()}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gRem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#2dd4bf"/><stop offset="1" stopColor="#0d9488"/></linearGradient></defs>
@@ -9933,7 +10039,7 @@ const cancelar = async (id) => {
             )}
 
             {puedeEditarSeguimiento && (
-            <ModTile onClick={() => setVista("arreglos")} label="Arreglos"
+            <ModTile order={ordHome("arreglos")} reordenando={reordm} dnd={dndFor("arreglos")} onClick={() => setVista("arreglos")} label="Arreglos"
               stat={<span style={{color:C.muted}}>{(() => { const ab = arreglos.filter(x => x.estatus==="pendiente"||x.estatus==="proceso").length; return ab>0 ? ab+" en proceso" : (arreglos.length>0 ? "Al día" : "Crear orden"); })()}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gArr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c084fc"/><stop offset="1" stopColor="#7c3aed"/></linearGradient></defs>
@@ -9948,7 +10054,7 @@ const cancelar = async (id) => {
             )}
 
             {puedeEditarSeguimiento && (
-            <ModTile onClick={() => setVista("proveedores")} label="Proveedores"
+            <ModTile order={ordHome("proveedores")} reordenando={reordm} dnd={dndFor("proveedores")} onClick={() => setVista("proveedores")} label="Proveedores"
               stat={<span style={{color:C.muted}}>Evaluación mensual</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gProv" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#38bdf8"/><stop offset="1" stopColor="#0369a1"/></linearGradient></defs>
@@ -9963,7 +10069,7 @@ const cancelar = async (id) => {
             )}
 
             {(rol === "admin" || puedeEditarSeguimiento) && (
-            <ModTile onClick={() => setVista("caja")} label="Caja chica"
+            <ModTile order={ordHome("caja")} reordenando={reordm} dnd={dndFor("caja")} onClick={() => setVista("caja")} label="Caja chica"
               stat={<span style={{color:C.muted}}>Control de gastos</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gCaja" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#34d399"/><stop offset="1" stopColor="#059669"/></linearGradient></defs>
@@ -9979,7 +10085,7 @@ const cancelar = async (id) => {
             )}
 
             {(rol === "admin" || puedeEditarSeguimiento) && (
-            <ModTile onClick={() => setVista("paqueteria")} label="Paquetería"
+            <ModTile order={ordHome("paqueteria")} reordenando={reordm} dnd={dndFor("paqueteria")} onClick={() => setVista("paqueteria")} label="Paquetería"
               stat={<span style={{color:C.muted}}>Etiquetas de envío</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gPaq" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#f0a35e"/><stop offset="1" stopColor="#d97706"/></linearGradient></defs>
@@ -9995,7 +10101,7 @@ const cancelar = async (id) => {
             )}
 
             {rol === "admin" && (
-            <ModTile onClick={() => setVista("pagos")} label="Pago bordadores"
+            <ModTile order={ordHome("pagos")} reordenando={reordm} dnd={dndFor("pagos")} onClick={() => setVista("pagos")} label="Pago bordadores"
               stat={<span style={{color:C.muted}}>{(() => { const sp = logosCatalogo.filter(l => l.precio===null||l.precio===undefined||l.precio==="").length; return sp>0 ? sp+" sin precio" : "Liquidación mensual"; })()}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gPago" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#fbbf24"/><stop offset="1" stopColor="#d97706"/></linearGradient></defs>
@@ -10007,7 +10113,7 @@ const cancelar = async (id) => {
             )}
 
             {puedeEditarSeguimiento && (
-            <ModTile onClick={() => setVista("bonos")} label="Bonos"
+            <ModTile order={ordHome("bonos")} reordenando={reordm} dnd={dndFor("bonos")} onClick={() => setVista("bonos")} label="Bonos"
               stat={<span style={{color:C.muted}}>{(() => { const ab = bonos.filter(b => b.estado !== "cerrado").length; return ab>0 ? ab+" abierto"+(ab===1?"":"s") : (bonos.length>0 ? "Al día" : "Calcular mes"); })()}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gBono" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#34d399"/><stop offset="1" stopColor="#059669"/></linearGradient></defs>
@@ -10023,7 +10129,7 @@ const cancelar = async (id) => {
             )}
 
             {(rol === "admin" || rol === "ventas") && (
-            <ModTile onClick={() => setVista("clasificacion")} label="Clasificación"
+            <ModTile order={ordHome("clasificacion")} reordenando={reordm} dnd={dndFor("clasificacion")} onClick={() => setVista("clasificacion")} label="Clasificación"
               stat={<span style={{color:C.muted}}>Clientes A / B / C</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gClasif" x1="0" y1="0" x2="1" y2="1">
@@ -10038,7 +10144,7 @@ const cancelar = async (id) => {
             )}
 
             {rol === "admin" && (
-            <ModTile onClick={() => setVista("checador")} label="Checador"
+            <ModTile order={ordHome("checador")} reordenando={reordm} dnd={dndFor("checador")} onClick={() => setVista("checador")} label="Checador"
               stat={<span style={{color:C.muted}}>{checadorRoster.length>0 ? checadorRoster.length+" empleado"+(checadorRoster.length===1?"":"s") : "Configurar"}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gChk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#60a5fa"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
@@ -10052,7 +10158,7 @@ const cancelar = async (id) => {
             )}
 
             {rol === "admin" && (
-            <ModTile onClick={() => setVista("cfgsemaforo")} label="Config. semáforo"
+            <ModTile order={ordHome("cfgsemaforo")} reordenando={reordm} dnd={dndFor("cfgsemaforo")} onClick={() => setVista("cfgsemaforo")} label="Config. semáforo"
               stat={<span style={{color:C.muted}}>Capacidad diaria</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gCfgSem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#f5a623"/><stop offset="1" stopColor="#c0392b"/></linearGradient></defs>
@@ -10066,7 +10172,7 @@ const cancelar = async (id) => {
             )}
 
             {rol === "admin" && (
-            <ModTile onClick={() => setVista("usuarios")} label="Usuarios"
+            <ModTile order={ordHome("usuarios")} reordenando={reordm} dnd={dndFor("usuarios")} onClick={() => setVista("usuarios")} label="Usuarios"
               stat={<span style={{color:C.muted}}>Permisos y accesos</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gUsr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#a78bfa"/><stop offset="1" stopColor="#7c3aed"/></linearGradient></defs>
@@ -10080,7 +10186,7 @@ const cancelar = async (id) => {
             )}
 
             {puedeEditarSeguimiento && (
-            <ModTile onClick={() => window.open(window.location.origin + "/?checador=1", "_blank")} label="Abrir checador"
+            <ModTile order={ordHome("abrir-checador")} reordenando={reordm} dnd={dndFor("abrir-checador")} onClick={() => window.open(window.location.origin + "/?checador=1", "_blank")} label="Abrir checador"
               stat={<span style={{color:C.muted}}>Para checar</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
                 <defs><linearGradient id="gChkS" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#60a5fa"/><stop offset="1" stopColor="#2563eb"/></linearGradient></defs>
@@ -10270,6 +10376,7 @@ const cancelar = async (id) => {
       {vista === "proveedores" && puedeEditarSeguimiento && (
         <Proveedores
           esAdmin={rol === "admin"}
+          ordenes={ordenes}
           onImprimir={(pl)=>setProvPdf(pl)}
         />
       )}

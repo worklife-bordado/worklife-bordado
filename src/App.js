@@ -3332,6 +3332,7 @@ const RUTA_TIPOS = [
   { v:"B", lbl:"Llevar a externo", col:"#5c8fe0" },
   { v:"R", lbl:"Recoger de externo", col:"#a855f7" },
   { v:"D", lbl:"Devolución", col:"#f57c00" },
+  { v:"C", lbl:"🍴 Comida", col:"#e67e22" },
 ];
 function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
@@ -3386,6 +3387,9 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
   const setP = (i,k,v) => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas: p.paradas.map((x,idx)=> idx===i?{...x,[k]:v}:x) }));
   const quitarP = (i) => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas: p.paradas.filter((_,idx)=>idx!==i) }));
   const addActividad = () => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas:[...p.paradas, nuevaParada("R")] }));
+  // Hora de comida como actividad: el chofer la ordena y la marca, no la pasa por alto.
+  // Es tipo "C" → NO cuenta en entregas ni externos, así que no afecta su bono.
+  const agregarComida = () => setR(p => p.estado==="cerrada" ? p : ({ ...p, paradas:[...p.paradas, { ...nuevaParada("C"), cliente:"Hora de comida" }] }));
   const addEntregasHoy = () => setR(p => {
     if (p.estado==="cerrada") return p;
     const yaIds = new Set(p.paradas.map(x=>x.ordenId).filter(Boolean));
@@ -3632,6 +3636,7 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
       <div style={{display:"flex", gap:8, flexWrap:"wrap", marginBottom:14}}>
         <button onClick={addEntregasHoy} style={{border:"none", borderRadius:9, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"10px 16px", fontSize:13, fontWeight:800, fontFamily:"inherit"}}>+ Agregar entregas de hoy</button>
         <button onClick={addActividad} style={{border:"1px solid "+C.border, borderRadius:9, cursor:"pointer", background:C.surface, color:C.text, padding:"10px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>+ Agregar actividad</button>
+        <button onClick={agregarComida} style={{border:"1px solid #e67e22", borderRadius:9, cursor:"pointer", background:"#e67e2222", color:"#e67e22", padding:"10px 16px", fontSize:13, fontWeight:700, fontFamily:"inherit"}}>🍴 Agregar hora de comida</button>
       </div>
       )}
       {r.paradas.length === 0 && <div style={{color:C.muted, fontSize:13, padding:"10px 0 16px"}}>Sin paradas todavía. Usa los botones de arriba para agregarlas.</div>}

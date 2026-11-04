@@ -47,11 +47,11 @@ function urlMapsOrdenChofer(paradas) {
     return { url: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(conOrden[0]), n: 1, total: 1 };
   }
   const usadas = conOrden.slice(0, 10);
-  const destino = usadas[usadas.length - 1];
-  const escalas = usadas.slice(0, -1);
+  // Formato de "ruta por segmentos" (/maps/dir//A/B/C): la app de Google Maps en el
+  // celular SÍ respeta TODAS las paradas con este formato. El formato ?waypoints solo
+  // se comportaba bien en computadora. El origen vacío (doble "/") = ubicación actual.
   return {
-    url: "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(destino)
-      + (escalas.length ? "&waypoints=" + escalas.map(encodeURIComponent).join("%7C") : ""),
+    url: "https://www.google.com/maps/dir/" + ["", ...usadas].map(encodeURIComponent).join("/"),
     n: usadas.length, total: conOrden.length,
   };
 }
@@ -7525,11 +7525,9 @@ function RutaMovil(){
       return { url: "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(dirs[0]), n: 1, total: 1 };
     }
     const usadas = dirs.slice(0, 10);
-    const destino = usadas[usadas.length - 1];
-    const escalas = usadas.slice(0, -1);
+    // Ruta por segmentos (/maps/dir//A/B/C): el celular respeta todas las paradas.
     return {
-      url: "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + encodeURIComponent(destino)
-        + (escalas.length ? "&waypoints=" + escalas.map(encodeURIComponent).join("%7C") : ""),
+      url: "https://www.google.com/maps/dir/" + ["", ...usadas].map(encodeURIComponent).join("/"),
       n: usadas.length, total: dirs.length,
     };
   };
@@ -7618,8 +7616,9 @@ function RutaMovil(){
     if (estatus === "inc") { setPendInc(idx); abrirObs(idx, actual.obs); return; }
     try {
       let geo = null;
-      // Entrega a cliente (tipo E) marcada como realizada: captura ubicación GPS como evidencia.
-      if (estatus === "ok" && actual.tipo === "E") { setGpsMsg("📍 Obteniendo ubicación…"); geo = await obtenerGPS(); setGpsMsg(""); }
+      // CUALQUIER parada marcada como realizada captura ubicación GPS como evidencia
+      // (antes solo las entregas a cliente tipo "E").
+      if (estatus === "ok") { setGpsMsg("📍 Obteniendo ubicación…"); geo = await obtenerGPS(); setGpsMsg(""); }
       const r = await llamar("marcar", { rutaId: ruta.id, idx, estatus, ...(geo ? { lat: geo.lat, lng: geo.lng, acc: geo.acc } : {}) });
       setRuta(p => ({ ...p, paradas: p.paradas.map(x => x.idx === idx ? { ...x, ...r.parada } : x) }));
       setPendInc(pi => pi === idx ? null : pi);

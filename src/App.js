@@ -363,6 +363,34 @@ function cargarXLSX() {
   });
 }
 
+// Descarga robusta de un libro XLSX. En la PWA instalada (escritorio o móvil) la descarga
+// por <a download> de un blob suele quedar bloqueada o no abrir ningún diálogo; por eso:
+//  1) si el navegador soporta compartir archivos (navigator.canShare), abre la hoja de
+//     "Compartir / Guardar en Archivos" — funciona en la app instalada y en móvil;
+//  2) si no, cae a la descarga clásica por ancla (navegador normal de escritorio).
+async function descargarXLSX(wb, filename) {
+  const XLSX = await cargarXLSX();
+  const bytes = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  try {
+    if (typeof File !== "undefined" && navigator.canShare) {
+      const file = new File([blob], filename, { type: blob.type });
+      if (navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: filename }); return true; }
+        catch (e) { if (e && e.name === "AbortError") return false; } // el usuario canceló
+      }
+    }
+  } catch (e) { /* sin soporte de compartir: baja por ancla */ }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { try { document.body.removeChild(a); } catch (_) {} URL.revokeObjectURL(url); }, 1500);
+  return true;
+}
+
 // ── Seguimiento público para el cliente ─────────────────────────────────────
 function genToken() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -4947,7 +4975,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
         ws3["!cols"] = [{ wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 15 }, { wch: 18 }, { wch: 26 }];
         XLSX.utils.book_append_sheet(wb, ws3, "Cierres mensuales");
       }
-      XLSX.writeFile(wb, "CajaChica_" + expDesde + "_a_" + expHasta + ".xlsx");
+      await descargarXLSX(wb, "CajaChica_" + expDesde + "_a_" + expHasta + ".xlsx");
     } catch (e) { alert("No se pudo exportar: " + (e.message || e)); }
     setExportando(false);
   };
@@ -5408,9 +5436,38 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       ws["!cols"] = [{wch:36},{wch:14},{wch:16},{wch:12}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Logos sin precio");
-      XLSX.writeFile(wb, "Logos_sin_precio_" + mes + ".xlsx");
+      await descargarXLSX(wb, "Logos_sin_precio_" + mes + ".xlsx");
     } catch(e) { alert("No se pudo exportar: " + (e.message || e)); }
     setExportandoSP(false);
+  };
+
+  // Exporta TODO el catálogo (Logo | Técnica | Precio) en el mismo formato que lee el
+  // importador, para editar precios en masa y volver a importarlo con el mismo botón.
+  // Una fila por precio: la general (técnica vacía) y una por cada precio por técnica.
+  // Un logo sin ningún precio sale con una fila base vacía para poder capturarlo.
+  const [exportandoCat, setExportandoCat] = useState(false);
+  const exportarCatalogo = async () => {
+    const cat = (catalogoLogos||[]);
+    if (!cat.length) { alert("El catálogo está vacío."); return; }
+    setExportandoCat(true);
+    try {
+      const XLSX = await cargarXLSX();
+      const filas = [];
+      cat.slice().sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||"")).forEach(l => {
+        const nombre = l.nombre || "";
+        const tieneGen = !(l.precio===null||l.precio===undefined||l.precio==="");
+        const precios = (l.precios && typeof l.precios==="object") ? l.precios : {};
+        const tecs = Object.keys(precios).filter(t => { const v=precios[t]; return !(v===null||v===undefined||v===""); });
+        if (tieneGen || tecs.length===0) filas.push({ "Logo": nombre, "Técnica": "", "Precio": tieneGen ? Number(l.precio) : "" });
+        tecs.sort((a,b)=>a.localeCompare(b)).forEach(t => filas.push({ "Logo": nombre, "Técnica": t, "Precio": Number(precios[t]) }));
+      });
+      const ws = XLSX.utils.json_to_sheet(filas, { header: ["Logo","Técnica","Precio"] });
+      ws["!cols"] = [{wch:38},{wch:16},{wch:12}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Catálogo de precios");
+      await descargarXLSX(wb, "Catalogo_bordadores_" + new Date().toISOString().slice(0,10) + ".xlsx");
+    } catch(e) { alert("No se pudo exportar: " + (e.message || e)); }
+    setExportandoCat(false);
   };
 
   const subtotalLinea = (l) => (Number(l.precio)||0) * (parseInt(l.cantidad)||0);
@@ -5465,8 +5522,9 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       <div style={{marginBottom:14}}>
         <button onClick={()=>setVerCat(v=>!v)} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"8px 13px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:8}}>🏷️ {verCat?"Ocultar":"Ver / editar"} catálogo de precios ({(catalogoLogos||[]).length})</button>
         <input ref={fileXlsxRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={handleExcel}/>
+        <button disabled={exportandoCat} onClick={exportarCatalogo} style={{background:"transparent",border:"1px solid "+C.border,borderRadius:9,color:C.text,padding:"8px 13px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginRight:8,opacity:exportandoCat?0.6:1}}>{exportandoCat?"Generando…":"⬇️ Exportar catálogo a Excel"}</button>
         <button disabled={importando} onClick={()=>fileXlsxRef.current && fileXlsxRef.current.click()} style={{background:C.accent,border:"none",borderRadius:9,color:"#1a1d27",padding:"8px 13px",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:importando?0.6:1}}>{importando?"Importando…":"📥 Importar Excel"}</button>
-        <div style={{fontSize:11,color:C.muted,marginTop:6}}>El Excel debe tener dos columnas: <b style={{color:C.text}}>Logo</b> y <b style={{color:C.text}}>Precio</b> (con encabezados en la primera fila). Importar no borra precios existentes si la celda viene vacía.</div>
+        <div style={{fontSize:11,color:C.muted,marginTop:6}}>Flujo masivo: <b style={{color:C.text}}>Exporta</b> el catálogo, edita los precios en el Excel y vuelve a <b style={{color:C.text}}>Importar</b> el mismo archivo. Columnas: <b style={{color:C.text}}>Logo</b>, <b style={{color:C.text}}>Técnica</b> (opcional; vacía = precio general) y <b style={{color:C.text}}>Precio</b>. Importar solo da de alta o actualiza; nunca borra logos ni precios, y una celda de precio vacía se deja igual.</div>
         {verCat && (
           <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px",marginTop:8}}>
             <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",paddingBottom:10,marginBottom:10,borderBottom:"1px solid "+C.border}}>
@@ -7197,7 +7255,7 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
       XLSX.utils.book_append_sheet(wb, ws2, "Resumen");
       XLSX.utils.book_append_sheet(wb, ws1, "Detalle por día");
       const nombreArch = "Checador_" + desde + "_a_" + hasta + ".xlsx";
-      XLSX.writeFile(wb, nombreArch);
+      await descargarXLSX(wb, nombreArch);
     } catch (e) {
       alert("No se pudo exportar: " + (e.message || e));
     }

@@ -6080,6 +6080,22 @@ function calcColaborador(def, capturas, bonoMax){
   });
   return { filas, totalBono, esNA };
 }
+// Aplica al cálculo los valores "sugeridos por sistema" que NO se capturaron a mano,
+// con la misma regla del editor: se usa el auto cuando la captura está vacía y el KPI
+// es automático o el sistema sugiere "NA". Así un KPI auto-"NA" (p.ej. un chofer SIN
+// rutas este mes) SÍ se trata como NA y su peso se reparte entre los que sí aplican.
+function capsConAuto(def, capturas, autoCl){
+  capturas = capturas || {}; autoCl = autoCl || {};
+  const out = { ...capturas };
+  // Solo se aplica el "NA" sugerido (KPI que no aplica este mes): su peso se reparte
+  // entre los que sí aplican. Los valores automáticos NUMÉRICOS siguen requiriendo
+  // captura/confirmación, igual que hoy — no se tocan aquí.
+  (def.kpis || []).forEach(k => {
+    const val = out[k.id]; const av = autoCl[k.id];
+    if ((val==="" || val==null) && k.na && esNAval(av)) out[k.id] = av;
+  });
+  return out;
+}
 // Valores que la app puede pre-llenar automáticamente para un período "YYYY-MM"
 function piezasOrden(o){
   const prendas = (o && o.prendas) || [];
@@ -6694,7 +6710,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], arreglos 
           // los recibos de este período quedan inmunes a ediciones futuras de objetivos.
           payload.calcSnapshot = {};
           personasBono(p, choferes, kpiCfg).forEach(per => { const cl = per.cl; const d = per.def;
-            const c = calcColaborador(d, (p.capturas||{})[cl] || {}, 0);
+            const c = calcColaborador(d, capsConAuto(d, (p.capturas||{})[cl] || {}, auto[cl]), 0);
             payload.calcSnapshot[cl] = {
               filas: c.filas.map(f => ({ id:f.id, label:f.label, peso:f.peso, resultado:f.resultado, pago:f.pago, nivel:f.nivel, esNAfila:!!f.esNAfila })),
               umbrales: Object.fromEntries(d.kpis.filter(k => k.umbEf).map(k => [k.id, k.umbEf])),
@@ -6743,7 +6759,7 @@ function BonosModule({ bonos, salarios, ordenes, rutas, choferes = [], arreglos 
       <div style={{opacity: cerrado?0.6:1, pointerEvents: cerrado?"none":"auto"}}>
       {personasBono(p, choferes, kpiCfg).map(per => { const cl = per.cl;
         const def = per.def;
-        const caps = (p.capturas||{})[cl] || {};
+        const caps = capsConAuto(def, (p.capturas||{})[cl] || {}, auto[cl]);
         const bonoMax = bonoMaxDe(cl);
         const calc = esAdmin ? calcColaborador(def, caps, bonoMax) : null;
         return (

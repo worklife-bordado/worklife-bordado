@@ -3317,10 +3317,12 @@ function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministr
                 {l.ords.map(o=>{
                   const d = dias(o.fechaRequerida);
                   const uc = d===null ? null : (d<0 ? "#c0392b" : d<=3 ? "#f57c00" : null);
+                  const pz = piezasDe(o);
                   return (
                   <div key={o.id} onClick={()=>onSelectOrden(o.id)} style={{display:"flex",alignItems:"center",gap:10,background:C.card,border:"1px solid "+C.border,borderLeft:"4px solid "+(uc||C.border),borderRadius:9,padding:"9px 12px",marginBottom:6,cursor:"pointer",marginLeft:12}}>
                     <div style={{fontWeight:800,color:C.accent,fontSize:13.5}}>#{o.numero}</div>
                     <div style={{flex:1,color:C.text,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.cliente||"Sin cliente"}</div>
+                    <div title="Piezas de la orden" style={{fontSize:11,fontWeight:700,color:C.text,background:C.surface,border:"1px solid "+C.border,borderRadius:8,padding:"2px 8px",whiteSpace:"nowrap"}}>{pz} pz</div>
                     <div style={{fontSize:10.5,color:"#fff",background:etapaInfo(o.etapa).color,borderRadius:8,padding:"2px 8px",whiteSpace:"nowrap"}}>{etapaInfo(o.etapa).label}</div>
                     <div style={{color:uc||C.muted,fontSize:11,fontWeight:uc?700:400,whiteSpace:"nowrap"}}>{fmtF(o.fechaRequerida)}</div>
                   </div>
@@ -4975,7 +4977,7 @@ function CajaChica({ usuario, rol, movimientos, movChofer, cortes, onAgregarMov,
         ws3["!cols"] = [{ wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 15 }, { wch: 18 }, { wch: 26 }];
         XLSX.utils.book_append_sheet(wb, ws3, "Cierres mensuales");
       }
-      await descargarXLSX(wb, "CajaChica_" + expDesde + "_a_" + expHasta + ".xlsx");
+      XLSX.writeFile(wb, "CajaChica_" + expDesde + "_a_" + expHasta + ".xlsx");
     } catch (e) { alert("No se pudo exportar: " + (e.message || e)); }
     setExportando(false);
   };
@@ -5436,7 +5438,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       ws["!cols"] = [{wch:36},{wch:14},{wch:16},{wch:12}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Logos sin precio");
-      await descargarXLSX(wb, "Logos_sin_precio_" + mes + ".xlsx");
+      XLSX.writeFile(wb, "Logos_sin_precio_" + mes + ".xlsx");
     } catch(e) { alert("No se pudo exportar: " + (e.message || e)); }
     setExportandoSP(false);
   };
@@ -5465,7 +5467,7 @@ function PagoBordadores({ ordenes, catalogoLogos, onSetPrecioLogo, onGuardarLiqu
       ws["!cols"] = [{wch:38},{wch:16},{wch:12}];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Catálogo de precios");
-      await descargarXLSX(wb, "Catalogo_bordadores_" + new Date().toISOString().slice(0,10) + ".xlsx");
+      XLSX.writeFile(wb, "Catalogo_bordadores_" + new Date().toISOString().slice(0,10) + ".xlsx");
     } catch(e) { alert("No se pudo exportar: " + (e.message || e)); }
     setExportandoCat(false);
   };
@@ -7255,7 +7257,7 @@ function ChecadorAdmin({ roster, onGuardarRoster, publicUrl, usuario }){
       XLSX.utils.book_append_sheet(wb, ws2, "Resumen");
       XLSX.utils.book_append_sheet(wb, ws1, "Detalle por día");
       const nombreArch = "Checador_" + desde + "_a_" + hasta + ".xlsx";
-      await descargarXLSX(wb, nombreArch);
+      XLSX.writeFile(wb, nombreArch);
     } catch (e) {
       alert("No se pudo exportar: " + (e.message || e));
     }

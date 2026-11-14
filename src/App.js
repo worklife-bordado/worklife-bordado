@@ -3337,8 +3337,337 @@ function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministr
   );
 }
 
+// ── Cotizador de bordado (matriz de tarifas) ───────────────────────────────
+// Medidas fijas (rango de cm por el lado mayor, puntadas aprox. y escalera de
+// descuento). Los PRECIOS y porcentajes viven en `params` (editables por el admin
+// y guardados en config/tarifasBordado), con estos valores por defecto.
+const TB_MEDIDAS = [
+  { label:"Hasta 5 cm",   hasta:5,  punt:2500,  escalera:"chica",  uso:"Nombre, puño, manga chica, lateral de gorra" },
+  { label:"5.1 a 8 cm",   hasta:8,  punt:5000,  escalera:"chica",  uso:"Pecho de camisa o polo, frente de gorra" },
+  { label:"8.1 a 10 cm",  hasta:10, punt:7500,  escalera:"chica",  uso:"Pecho grande, frente de gorra grande, mandil" },
+  { label:"10.1 a 15 cm", hasta:15, punt:15000, escalera:"grande", uso:"Hombro o manga grande, pecho de chamarra" },
+  { label:"15.1 a 20 cm", hasta:20, punt:25000, escalera:"grande", uso:"Espalda chica, mochila, bolsa" },
+  { label:"20.1 a 25 cm", hasta:25, punt:40000, escalera:"grande", uso:"Espalda mediana" },
+  { label:"25.1 a 30 cm", hasta:30, punt:55000, escalera:"grande", uso:"Espalda completa" },
+];
+const TB_RANGOS = [
+  { min:1, label:"1–5" }, { min:6, label:"6–20" }, { min:21, label:"21–50" },
+  { min:51, label:"51–100" }, { min:101, label:"101–250" }, { min:251, label:"251+" },
+];
+const TB_SOBRE_DEF = [
+  { id:"relleno", label:"Relleno completo",             nota:"Logo cubierto 100% de puntada (tipo parche)" },
+  { id:"d3d",     label:"Bordado 3D (foam)",            nota:"Letras o formas en relieve; mejor en gorra" },
+  { id:"metal",   label:"Hilo metálico o neón",         nota:"Dorado, plateado, fosforescente u otro especial" },
+  { id:"colores", label:"Más de 6 colores",             nota:"Del 7.º color de hilo en adelante" },
+  { id:"gorra",   label:"Gorra, mochila o zona difícil",nota:"Gorra armada, bolsa, manga/pierna cosida, cuello" },
+  { id:"grueso",  label:"Material grueso o delicado",   nota:"Chamarra acolchada, piel, toalla, polar, malla" },
+];
+const TB_DEFAULTS = {
+  base:[28,42,55,85,130,190,250],
+  descChica:[0,0.10,0.22,0.32,0.40,0.45],
+  descGrande:[0,0.08,0.15,0.22,0.27,0.30],
+  sobre:{ relleno:0.40, d3d:0.35, metal:0.25, colores:0.15, gorra:0.15, grueso:0.20 },
+  urgente:0.25, ponchado:150, ponchadoDesde:21, prefDesc:0.40, minSolo:200, iva:0.16,
+};
+// Normaliza el doc de config a un objeto de parámetros completo (defaults si falta algo).
+function tbParamsEf(cfg){
+  cfg = cfg || {};
+  const arr = (a,d)=> (Array.isArray(a)&&a.length===d.length)? a.map(Number) : d.slice();
+  const num = (v,d)=> (v==null||v===""||isNaN(Number(v)))? d : Number(v);
+  const sobre = {}; TB_SOBRE_DEF.forEach(s=>{ sobre[s.id]= num(cfg.sobre&&cfg.sobre[s.id], TB_DEFAULTS.sobre[s.id]); });
+  return {
+    base: arr(cfg.base, TB_DEFAULTS.base),
+    descChica: arr(cfg.descChica, TB_DEFAULTS.descChica),
+    descGrande: arr(cfg.descGrande, TB_DEFAULTS.descGrande),
+    sobre,
+    urgente: num(cfg.urgente, TB_DEFAULTS.urgente),
+    ponchado: num(cfg.ponchado, TB_DEFAULTS.ponchado),
+    ponchadoDesde: num(cfg.ponchadoDesde, TB_DEFAULTS.ponchadoDesde),
+    prefDesc: num(cfg.prefDesc, TB_DEFAULTS.prefDesc),
+    minSolo: num(cfg.minSolo, TB_DEFAULTS.minSolo),
+    iva: num(cfg.iva, TB_DEFAULTS.iva),
+  };
+}
+function tbRangoIdx(piezas){ let idx=0; for(let i=0;i<TB_RANGOS.length;i++){ if(piezas>=TB_RANGOS[i].min) idx=i; } return idx; }
+function tbMedidaIdx(cm){ const n=Number(cm); if(!n||n<=0||n>30) return -1; for(let i=0;i<TB_MEDIDAS.length;i++){ if(n<=TB_MEDIDAS[i].hasta) return i; } return -1; }
+// Precio de tabla por pieza (con descuento por volumen y, si es Preferencial, su descuento).
+function tbPrecioTabla(P, medidaIdx, piezas, servicio){
+  const m = TB_MEDIDAS[medidaIdx]; if(!m) return null;
+  const desc = (m.escalera==="chica"?P.descChica:P.descGrande)[tbRangoIdx(piezas)] || 0;
+  let precio = Math.round(P.base[medidaIdx]*(1-desc));
+  if(servicio==="pref") precio = Math.round(precio*(1-P.prefDesc));
+  return precio;
+}
+
+function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
+  const P = params;
+  const [servicio,setServicio]=useState("solo");
+  const [piezas,setPiezas]=useState(30);
+  const [urgente,setUrgente]=useState(false);
+  const [logos,setLogos]=useState([{ ubic:"", cm:"", sobre:{}, nuevo:true }]);
+  const [verTarifas,setVerTarifas]=useState(false);
+  const [verParam,setVerParam]=useState(false);
+
+  const pzs = Math.max(0, parseInt(piezas)||0);
+  const setLogo=(i,patch)=> setLogos(ls=> ls.map((l,j)=> j===i?{...l,...patch}:l));
+  const toggleSobre=(i,id)=> setLogos(ls=> ls.map((l,j)=> j===i?{...l, sobre:{...l.sobre,[id]:!l.sobre[id]}}:l));
+  const addLogo=()=> setLogos(ls=> ls.length>=8?ls:[...ls,{ubic:"",cm:"",sobre:{},nuevo:true}]);
+  const delLogo=(i)=> setLogos(ls=> ls.length<=1?ls:ls.filter((_,j)=>j!==i));
+
+  const calc = logos.map(l=>{
+    const esc = String(l.cm).trim()!=="";
+    const mi = tbMedidaIdx(l.cm);
+    if(mi<0) return { cotizar: esc, mi:-1, tabla:null, unit:null, sub:0, ponch:0, sumSobre:0 };
+    const tabla = tbPrecioTabla(P, mi, pzs, servicio);
+    let sum = urgente? P.urgente:0;
+    TB_SOBRE_DEF.forEach(s=>{ if(l.sobre[s.id]) sum+=P.sobre[s.id]; });
+    const unit = Math.round(tabla*(1+sum));
+    const sub = unit*pzs;
+    const ponch = (l.nuevo && pzs>0 && pzs<P.ponchadoDesde)? P.ponchado:0;
+    return { cotizar:false, mi, tabla, sumSobre:sum, unit, sub, ponch };
+  });
+  const hayCotizar = calc.some(c=>c.cotizar);
+  const subtotalBordado = calc.reduce((s,c)=>s+c.sub,0);
+  const ponchadoTotal = calc.reduce((s,c)=>s+c.ponch,0);
+  const ajusteMin = (servicio==="solo" && subtotalBordado>0 && subtotalBordado<P.minSolo)? (P.minSolo-subtotalBordado):0;
+  const subAntesIVA = subtotalBordado + ajusteMin + ponchadoTotal;
+  const iva = Math.round(subAntesIVA*P.iva*100)/100;
+  const total = subAntesIVA + iva;
+  const precioPorPieza = calc.reduce((s,c)=> s+(c.unit||0),0);
+
+  const card={background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:"14px 16px",marginBottom:12};
+  const lbl={fontSize:12,color:C.muted,fontWeight:700,marginBottom:4};
+  const inp={background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,padding:"8px 10px",fontSize:14,outline:"none",fontFamily:"inherit"};
+  const pct=(x)=> Math.round(x*100)+"%";
+
+  return (
+    <div style={{maxWidth:820,margin:"0 auto",padding:"0 14px 40px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}>
+        <button onClick={onBack} style={{border:"none",background:"transparent",color:C.accent,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>← Inicio</button>
+        <div style={{fontSize:22,fontWeight:800,color:C.text,flex:1}}>🧮 Cotizador de bordado</div>
+      </div>
+      <div style={{color:C.muted,fontSize:12.5,marginBottom:14}}>Precios en <b style={{color:C.text}}>MXN antes de IVA</b>. El IVA se suma solo en el total. Cantidad = piezas del pedido que llevan ese mismo logo.</div>
+
+      {/* Datos del pedido */}
+      <div style={card}>
+        <div style={{display:"flex",gap:16,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div>
+            <div style={lbl}>Tipo de servicio</div>
+            <div style={{display:"flex",gap:6}}>
+              {[["solo","Solo bordado"],["pref","Preferencial"]].map(([v,t])=>(
+                <button key={v} onClick={()=>setServicio(v)} style={{border:"1px solid "+(servicio===v?C.accent:C.border),background:servicio===v?C.accent:C.surface,color:servicio===v?"#1a1d27":C.text,borderRadius:8,padding:"8px 12px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{t}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={lbl}>Piezas del pedido</div>
+            <input type="number" min="1" value={piezas} onChange={e=>setPiezas(e.target.value)} style={{...inp,width:110}}/>
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:13,color:C.text,fontWeight:700,paddingBottom:8}}>
+            <input type="checkbox" checked={urgente} onChange={e=>setUrgente(e.target.checked)} style={{width:17,height:17}}/>
+            Urgente (−72 h) <span style={{color:C.accent}}>+{pct(P.urgente)}</span>
+          </label>
+        </div>
+        {servicio==="pref" && <div style={{fontSize:11.5,color:C.muted,marginTop:8}}>Preferencial: nosotros vendemos la prenda. El bordado baja <b style={{color:C.text}}>{pct(P.prefDesc)}</b> vs. Solo bordado.</div>}
+      </div>
+
+      {/* Logos */}
+      {logos.map((l,i)=>{
+        const c=calc[i];
+        return (
+        <div key={i} style={card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontWeight:800,color:C.text,fontSize:15}}>Logo {i+1}</div>
+            {logos.length>1 && <button onClick={()=>delLogo(i)} style={{border:"1px solid #e06a6a66",background:"transparent",color:"#e06a6a",borderRadius:7,padding:"4px 9px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Quitar</button>}
+          </div>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:10}}>
+            <div style={{flex:"1 1 180px"}}>
+              <div style={lbl}>Ubicación (opcional)</div>
+              <input value={l.ubic} onChange={e=>setLogo(i,{ubic:e.target.value})} placeholder="Pecho izq., manga…" style={{...inp,width:"100%",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <div style={lbl}>Medida mayor (cm)</div>
+              <input type="number" min="0" step="0.5" value={l.cm} onChange={e=>setLogo(i,{cm:e.target.value})} placeholder="7" style={{...inp,width:100}}/>
+            </div>
+            <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:13,color:C.text,fontWeight:700,alignSelf:"flex-end",paddingBottom:8}}>
+              <input type="checkbox" checked={l.nuevo} onChange={e=>setLogo(i,{nuevo:e.target.checked})} style={{width:17,height:17}}/>
+              Logo nuevo (ponchado)
+            </label>
+          </div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:4}}>
+            {TB_SOBRE_DEF.map(s=>{
+              const on=!!l.sobre[s.id];
+              return (
+                <button key={s.id} title={s.nota} onClick={()=>toggleSobre(i,s.id)} style={{border:"1px solid "+(on?C.accent:C.border),background:on?C.accent+"22":C.surface,color:on?C.accent:C.muted,borderRadius:20,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{s.label} +{pct(P.sobre[s.id])}</button>
+              );
+            })}
+          </div>
+          <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+            {c.cotizar ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>Mide más de 30 cm → cotizar con producción</span>
+             : c.unit==null ? <span style={{color:C.muted,fontSize:13}}>Captura la medida del logo</span>
+             : <>
+                <span style={{fontSize:12,color:C.muted}}>{TB_MEDIDAS[c.mi].label} · tabla ${fmtMoney(c.tabla)}{c.sumSobre>0?` · +${pct(c.sumSobre)} sobreprecio`:""}</span>
+                <span style={{fontSize:15,fontWeight:800,color:C.text}}>${fmtMoney(c.unit)} <span style={{fontSize:12,color:C.muted,fontWeight:600}}>/ pza</span></span>
+               </>}
+          </div>
+        </div>
+        );
+      })}
+      <button onClick={addLogo} disabled={logos.length>=8} style={{border:"1px dashed "+C.border,background:C.surface,color:C.text,borderRadius:10,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",opacity:logos.length>=8?0.5:1,marginBottom:14}}>+ Agregar otro logo / ubicación</button>
+
+      {/* Resumen */}
+      <div style={{background:C.card,border:"1px solid "+C.accent+"66",borderLeft:"4px solid "+C.accent,borderRadius:14,padding:"16px 18px",marginBottom:14}}>
+        <div style={{fontWeight:800,color:C.text,fontSize:16,marginBottom:10}}>Resumen del pedido ({pzs} {pzs===1?"pieza":"piezas"})</div>
+        {[["Precio por pieza (todos los logos)", precioPorPieza],
+          ["Subtotal bordado", subtotalBordado],
+          ...(ajusteMin>0?[["Ajuste a pedido mínimo (Solo bordado)", ajusteMin]]:[]),
+          ["Ponchado", ponchadoTotal],
+          ["Subtotal antes de IVA", subAntesIVA],
+          ["IVA ("+pct(P.iva)+")", iva]].map(([t,v],k)=>(
+          <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:13.5,color:C.text,padding:"4px 0"}}>
+            <span style={{color:C.muted}}>{t}</span><span style={{fontWeight:700}}>${fmtMoney(v)}</span>
+          </div>
+        ))}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,paddingTop:10,borderTop:"1px solid "+C.border}}>
+          <span style={{fontSize:15,fontWeight:800,color:C.text}}>Total con IVA</span>
+          <span style={{fontSize:24,fontWeight:800,color:C.accent}}>${fmtMoney(total)}</span>
+        </div>
+        {hayCotizar && <div style={{fontSize:12,color:C.accent,marginTop:8,fontWeight:700}}>⚠️ Un logo mide más de 30 cm: pide precio a producción antes de cerrar.</div>}
+        {servicio==="solo" && <div style={{fontSize:11,color:C.muted,marginTop:8}}>Prenda del cliente: no respondemos por defectos de la tela. En prendas caras o delicadas, borda 1 pieza de prueba primero.</div>}
+      </div>
+
+      {/* Tabla de tarifas de referencia */}
+      <button onClick={()=>setVerTarifas(v=>!v)} style={{width:"100%",textAlign:"left",border:"1px solid "+C.border,background:C.surface,color:C.text,borderRadius:10,padding:"11px 14px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginBottom:verTarifas?8:14}}>📋 {verTarifas?"Ocultar":"Ver"} tabla de tarifas</button>
+      {verTarifas && [["solo","A. Solo bordado (el cliente trae la prenda)"],["pref","B. Preferencial (nosotros vendemos la prenda)"]].map(([sv,titulo])=>(
+        <div key={sv} style={{...card,overflowX:"auto"}}>
+          <div style={{fontWeight:800,color:C.text,fontSize:14,marginBottom:8}}>{titulo}</div>
+          <table style={{borderCollapse:"collapse",width:"100%",fontSize:12.5,minWidth:560}}>
+            <thead><tr>
+              <th style={{textAlign:"left",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>Medida</th>
+              {TB_RANGOS.map(r=><th key={r.min} style={{textAlign:"right",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>{r.label}</th>)}
+            </tr></thead>
+            <tbody>
+              {TB_MEDIDAS.map((m,mi)=>(
+                <tr key={mi}>
+                  <td style={{padding:"6px 8px",color:C.text,fontWeight:700,whiteSpace:"nowrap"}}>{m.label}</td>
+                  {TB_RANGOS.map((r,ri)=>(
+                    <td key={ri} style={{textAlign:"right",padding:"6px 8px",color:C.text}}>${fmtMoney(tbPrecioTabla(P,mi,r.min,sv))}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Precio por pieza y por logo, MXN antes de IVA. Más de 30 cm: cotizar con producción.</div>
+        </div>
+      ))}
+
+      {/* Editor de parámetros (solo admin) */}
+      {esAdmin && <ParamsBordado P={P} onGuardar={onGuardarParams} abierto={verParam} setAbierto={setVerParam} />}
+    </div>
+  );
+}
+
+// Editor de precios/porcentajes (solo admin). Guarda en config/tarifasBordado.
+function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
+  const toDraft=(P)=>({
+    base:P.base.slice(),
+    descChica:P.descChica.map(x=>Math.round(x*100)),
+    descGrande:P.descGrande.map(x=>Math.round(x*100)),
+    sobre:Object.fromEntries(TB_SOBRE_DEF.map(s=>[s.id,Math.round(P.sobre[s.id]*100)])),
+    urgente:Math.round(P.urgente*100), ponchado:P.ponchado, ponchadoDesde:P.ponchadoDesde,
+    prefDesc:Math.round(P.prefDesc*100), minSolo:P.minSolo, iva:Math.round(P.iva*100),
+  });
+  const [d,setD]=useState(toDraft(P));
+  const [guardando,setGuardando]=useState(false);
+  const [msg,setMsg]=useState("");
+  useEffect(()=>{ setD(toDraft(P)); }, [P]);
+  const setArr=(k,i,v)=> setD(p=>({...p,[k]:p[k].map((x,j)=>j===i?v:x)}));
+  const inp={background:C.bg,border:"1px solid "+C.border,borderRadius:7,color:C.text,padding:"6px 7px",fontSize:13,outline:"none",width:66,fontFamily:"inherit",textAlign:"right"};
+  const th={fontSize:11,color:C.muted,fontWeight:700,padding:"4px 6px",textAlign:"right"};
+  const guardar=async()=>{
+    setGuardando(true); setMsg("");
+    try{
+      await onGuardar({
+        base:d.base.map(Number),
+        descChica:d.descChica.map(x=>Number(x)/100),
+        descGrande:d.descGrande.map(x=>Number(x)/100),
+        sobre:Object.fromEntries(TB_SOBRE_DEF.map(s=>[s.id,Number(d.sobre[s.id])/100])),
+        urgente:Number(d.urgente)/100, ponchado:Number(d.ponchado), ponchadoDesde:Number(d.ponchadoDesde),
+        prefDesc:Number(d.prefDesc)/100, minSolo:Number(d.minSolo), iva:Number(d.iva)/100,
+      });
+      setMsg("✓ Precios guardados. Los vendedores ya los ven.");
+      setTimeout(()=>setMsg(""),3000);
+    }catch(e){ setMsg("✕ No se pudo guardar: "+(e.message||e)); }
+    setGuardando(false);
+  };
+  const card={background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:"14px 16px",marginBottom:12};
+  return (<>
+    <button onClick={()=>setAbierto(v=>!v)} style={{width:"100%",textAlign:"left",border:"1px solid "+C.border,background:C.surface,color:C.text,borderRadius:10,padding:"11px 14px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",marginTop:6,marginBottom:abierto?8:0}}>⚙️ {abierto?"Ocultar":"Editar precios"} (solo administrador)</button>
+    {abierto && (
+      <div style={card}>
+        <div style={{fontSize:12,color:C.muted,marginBottom:12}}>Todo en MXN antes de IVA. Los descuentos y sobreprecios se capturan en <b style={{color:C.text}}>%</b>. Al guardar, la tabla y el cotizador se recalculan y los vendedores ven los nuevos precios.</div>
+
+        <div style={{fontWeight:800,color:C.text,fontSize:13,marginBottom:6}}>Precio base por medida (1–5 pzas)</div>
+        <div style={{overflowX:"auto",marginBottom:14}}>
+          <table style={{borderCollapse:"collapse",minWidth:520}}><tbody>
+            {TB_MEDIDAS.map((m,i)=>(
+              <tr key={i}>
+                <td style={{padding:"4px 8px",fontSize:12.5,color:C.text,whiteSpace:"nowrap"}}>{m.label} <span style={{color:C.muted,fontSize:11}}>({m.escalera})</span></td>
+                <td style={{padding:"4px 6px",color:C.muted}}>$</td>
+                <td style={{padding:"4px 6px"}}><input type="number" value={d.base[i]} onChange={e=>setArr("base",i,e.target.value)} style={inp}/></td>
+              </tr>
+            ))}
+          </tbody></table>
+        </div>
+
+        <div style={{fontWeight:800,color:C.text,fontSize:13,marginBottom:6}}>Descuento por volumen (%)</div>
+        <div style={{overflowX:"auto",marginBottom:14}}>
+          <table style={{borderCollapse:"collapse",minWidth:560}}>
+            <thead><tr><th style={{...th,textAlign:"left"}}>Escalera</th>{TB_RANGOS.map(r=><th key={r.min} style={th}>{r.label}</th>)}</tr></thead>
+            <tbody>
+              {[["descChica","Chica (≤10 cm)"],["descGrande","Grande (>10 cm)"]].map(([k,t])=>(
+                <tr key={k}>
+                  <td style={{padding:"4px 8px",fontSize:12.5,color:C.text,whiteSpace:"nowrap"}}>{t}</td>
+                  {d[k].map((v,i)=>(
+                    <td key={i} style={{padding:"4px 4px"}}><input type="number" value={v} onChange={e=>setArr(k,i,e.target.value)} style={{...inp,width:52}}/></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{fontWeight:800,color:C.text,fontSize:13,marginBottom:6}}>Sobreprecios (%)</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:10,marginBottom:14}}>
+          {TB_SOBRE_DEF.map(s=>(
+            <label key={s.id} style={{display:"flex",alignItems:"center",gap:6,fontSize:12.5,color:C.text}}>
+              {s.label}<input type="number" value={d.sobre[s.id]} onChange={e=>setD(p=>({...p,sobre:{...p.sobre,[s.id]:e.target.value}}))} style={{...inp,width:52}}/>%
+            </label>
+          ))}
+          <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12.5,color:C.text}}>Urgente<input type="number" value={d.urgente} onChange={e=>setD(p=>({...p,urgente:e.target.value}))} style={{...inp,width:52}}/>%</label>
+        </div>
+
+        <div style={{fontWeight:800,color:C.text,fontSize:13,marginBottom:6}}>Ponchado, Preferencial, mínimo e IVA</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:14,marginBottom:14}}>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Ponchado $<input type="number" value={d.ponchado} onChange={e=>setD(p=>({...p,ponchado:e.target.value}))} style={inp}/></label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Ponchado gratis desde (pzas)<input type="number" value={d.ponchadoDesde} onChange={e=>setD(p=>({...p,ponchadoDesde:e.target.value}))} style={{...inp,width:52}}/></label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Descuento Preferencial<input type="number" value={d.prefDesc} onChange={e=>setD(p=>({...p,prefDesc:e.target.value}))} style={{...inp,width:52}}/>%</label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Pedido mínimo Solo bordado $<input type="number" value={d.minSolo} onChange={e=>setD(p=>({...p,minSolo:e.target.value}))} style={inp}/></label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>IVA<input type="number" value={d.iva} onChange={e=>setD(p=>({...p,iva:e.target.value}))} style={{...inp,width:52}}/>%</label>
+        </div>
+
+        <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <button disabled={guardando} onClick={guardar} style={{border:"none",background:C.accent,color:"#1a1d27",borderRadius:9,padding:"10px 18px",fontSize:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",opacity:guardando?0.6:1}}>{guardando?"Guardando…":"Guardar precios"}</button>
+          <button onClick={()=>setD(toDraft(tbParamsEf(null)))} style={{border:"1px solid "+C.border,background:C.surface,color:C.muted,borderRadius:9,padding:"10px 14px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Restaurar sugeridos</button>
+          {msg && <span style={{fontSize:12.5,fontWeight:700,color:msg[0]==="✓"?C.success:"#e06a6a"}}>{msg}</span>}
+        </div>
+      </div>
+    )}
+  </>);
+}
+
 // ── Ficha de módulo estilo Odoo (ícono + badge + etiqueta + mini-dato) ──────
-const HOME_TILES_ORDEN_DEF = ["lista","calendario","dashboard","kanban","carga","rutas","remisiones","arreglos","proveedores","caja","paqueteria","pagos","bonos","clasificacion","checador","cfgsemaforo","usuarios","abrir-checador"];
+const HOME_TILES_ORDEN_DEF = ["lista","calendario","dashboard","kanban","carga","rutas","remisiones","arreglos","proveedores","caja","paqueteria","pagos","cotizador","bonos","clasificacion","checador","cfgsemaforo","usuarios","abrir-checador"];
 function ModTile({ onClick, children, label, stat, badge, badgeColor, order, reordenando, dnd }) {
   const mob = typeof window !== "undefined" && window.innerWidth < 600;
   return (
@@ -8648,6 +8977,14 @@ function AppInner() {
   const guardarReorden = async () => { const nuevo = ordenDraft || ordenHome; try { await setDoc(doc(db,"config","homeOrden"), { orden: nuevo, actualizadoPor: usuario?.email, actualizado: new Date().toISOString() }, {merge:true}); setOrdenHome(nuevo); } catch(e){ alert("No se pudo guardar el orden: "+e.message); } setReordm(false); setOrdenDraft(null); };
   const cancelarReorden = () => { setReordm(false); setOrdenDraft(null); };
   const [liquidaciones, setLiquidaciones] = useState([]);
+  // Parámetros del cotizador de bordado (config/tarifasBordado). Se leen bajo demanda
+  // al abrir el módulo (1 lectura); el admin los edita y los vendedores ven lo guardado.
+  const [tbCfg, setTbCfg] = useState(null);
+  const tbParams = tbParamsEf(tbCfg);
+  const guardarTbParams = async (obj) => {
+    await setDoc(doc(db, "config", "tarifasBordado"), { ...obj, actualizado: new Date().toISOString(), actualizadoPor: usuario?.email || "" }, { merge: true });
+    setTbCfg(obj);
+  };
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);
   const [cajaCortes, setCajaCortes] = useState([]);
@@ -8851,6 +9188,11 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
   useEffect(() => {
     (async () => { try { const cfg = await getDoc(doc(db, "config", "semaforoCfg")); setCapSemaforo(cfg.exists() ? cfg.data() : {}); } catch (e) { setCapSemaforo({}); } })();
   }, []);
+  // Parámetros del cotizador de bordado: se leen la primera vez que se abre el módulo.
+  useEffect(() => {
+    if (vista !== "cotizador" || tbCfg !== null) return;
+    (async () => { try { const cfg = await getDoc(doc(db, "config", "tarifasBordado")); setTbCfg(cfg.exists() ? cfg.data() : {}); } catch (e) { setTbCfg({}); } })();
+  }, [vista, tbCfg]);
   // Semáforo REACTIVO: recalcula la cola desde las `ordenes` en memoria y persiste el valor
   // SOLO si cambió. Antes esto era imperativo (al liberar / mover a calidad / guardar capacidad)
   // y se "saltaba" si la cadena de guardado fallaba, dejando la cola congelada. Ahora, en cuanto
@@ -10190,6 +10532,23 @@ const cancelar = async (id) => {
             </ModTile>
             )}
 
+            {(rol === "admin" || rol === "ventas") && (
+            <ModTile order={ordHome("cotizador")} reordenando={reordm} dnd={dndFor("cotizador")} onClick={() => setVista("cotizador")} label="Cotizador bordado"
+              stat={<span style={{color:C.muted}}>Precio al instante</span>}>
+              <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
+                <defs><linearGradient id="gCot" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5eead4"/><stop offset="1" stopColor="#0d9488"/></linearGradient></defs>
+                <rect x="0" y="0" width="88" height="88" rx="20" fill="url(#gCot)"/>
+                <rect x="26" y="20" width="36" height="48" rx="6" fill="#fff" fillOpacity="0.95"/>
+                <rect x="31" y="25" width="26" height="10" rx="2" fill="#0d9488"/>
+                <g fill="#0d9488">
+                  <circle cx="35" cy="45" r="2.6"/><circle cx="44" cy="45" r="2.6"/><circle cx="53" cy="45" r="2.6"/>
+                  <circle cx="35" cy="54" r="2.6"/><circle cx="44" cy="54" r="2.6"/><circle cx="53" cy="54" r="2.6"/>
+                  <circle cx="35" cy="63" r="2.6"/><circle cx="44" cy="63" r="2.6"/><circle cx="53" cy="63" r="2.6"/>
+                </g>
+              </svg>
+            </ModTile>
+            )}
+
             {puedeEditarSeguimiento && (
             <ModTile order={ordHome("bonos")} reordenando={reordm} dnd={dndFor("bonos")} onClick={() => setVista("bonos")} label="Bonos"
               stat={<span style={{color:C.muted}}>{(() => { const ab = bonos.filter(b => b.estado !== "cerrado").length; return ab>0 ? ab+" abierto"+(ab===1?"":"s") : (bonos.length>0 ? "Al día" : "Calcular mes"); })()}</span>}>
@@ -10482,6 +10841,17 @@ const cancelar = async (id) => {
           onRenombrarLogo={renombrarLogo}
           onBorrarLogo={borrarLogo}
         />
+      )}
+
+      {vista === "cotizador" && (rol === "admin" || rol === "ventas") && (
+        <div style={{padding:"18px 0"}}>
+          <CotizadorBordado
+            esAdmin={rol === "admin"}
+            params={tbParams}
+            onGuardarParams={guardarTbParams}
+            onBack={() => setVista("home")}
+          />
+        </div>
       )}
 
       {vista === "paqueteria" && (rol === "admin" || rol === "seguimiento") && (

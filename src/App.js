@@ -3341,15 +3341,19 @@ function CargaBordador({ ordenes, onBack, onSelectOrden, puedeAdmin, onAdministr
 // Medidas fijas (rango de cm por el lado mayor, puntadas aprox. y escalera de
 // descuento). Los PRECIOS y porcentajes viven en `params` (editables por el admin
 // y guardados en config/tarifasBordado), con estos valores por defecto.
+// La fila se elige por ÁREA del logo (ancho × alto, en cm²), porque las puntadas —lo que
+// cuesta en máquina e hilo— dependen de la superficie, no del lado mayor. Si el logo ya
+// está ponchado, se puede capturar las puntadas reales y se elige la fila con ellas.
 const TB_MEDIDAS = [
-  { label:"Hasta 5 cm",   hasta:5,  punt:2500,  escalera:"chica",  uso:"Nombre, puño, manga chica, lateral de gorra" },
-  { label:"5.1 a 8 cm",   hasta:8,  punt:5000,  escalera:"chica",  uso:"Pecho de camisa o polo, frente de gorra" },
-  { label:"8.1 a 10 cm",  hasta:10, punt:7500,  escalera:"chica",  uso:"Pecho grande, frente de gorra grande, mandil" },
-  { label:"10.1 a 15 cm", hasta:15, punt:15000, escalera:"grande", uso:"Hombro o manga grande, pecho de chamarra" },
-  { label:"15.1 a 20 cm", hasta:20, punt:25000, escalera:"grande", uso:"Espalda chica, mochila, bolsa" },
-  { label:"20.1 a 25 cm", hasta:25, punt:40000, escalera:"grande", uso:"Espalda mediana" },
-  { label:"25.1 a 30 cm", hasta:30, punt:55000, escalera:"grande", uso:"Espalda completa" },
+  { label:"Hasta 20 cm²",    desdeCm2:0,   hastaCm2:20,  puntDesde:0,     puntHasta:2500,  escalera:"chica",  ej:"10×2, 5×4, nombres" },
+  { label:"20.1 a 40 cm²",   desdeCm2:20,  hastaCm2:40,  puntDesde:2500,  puntHasta:5000,  escalera:"chica",  ej:"10×4, 8×5, pecho de polo" },
+  { label:"40.1 a 60 cm²",   desdeCm2:40,  hastaCm2:60,  puntDesde:5000,  puntHasta:7500,  escalera:"chica",  ej:"10×6, 8×7, pecho grande, gorra" },
+  { label:"60.1 a 125 cm²",  desdeCm2:60,  hastaCm2:125, puntDesde:7500,  puntHasta:15000, escalera:"grande", ej:"12×10, 15×8, hombro, pecho de chamarra" },
+  { label:"125.1 a 210 cm²", desdeCm2:125, hastaCm2:210, puntDesde:15000, puntHasta:25000, escalera:"grande", ej:"20×10, 15×14, espalda chica" },
+  { label:"210.1 a 330 cm²", desdeCm2:210, hastaCm2:330, puntDesde:25000, puntHasta:40000, escalera:"grande", ej:"20×16, 25×13, espalda mediana" },
+  { label:"330.1 a 460 cm²", desdeCm2:330, hastaCm2:460, puntDesde:40000, puntHasta:55000, escalera:"grande", ej:"30×15, 25×18, espalda completa" },
 ];
+const TB_MAX_CM2 = 460, TB_MAX_PUNT = 55000;
 const TB_RANGOS = [
   { min:1, label:"1–5" }, { min:6, label:"6–20" }, { min:21, label:"21–50" },
   { min:51, label:"51–100" }, { min:101, label:"101–250" }, { min:251, label:"251+" },
@@ -3367,7 +3371,9 @@ const TB_DEFAULTS = {
   descChica:[0,0.10,0.22,0.32,0.40,0.45],
   descGrande:[0,0.08,0.15,0.22,0.27,0.30],
   sobre:{ relleno:0.40, d3d:0.35, metal:0.25, colores:0.15, gorra:0.15, grueso:0.20 },
-  urgente:0.25, ponchado:150, ponchadoDesde:21, prefDesc:0.40, minSolo:200, iva:0.16,
+  urgente:0.25, ponchado:150, ponchadoDesde:21,
+  prefDesc:0.40, prefDescVol:0.25, prefVolDesde:51, // Preferencial: 40% en pedidos chicos, 25% desde 51 pzas
+  minSolo:200, iva:0.16,
 };
 // Normaliza el doc de config a un objeto de parámetros completo (defaults si falta algo).
 function tbParamsEf(cfg){
@@ -3384,18 +3390,34 @@ function tbParamsEf(cfg){
     ponchado: num(cfg.ponchado, TB_DEFAULTS.ponchado),
     ponchadoDesde: num(cfg.ponchadoDesde, TB_DEFAULTS.ponchadoDesde),
     prefDesc: num(cfg.prefDesc, TB_DEFAULTS.prefDesc),
+    prefDescVol: num(cfg.prefDescVol, TB_DEFAULTS.prefDescVol),
+    prefVolDesde: num(cfg.prefVolDesde, TB_DEFAULTS.prefVolDesde),
     minSolo: num(cfg.minSolo, TB_DEFAULTS.minSolo),
     iva: num(cfg.iva, TB_DEFAULTS.iva),
   };
 }
 function tbRangoIdx(piezas){ let idx=0; for(let i=0;i<TB_RANGOS.length;i++){ if(piezas>=TB_RANGOS[i].min) idx=i; } return idx; }
-function tbMedidaIdx(cm){ const n=Number(cm); if(!n||n<=0||n>30) return -1; for(let i=0;i<TB_MEDIDAS.length;i++){ if(n<=TB_MEDIDAS[i].hasta) return i; } return -1; }
+// Elige la fila de la tabla. Prioriza puntadas reales si se capturaron; si no, usa el área.
+// Devuelve el índice de fila (0..6), -1 si excede el máximo (cotizar), o null si faltan datos.
+function tbFilaIdx(area, puntadas){
+  const p = Number(puntadas);
+  if (puntadas!=null && puntadas!=="" && !isNaN(p) && p>0){
+    if (p > TB_MAX_PUNT) return -1;
+    let idx=0; for(let i=0;i<TB_MEDIDAS.length;i++){ if(p > TB_MEDIDAS[i].puntDesde) idx=i; } return idx;
+  }
+  const a = Number(area);
+  if (area!=null && area!=="" && !isNaN(a) && a>0){
+    if (a > TB_MAX_CM2) return -1;
+    let idx=0; for(let i=0;i<TB_MEDIDAS.length;i++){ if(a > TB_MEDIDAS[i].desdeCm2) idx=i; } return idx;
+  }
+  return null;
+}
 // Precio de tabla por pieza (con descuento por volumen y, si es Preferencial, su descuento).
 function tbPrecioTabla(P, medidaIdx, piezas, servicio){
   const m = TB_MEDIDAS[medidaIdx]; if(!m) return null;
   const desc = (m.escalera==="chica"?P.descChica:P.descGrande)[tbRangoIdx(piezas)] || 0;
   let precio = Math.round(P.base[medidaIdx]*(1-desc));
-  if(servicio==="pref") precio = Math.round(precio*(1-P.prefDesc));
+  if(servicio==="pref"){ const pd = (piezas>=P.prefVolDesde)? P.prefDescVol : P.prefDesc; precio = Math.round(precio*(1-pd)); }
   return precio;
 }
 
@@ -3404,27 +3426,31 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
   const [servicio,setServicio]=useState("solo");
   const [piezas,setPiezas]=useState(30);
   const [urgente,setUrgente]=useState(false);
-  const [logos,setLogos]=useState([{ ubic:"", cm:"", sobre:{}, nuevo:true }]);
+  const [logos,setLogos]=useState([{ ubic:"", ancho:"", alto:"", punt:"", sobre:{}, nuevo:true }]);
   const [verTarifas,setVerTarifas]=useState(false);
   const [verParam,setVerParam]=useState(false);
 
   const pzs = Math.max(0, parseInt(piezas)||0);
   const setLogo=(i,patch)=> setLogos(ls=> ls.map((l,j)=> j===i?{...l,...patch}:l));
   const toggleSobre=(i,id)=> setLogos(ls=> ls.map((l,j)=> j===i?{...l, sobre:{...l.sobre,[id]:!l.sobre[id]}}:l));
-  const addLogo=()=> setLogos(ls=> ls.length>=8?ls:[...ls,{ubic:"",cm:"",sobre:{},nuevo:true}]);
+  const addLogo=()=> setLogos(ls=> ls.length>=8?ls:[...ls,{ubic:"",ancho:"",alto:"",punt:"",sobre:{},nuevo:true}]);
   const delLogo=(i)=> setLogos(ls=> ls.length<=1?ls:ls.filter((_,j)=>j!==i));
 
   const calc = logos.map(l=>{
-    const esc = String(l.cm).trim()!=="";
-    const mi = tbMedidaIdx(l.cm);
-    if(mi<0) return { cotizar: esc, mi:-1, tabla:null, unit:null, sub:0, ponch:0, sumSobre:0 };
-    const tabla = tbPrecioTabla(P, mi, pzs, servicio);
+    const area = (String(l.ancho).trim()!=="" && String(l.alto).trim()!=="" && !isNaN(Number(l.ancho)) && !isNaN(Number(l.alto)))
+      ? Number(l.ancho)*Number(l.alto) : null;
+    const usaPunt = (String(l.punt).trim()!=="" && !isNaN(Number(l.punt)) && Number(l.punt)>0);
+    const captura = usaPunt || area!=null;
+    const fi = tbFilaIdx(area, l.punt);
+    if(fi===null) return { cotizar:false, incompleto:true, mi:-1, area, usaPunt, tabla:null, unit:null, sub:0, ponch:0, sumSobre:0 };
+    if(fi<0)     return { cotizar:true,  incompleto:false, mi:-1, area, usaPunt, tabla:null, unit:null, sub:0, ponch:0, sumSobre:0 };
+    const tabla = tbPrecioTabla(P, fi, pzs, servicio);
     let sum = urgente? P.urgente:0;
     TB_SOBRE_DEF.forEach(s=>{ if(l.sobre[s.id]) sum+=P.sobre[s.id]; });
     const unit = Math.round(tabla*(1+sum));
     const sub = unit*pzs;
     const ponch = (l.nuevo && pzs>0 && pzs<P.ponchadoDesde)? P.ponchado:0;
-    return { cotizar:false, mi, tabla, sumSobre:sum, unit, sub, ponch };
+    return { cotizar:false, incompleto:false, mi:fi, area, usaPunt, tabla, sumSobre:sum, unit, sub, ponch };
   });
   const hayCotizar = calc.some(c=>c.cotizar);
   const subtotalBordado = calc.reduce((s,c)=>s+c.sub,0);
@@ -3468,7 +3494,7 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
             Urgente (−72 h) <span style={{color:C.accent}}>+{pct(P.urgente)}</span>
           </label>
         </div>
-        {servicio==="pref" && <div style={{fontSize:11.5,color:C.muted,marginTop:8}}>Preferencial: nosotros vendemos la prenda. El bordado baja <b style={{color:C.text}}>{pct(P.prefDesc)}</b> vs. Solo bordado.</div>}
+        {servicio==="pref" && <div style={{fontSize:11.5,color:C.muted,marginTop:8}}>Preferencial: nosotros vendemos la prenda. El bordado baja <b style={{color:C.text}}>{pct(P.prefDesc)}</b> en pedidos de hasta {P.prefVolDesde-1} pzas y <b style={{color:C.text}}>{pct(P.prefDescVol)}</b> desde {P.prefVolDesde} pzas, vs. Solo bordado{pzs>0?` → aquí aplica ${pct(pzs>=P.prefVolDesde?P.prefDescVol:P.prefDesc)} (${pzs} pzas)`:""}.</div>}
       </div>
 
       {/* Logos */}
@@ -3480,14 +3506,28 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
             <div style={{fontWeight:800,color:C.text,fontSize:15}}>Logo {i+1}</div>
             {logos.length>1 && <button onClick={()=>delLogo(i)} style={{border:"1px solid #e06a6a66",background:"transparent",color:"#e06a6a",borderRadius:7,padding:"4px 9px",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Quitar</button>}
           </div>
-          <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:10}}>
-            <div style={{flex:"1 1 180px"}}>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:8,alignItems:"flex-end"}}>
+            <div style={{flex:"1 1 150px"}}>
               <div style={lbl}>Ubicación (opcional)</div>
               <input value={l.ubic} onChange={e=>setLogo(i,{ubic:e.target.value})} placeholder="Pecho izq., manga…" style={{...inp,width:"100%",boxSizing:"border-box"}}/>
             </div>
             <div>
-              <div style={lbl}>Medida mayor (cm)</div>
-              <input type="number" min="0" step="0.5" value={l.cm} onChange={e=>setLogo(i,{cm:e.target.value})} placeholder="7" style={{...inp,width:100}}/>
+              <div style={lbl}>Ancho (cm)</div>
+              <input type="number" min="0" step="0.5" value={l.ancho} onChange={e=>setLogo(i,{ancho:e.target.value})} placeholder="10" style={{...inp,width:80}}/>
+            </div>
+            <div>
+              <div style={lbl}>Alto (cm)</div>
+              <input type="number" min="0" step="0.5" value={l.alto} onChange={e=>setLogo(i,{alto:e.target.value})} placeholder="2" style={{...inp,width:80}}/>
+            </div>
+            <div>
+              <div style={lbl}>Área</div>
+              <div style={{...inp,width:90,color:c.area!=null?C.text:C.muted,background:C.surface}}>{c.area!=null? c.area.toLocaleString("es-MX")+" cm²" : "—"}</div>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"center",marginBottom:8}}>
+            <div>
+              <div style={lbl}>Puntadas reales (opcional, si ya está ponchado)</div>
+              <input type="number" min="0" value={l.punt} onChange={e=>setLogo(i,{punt:e.target.value})} placeholder="p. ej. 2500" style={{...inp,width:130}}/>
             </div>
             <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:13,color:C.text,fontWeight:700,alignSelf:"flex-end",paddingBottom:8}}>
               <input type="checkbox" checked={l.nuevo} onChange={e=>setLogo(i,{nuevo:e.target.checked})} style={{width:17,height:17}}/>
@@ -3503,10 +3543,10 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
             })}
           </div>
           <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-            {c.cotizar ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>Mide más de 30 cm → cotizar con producción</span>
-             : c.unit==null ? <span style={{color:C.muted,fontSize:13}}>Captura la medida del logo</span>
+            {c.cotizar ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>Más de {TB_MAX_CM2} cm² o {TB_MAX_PUNT.toLocaleString("es-MX")} puntadas → cotizar con producción</span>
+             : c.incompleto ? <span style={{color:C.muted,fontSize:13}}>Captura ancho y alto (o las puntadas reales)</span>
              : <>
-                <span style={{fontSize:12,color:C.muted}}>{TB_MEDIDAS[c.mi].label} · tabla ${fmtMoney(c.tabla)}{c.sumSobre>0?` · +${pct(c.sumSobre)} sobreprecio`:""}</span>
+                <span style={{fontSize:12,color:C.muted}}>{TB_MEDIDAS[c.mi].label}{c.usaPunt?" (por puntadas)":""} · tabla ${fmtMoney(c.tabla)}{c.sumSobre>0?` · +${pct(c.sumSobre)} sobreprecio`:""}</span>
                 <span style={{fontSize:15,fontWeight:800,color:C.text}}>${fmtMoney(c.unit)} <span style={{fontSize:12,color:C.muted,fontWeight:600}}>/ pza</span></span>
                </>}
           </div>
@@ -3543,13 +3583,13 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
           <div style={{fontWeight:800,color:C.text,fontSize:14,marginBottom:8}}>{titulo}</div>
           <table style={{borderCollapse:"collapse",width:"100%",fontSize:12.5,minWidth:560}}>
             <thead><tr>
-              <th style={{textAlign:"left",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>Medida</th>
+              <th style={{textAlign:"left",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>Área (ancho × alto)</th>
               {TB_RANGOS.map(r=><th key={r.min} style={{textAlign:"right",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>{r.label}</th>)}
             </tr></thead>
             <tbody>
               {TB_MEDIDAS.map((m,mi)=>(
                 <tr key={mi}>
-                  <td style={{padding:"6px 8px",color:C.text,fontWeight:700,whiteSpace:"nowrap"}}>{m.label}</td>
+                  <td style={{padding:"6px 8px",color:C.text,fontWeight:700,whiteSpace:"nowrap"}}>{m.label}<div style={{fontSize:10.5,color:C.muted,fontWeight:400}}>≤{m.puntHasta.toLocaleString("es-MX")} pts · {m.ej}</div></td>
                   {TB_RANGOS.map((r,ri)=>(
                     <td key={ri} style={{textAlign:"right",padding:"6px 8px",color:C.text}}>${fmtMoney(tbPrecioTabla(P,mi,r.min,sv))}</td>
                   ))}
@@ -3557,7 +3597,7 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
               ))}
             </tbody>
           </table>
-          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Precio por pieza y por logo, MXN antes de IVA. Más de 30 cm: cotizar con producción.</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Precio por pieza y por logo, MXN antes de IVA. La fila se elige por área (ancho × alto) o por puntadas reales. Más de {TB_MAX_CM2} cm² o {TB_MAX_PUNT.toLocaleString("es-MX")} puntadas: cotizar con producción.</div>
         </div>
       ))}
 
@@ -3575,7 +3615,8 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
     descGrande:P.descGrande.map(x=>Math.round(x*100)),
     sobre:Object.fromEntries(TB_SOBRE_DEF.map(s=>[s.id,Math.round(P.sobre[s.id]*100)])),
     urgente:Math.round(P.urgente*100), ponchado:P.ponchado, ponchadoDesde:P.ponchadoDesde,
-    prefDesc:Math.round(P.prefDesc*100), minSolo:P.minSolo, iva:Math.round(P.iva*100),
+    prefDesc:Math.round(P.prefDesc*100), prefDescVol:Math.round(P.prefDescVol*100), prefVolDesde:P.prefVolDesde,
+    minSolo:P.minSolo, iva:Math.round(P.iva*100),
   });
   const [d,setD]=useState(toDraft(P));
   const [guardando,setGuardando]=useState(false);
@@ -3593,7 +3634,8 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
         descGrande:d.descGrande.map(x=>Number(x)/100),
         sobre:Object.fromEntries(TB_SOBRE_DEF.map(s=>[s.id,Number(d.sobre[s.id])/100])),
         urgente:Number(d.urgente)/100, ponchado:Number(d.ponchado), ponchadoDesde:Number(d.ponchadoDesde),
-        prefDesc:Number(d.prefDesc)/100, minSolo:Number(d.minSolo), iva:Number(d.iva)/100,
+        prefDesc:Number(d.prefDesc)/100, prefDescVol:Number(d.prefDescVol)/100, prefVolDesde:Number(d.prefVolDesde),
+        minSolo:Number(d.minSolo), iva:Number(d.iva)/100,
       });
       setMsg("✓ Precios guardados. Los vendedores ya los ven.");
       setTimeout(()=>setMsg(""),3000);
@@ -3651,7 +3693,9 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
         <div style={{display:"flex",flexWrap:"wrap",gap:14,marginBottom:14}}>
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Ponchado $<input type="number" value={d.ponchado} onChange={e=>setD(p=>({...p,ponchado:e.target.value}))} style={inp}/></label>
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Ponchado gratis desde (pzas)<input type="number" value={d.ponchadoDesde} onChange={e=>setD(p=>({...p,ponchadoDesde:e.target.value}))} style={{...inp,width:52}}/></label>
-          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Descuento Preferencial<input type="number" value={d.prefDesc} onChange={e=>setD(p=>({...p,prefDesc:e.target.value}))} style={{...inp,width:52}}/>%</label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Preferencial pedido chico<input type="number" value={d.prefDesc} onChange={e=>setD(p=>({...p,prefDesc:e.target.value}))} style={{...inp,width:52}}/>%</label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Preferencial volumen<input type="number" value={d.prefDescVol} onChange={e=>setD(p=>({...p,prefDescVol:e.target.value}))} style={{...inp,width:52}}/>%</label>
+          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Preferencial cambia a volumen desde (pzas)<input type="number" value={d.prefVolDesde} onChange={e=>setD(p=>({...p,prefVolDesde:e.target.value}))} style={{...inp,width:52}}/></label>
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Pedido mínimo Solo bordado $<input type="number" value={d.minSolo} onChange={e=>setD(p=>({...p,minSolo:e.target.value}))} style={inp}/></label>
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>IVA<input type="number" value={d.iva} onChange={e=>setD(p=>({...p,iva:e.target.value}))} style={{...inp,width:52}}/>%</label>
         </div>

@@ -3398,7 +3398,13 @@ const TB_DEFAULTS = {
 function tbParamsEf(cfg){
   cfg = cfg || {};
   const arr = (a,d)=> (Array.isArray(a)&&a.length===d.length)? a.map(Number) : d.slice();
-  const arr2 = (a,d)=> (Array.isArray(a)&&a.length===d.length&&a.every((r,i)=>Array.isArray(r)&&r.length===d[i].length))? a.map(r=>r.map(Number)) : d.map(r=>r.slice());
+  // Acepta la matriz como arreglo 2D (defaults/memoria) o como objeto de filas {f0,f1,f2}
+  // (como se guarda en Firestore, que no admite arreglos anidados).
+  const arr2 = (a,d)=>{
+    let m = a;
+    if (a && !Array.isArray(a) && typeof a==="object") m = [a.f0, a.f1, a.f2];
+    return (Array.isArray(m)&&m.length===d.length&&m.every((r,i)=>Array.isArray(r)&&r.length===d[i].length))? m.map(r=>r.map(Number)) : d.map(r=>r.slice());
+  };
   const num = (v,d)=> (v==null||v===""||isNaN(Number(v)))? d : Number(v);
   const sobre = {}; TB_SOBRE_DEF.forEach(s=>{ sobre[s.id]= num(cfg.sobre&&cfg.sobre[s.id], TB_DEFAULTS.sobre[s.id]); });
   return {
@@ -9132,8 +9138,13 @@ function AppInner() {
   const [tbCfg, setTbCfg] = useState(null);
   const tbParams = tbParamsEf(tbCfg);
   const guardarTbParams = async (obj) => {
-    await setDoc(doc(db, "config", "tarifasBordado"), { ...obj, actualizado: new Date().toISOString(), actualizadoPor: usuario?.email || "" }, { merge: true });
-    setTbCfg(obj);
+    // Firestore no admite arreglos anidados: las matrices de impresión (3×5) se guardan
+    // como objeto de filas {f0,f1,f2}. tbParamsEf las vuelve a leer en cualquiera de las dos formas.
+    const mtz = (m)=> (Array.isArray(m) ? { f0:m[0], f1:m[1], f2:m[2] } : m);
+    const safe = { ...obj, impSeri: mtz(obj.impSeri), impDtf: mtz(obj.impDtf), impVinil: mtz(obj.impVinil),
+      actualizado: new Date().toISOString(), actualizadoPor: usuario?.email || "" };
+    await setDoc(doc(db, "config", "tarifasBordado"), safe, { merge: true });
+    setTbCfg(safe);
   };
   const [cajaMov, setCajaMov] = useState([]);
   const [cajaMovChofer, setCajaMovChofer] = useState([]);

@@ -3390,7 +3390,8 @@ const TB_DEFAULTS = {
   urgente:0.25, ponchado:150, ponchadoDesde:21,
   prefDesc:0.40, prefDescVol:0.25, prefVolDesde:51, // Preferencial: 40% pedidos chicos, 25% desde 51 pzas (todas las técnicas)
   minSolo:200, iva:0.16,
-  // Impresión — tablas Solo servicio [Chico, Mediano, Grande] × [1–5, 6–20, 21–50, 51–100, 101+]
+  // Impresión — precio del logo chico (tamaño "Hasta 20 cm²") por volumen [1–5, 6–20, 21–50, 51–100, +100].
+  // El tamaño usa las mismas 7 medidas por área del bordado; para tamaños mayores el precio escala (ver TB_IMP_ESCALA).
   // Precio del LOGO CHICO (tamaño "Hasta 20 cm²") por rango de volumen [1–5, 6–20, 21–50, 51–100, +100].
   // Punto medio de la tabla; donde la técnica "no conviene" se repite el valor contiguo (serigrafía 1–5, vinil +100).
   // Serigrafía: precio SOLO IMPRESIÓN por pieza (el setup va aparte, como revelado único; así no se

@@ -3360,14 +3360,17 @@ const TB_RANGOS = [
   { min:51, label:"51–100" }, { min:101, label:"101–250" }, { min:251, label:"251+" },
 ];
 
-// IMPRESIÓN — tamaño por área con área de referencia (para interpolar el precio).
-const TB_IMP_TAM = [
-  { label:"Chico",   desde:0,   hasta:200,  ref:100,  ej:"10×10 (pecho / gorra)" },
-  { label:"Mediano", desde:200, hasta:600,  ref:567,  ej:"21×27 (carta)" },
-  { label:"Grande",  desde:600, hasta:1500, ref:1161, ej:"27×43 (tabloide)" },
-];
-const TB_IMP_MAX_CM2 = 1500;
-const TB_IMP_RANGOS = [ {min:1,label:"1–5"}, {min:6,label:"6–20"}, {min:21,label:"21–50"}, {min:51,label:"51–100"}, {min:101,label:"101+"} ];
+// IMPRESIÓN — usa las MISMAS medidas por área del bordado (TB_MEDIDAS, máx. 460 cm²).
+// El precio = precio del logo chico (tabla por técnica/volumen) × la proporción del bordado
+// por tamaño (base[tier]/base[0]). Así la curva de volumen la pone la tabla de impresión
+// (serigrafía baja mucho más que el bordado en volumen) y el tamaño escala como el bordado.
+const TB_IMP_RANGOS = [ {min:1,label:"1–5"}, {min:6,label:"6–20"}, {min:21,label:"21–50"}, {min:51,label:"51–100"}, {min:101,label:"+100"} ];
+// Combinaciones técnica × volumen donde la técnica NO conviene (se cobra, pero se avisa).
+function tbImpNoConviene(tecnica, volIdx){
+  if(tecnica==="Serigrafía" && volIdx===0) return "No conviene a tan pocas piezas (revelado $250+ por tinta). Para 1–5 piezas conviene DTF o vinil.";
+  if(tecnica==="Vinil textil" && volIdx===4) return "No conviene en volumen alto (mucho depilado). Para +100 piezas conviene DTF o serigrafía.";
+  return null;
+}
 
 // Sobreprecios. soloBordado = solo aplica en bordado. especial = en vinil usa vinilEspecial.
 const TB_SOBRE_DEF = [
@@ -3388,9 +3391,13 @@ const TB_DEFAULTS = {
   prefDesc:0.40, prefDescVol:0.25, prefVolDesde:51, // Preferencial: 40% pedidos chicos, 25% desde 51 pzas (todas las técnicas)
   minSolo:200, iva:0.16,
   // Impresión — tablas Solo servicio [Chico, Mediano, Grande] × [1–5, 6–20, 21–50, 51–100, 101+]
-  impSeri:  [[75,50,35,24,15],[90,65,48,35,22],[115,80,60,48,32]],
-  impDtf:   [[70,50,38,28,20],[120,95,75,60,42],[165,135,115,90,68]],
-  impVinil: [[90,70,55,42,32],[150,125,100,85,68],[210,180,150,125,100]],
+  // Precio del LOGO CHICO (tamaño "Hasta 20 cm²") por rango de volumen [1–5, 6–20, 21–50, 51–100, +100].
+  // Punto medio de la tabla; donde la técnica "no conviene" se repite el valor contiguo (serigrafía 1–5, vinil +100).
+  // Serigrafía: precio SOLO IMPRESIÓN por pieza (el setup va aparte, como revelado único; así no se
+  // cobra el arranque dos veces). A bajo volumen el precio sube por el revelado, no por la pieza.
+  impSeri:  [26, 25, 24, 23, 13],
+  impDtf:   [39, 29, 21, 14, 10],
+  impVinil: [50, 39, 30, 24, 24],
   seriTintaExtra:[18,16,15,13,12], // serigrafía: cada tinta adicional por pieza, por rango
   revelado:250, reveladoDesde:50, seriMaxTintas:6,
   vinilColorAdd:0.50, vinilMaxColores:3, vinilEspecial:0.45,
@@ -3420,9 +3427,9 @@ function tbParamsEf(cfg){
     prefVolDesde: num(cfg.prefVolDesde, TB_DEFAULTS.prefVolDesde),
     minSolo: num(cfg.minSolo, TB_DEFAULTS.minSolo),
     iva: num(cfg.iva, TB_DEFAULTS.iva),
-    impSeri: arr2(cfg.impSeri, TB_DEFAULTS.impSeri),
-    impDtf: arr2(cfg.impDtf, TB_DEFAULTS.impDtf),
-    impVinil: arr2(cfg.impVinil, TB_DEFAULTS.impVinil),
+    impSeri: arr(cfg.impSeri, TB_DEFAULTS.impSeri),
+    impDtf: arr(cfg.impDtf, TB_DEFAULTS.impDtf),
+    impVinil: arr(cfg.impVinil, TB_DEFAULTS.impVinil),
     seriTintaExtra: arr(cfg.seriTintaExtra, TB_DEFAULTS.seriTintaExtra),
     revelado: num(cfg.revelado, TB_DEFAULTS.revelado),
     reveladoDesde: num(cfg.reveladoDesde, TB_DEFAULTS.reveladoDesde),
@@ -3456,24 +3463,15 @@ function tbPrecioTabla(P, medidaIdx, piezas, servicio){
 }
 // ── Impresión ──
 function tbImpQtyCol(piezas){ let idx=0; for(let i=0;i<TB_IMP_RANGOS.length;i++){ if(piezas>=TB_IMP_RANGOS[i].min) idx=i; } return idx; }
-function tbImpSizeIdx(area){ const a=Number(area); if(!a||a<=0) return null; if(a>TB_IMP_MAX_CM2) return -1; let idx=0; for(let i=0;i<TB_IMP_TAM.length;i++){ if(a>TB_IMP_TAM[i].desde) idx=i; } return idx; }
-function tbImpMatriz(P, tecnica){ return tecnica==="Serigrafía"?P.impSeri : tecnica==="DTF"?P.impDtf : P.impVinil; }
-// Precio Solo servicio proporcional al área (interpolación lineal entre áreas de referencia).
-function tbImpSolo(matriz, area, qtyCol){
-  const t=TB_IMP_TAM; const c=(r)=> matriz[r][qtyCol];
-  let p;
-  if(area<=t[0].ref) p=c(0);
-  else if(area<=t[1].ref) p=c(0)+(c(1)-c(0))*(area-t[0].ref)/(t[1].ref-t[0].ref);
-  else p=c(1)+(c(2)-c(1))*(area-t[1].ref)/(t[2].ref-t[1].ref);
-  return Math.round(p);
-}
-function tbImpPrefDisc(P, qtyCol){ return (TB_IMP_RANGOS[qtyCol].min >= P.prefVolDesde)? P.prefDescVol : P.prefDesc; }
-function tbImpPref(P, matriz, area, qtyCol){
-  const cur = Math.round( tbImpSolo(matriz,area,qtyCol)*(1-tbImpPrefDisc(P,qtyCol)) );
-  if(qtyCol===0) return cur;
-  const prev = Math.round( tbImpSolo(matriz,area,qtyCol-1)*(1-tbImpPrefDisc(P,qtyCol-1)) );
-  return Math.min(cur, prev);
-}
+function tbImpFila(P, tecnica){ return tecnica==="Serigrafía"?P.impSeri : tecnica==="DTF"?P.impDtf : P.impVinil; }
+// Escala de tamaño por técnica (tier 0..6). El bordado sube ~9× del chico al grande por las puntadas.
+// DTF y vinil escalan con el área del impreso (~×3 el grande). La serigrafía casi no cambia con el
+// tamaño (es la misma pantalla; solo un poco más de tinta/manejo), así que lleva su propia escala plana.
+const TB_IMP_ESCALA      = [1, 1.15, 1.3, 1.6, 2.0, 2.5, 3.0]; // DTF y vinil
+const TB_IMP_ESCALA_SERI = [1, 1.05, 1.1, 1.2, 1.3, 1.4, 1.5]; // serigrafía (plana)
+function tbImpRatio(tecnica, tier){ return (tecnica==="Serigrafía"?TB_IMP_ESCALA_SERI:TB_IMP_ESCALA)[tier] || 1; }
+// Precio Solo servicio (antes de preferencial) = precio del logo chico de la tabla × escala de tamaño.
+function tbImpSolo(P, tecnica, tier, qtyCol){ return Math.round( tbImpFila(P,tecnica)[qtyCol] * tbImpRatio(tecnica,tier) ); }
 
 // Calcula un diseño para cualquier técnica. Devuelve {estado, label, tabla, sumSobre, unit, sub, cargo, ...}.
 function tbCalcDiseno(P, tecnica, servicio, pzs, urgente, d){
@@ -3495,13 +3493,14 @@ function tbCalcDiseno(P, tecnica, servicio, pzs, urgente, d){
     return { estado:"ok", area, label:TB_MEDIDAS[fi].label+(usaPunt?" (por puntadas)":""), tabla, sumSobre, unit, sub:unit*pzs, cargo };
   }
 
-  // Impresión (Vinil / DTF / Serigrafía)
-  const si = tbImpSizeIdx(area);
-  if(si===null) return { estado:"incompleto", area };
-  if(si<0)      return { estado:"cotizar", area };
+  // Impresión (Vinil / DTF / Serigrafía): mismo tamaño que el bordado (área → tier), precio de la tabla × proporción.
+  const fi2 = tbFilaIdx(area, "");               // tier por área (sin puntadas)
+  if(fi2===null) return { estado:"incompleto", area };
+  if(fi2<0)      return { estado:"cotizar", area }; // > 460 cm²
   const qtyCol = tbImpQtyCol(pzs);
-  const matriz = tbImpMatriz(P, tecnica);
-  const base = servicio==="pref" ? tbImpPref(P,matriz,area,qtyCol) : tbImpSolo(matriz,area,qtyCol);
+  const pd = (pzs>=P.prefVolDesde)? P.prefDescVol : P.prefDesc;
+  let base = tbImpSolo(P, tecnica, fi2, qtyCol);
+  if(servicio==="pref") base = Math.round(base*(1-pd));
   let tabla, coloresCobro=null, extra="";
   if(tecnica==="Vinil textil"){
     coloresCobro = Math.max(1, parseInt(d.colores)||1);
@@ -3514,15 +3513,15 @@ function tbCalcDiseno(P, tecnica, servicio, pzs, urgente, d){
     coloresCobro = Math.max(1, parseInt(d.colores)||1) + (d.oscura?1:0);
     if(coloresCobro > P.seriMaxTintas) return { estado:"cotizar", area };
     const tintasExtra = (coloresCobro-1)*P.seriTintaExtra[qtyCol];
-    tabla = Math.round(base + tintasExtra*(servicio==="pref"? (1-tbImpPrefDisc(P,qtyCol)) : 1));
+    tabla = Math.round(base + tintasExtra*(servicio==="pref"? (1-pd) : 1));
     extra = coloresCobro+(coloresCobro===1?" tinta":" tintas");
   }
   const unit = Math.round(tabla*(1+sumSobre));
-  // Cargo inicial: serigrafía = revelado por tinta (pedidos chicos). Bordado ya arriba. DTF/Vinil = 0.
+  // Cargo inicial: serigrafía = revelado por tinta (pedidos chicos). DTF/Vinil = 0.
   let cargo = 0;
   if(d.nuevo && tecnica==="Serigrafía" && pzs>0 && pzs<P.reveladoDesde) cargo = P.revelado*coloresCobro;
-  const label = Math.round(area)+" cm² ("+TB_IMP_TAM[si].label+", proporcional)"+(extra?" · "+extra:"");
-  return { estado:"ok", area, label, tabla, sumSobre, unit, sub:unit*pzs, cargo };
+  const label = TB_MEDIDAS[fi2].label+" · "+TB_IMP_RANGOS[qtyCol].label+" pzas"+(extra?" · "+extra:"");
+  return { estado:"ok", area, label, tabla, sumSobre, unit, sub:unit*pzs, cargo, aviso: tbImpNoConviene(tecnica, qtyCol) };
 }
 
 function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
@@ -3633,7 +3632,7 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
             })}
           </div>
           <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-            {c.estado==="cotizar" ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>{esImp?`Más de ${TB_IMP_MAX_CM2} cm²`+(tecnica==="Serigrafía"?` o ${P.seriMaxTintas} tintas`:"")+" → cotizar con producción":`Más de ${TB_MAX_CM2} cm² o ${TB_MAX_PUNT.toLocaleString("es-MX")} puntadas → cotizar con producción`}</span>
+            {c.estado==="cotizar" ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>{esImp?`Más de ${TB_MAX_CM2} cm²`+(tecnica==="Serigrafía"?` o ${P.seriMaxTintas} tintas`:"")+" → cotizar con producción":`Más de ${TB_MAX_CM2} cm² o ${TB_MAX_PUNT.toLocaleString("es-MX")} puntadas → cotizar con producción`}</span>
              : c.estado==="maxcol" ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>Vinil: máximo {P.vinilMaxColores} colores. Con más usa DTF.</span>
              : c.estado==="incompleto" ? <span style={{color:C.muted,fontSize:13}}>{tecnica==="Bordado"?"Captura ancho y alto (o puntadas)":"Captura ancho y alto"}</span>
              : <>
@@ -3641,6 +3640,7 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
                 <span style={{fontSize:15,fontWeight:800,color:C.text}}>${fmtMoney(c.unit)} <span style={{fontSize:12,color:C.muted,fontWeight:600}}>/ pza</span></span>
                </>}
           </div>
+          {c.aviso && <div style={{marginTop:8,background:"#2a1f0e",border:"1px solid "+C.accent+"55",borderRadius:9,padding:"8px 11px",fontSize:12,color:C.accent,fontWeight:700}}>⚠️ {c.aviso}</div>}
         </div>
         );
       })}
@@ -3684,19 +3684,19 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
           <div style={{fontSize:11,color:C.muted,marginTop:8}}>Precio por pieza y por logo, MXN antes de IVA. La fila se elige por área o por puntadas reales. Más de {TB_MAX_CM2} cm² o {TB_MAX_PUNT.toLocaleString("es-MX")} puntadas: cotizar con producción.</div>
         </div>
       ))}
-      {verTarifas && esImp && (()=>{ const mtz=tbImpMatriz(P,tecnica); return (
+      {verTarifas && esImp && (
         <div style={{...card,overflowX:"auto"}}>
           <div style={{fontWeight:800,color:C.text,fontSize:14,marginBottom:8}}>Solo servicio · {tecnica} (1 {tecnica==="Serigrafía"?"tinta":"color"}), MXN antes de IVA</div>
-          <table style={{borderCollapse:"collapse",width:"100%",fontSize:12.5,minWidth:520}}>
-            <thead><tr><th style={{textAlign:"left",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>Tamaño</th>{TB_IMP_RANGOS.map(r=><th key={r.min} style={{textAlign:"right",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>{r.label}</th>)}</tr></thead>
-            <tbody>{TB_IMP_TAM.map((t,ti)=>(
-              <tr key={ti}><td style={{padding:"6px 8px",color:C.text,fontWeight:700,whiteSpace:"nowrap"}}>{t.label}<div style={{fontSize:10.5,color:C.muted,fontWeight:400}}>≤{t.hasta} cm² · {t.ej}</div></td>
-                {mtz[ti].map((v,ri)=>(<td key={ri} style={{textAlign:"right",padding:"6px 8px",color:C.text}}>${fmtMoney(v)}</td>))}</tr>
+          <table style={{borderCollapse:"collapse",width:"100%",fontSize:12.5,minWidth:560}}>
+            <thead><tr><th style={{textAlign:"left",padding:"6px 8px",color:C.muted,borderBottom:"1px solid "+C.border}}>Tamaño (área)</th>{TB_IMP_RANGOS.map((r,ri)=><th key={r.min} style={{textAlign:"right",padding:"6px 8px",color:(tbImpNoConviene(tecnica,ri)?C.accent:C.muted),borderBottom:"1px solid "+C.border}}>{r.label}</th>)}</tr></thead>
+            <tbody>{TB_MEDIDAS.map((m,ti)=>(
+              <tr key={ti}><td style={{padding:"6px 8px",color:C.text,fontWeight:700,whiteSpace:"nowrap"}}>{m.label}<div style={{fontSize:10.5,color:C.muted,fontWeight:400}}>{m.ej}</div></td>
+                {TB_IMP_RANGOS.map((r,ri)=>(<td key={ri} style={{textAlign:"right",padding:"6px 8px",color:(tbImpNoConviene(tecnica,ri)?C.accent:C.text)}}>${fmtMoney(tbImpSolo(P,tecnica,ti,ri))}</td>))}</tr>
             ))}</tbody>
           </table>
-          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Medidas intermedias: precio proporcional al área. {tecnica==="Serigrafía"?`Cada tinta adicional por pieza según cantidad. Revelado $${fmtMoney(P.revelado)}/tinta en pedidos de menos de ${P.reveladoDesde} pzas.`:tecnica==="Vinil textil"?`Cada color adicional +${pct(P.vinilColorAdd)}. Máx. ${P.vinilMaxColores} colores. Vinil especial +${pct(P.vinilEspecial)}.`:"DTF admite full color sin costo extra por color."} Preferencial: −{pct(P.prefDesc)} / −{pct(P.prefDescVol)}. Más de {TB_IMP_MAX_CM2} cm²: cotizar.</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>El tamaño usa las mismas medidas del bordado; el precio escala {tecnica==="Serigrafía"?"muy poco con el tamaño (×1 a ×1.5, es la misma pantalla)":"de forma suave (×1 el chico a ×3 el grande)"}. {tecnica==="Serigrafía"?`Precio de solo impresión; el revelado ($${fmtMoney(P.revelado)}/tinta en pedidos de menos de ${P.reveladoDesde} pzas) se cobra una sola vez aparte. En 1–5 pzas no conviene (revelado).`:tecnica==="Vinil textil"?`Cada color adicional +${pct(P.vinilColorAdd)}. Máx. ${P.vinilMaxColores} colores. Vinil especial +${pct(P.vinilEspecial)}. En +100 pzas no conviene (depilado).`:"DTF admite full color sin costo extra por color."} Preferencial: −{pct(P.prefDesc)} / −{pct(P.prefDescVol)}. Más de {TB_MAX_CM2} cm²: cotizar. Las columnas en color son volúmenes donde la técnica no conviene.</div>
         </div>
-      ); })()}
+      )}
 
       {esAdmin && <ParamsBordado P={P} onGuardar={onGuardarParams} abierto={verParam} setAbierto={setVerParam} />}
     </div>
@@ -3713,7 +3713,7 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
     urgente:Math.round(P.urgente*100), ponchado:P.ponchado, ponchadoDesde:P.ponchadoDesde,
     prefDesc:Math.round(P.prefDesc*100), prefDescVol:Math.round(P.prefDescVol*100), prefVolDesde:P.prefVolDesde,
     minSolo:P.minSolo, iva:Math.round(P.iva*100),
-    impSeri:P.impSeri.map(r=>r.slice()), impDtf:P.impDtf.map(r=>r.slice()), impVinil:P.impVinil.map(r=>r.slice()),
+    impSeri:P.impSeri.slice(), impDtf:P.impDtf.slice(), impVinil:P.impVinil.slice(),
     seriTintaExtra:P.seriTintaExtra.slice(), revelado:P.revelado, reveladoDesde:P.reveladoDesde, seriMaxTintas:P.seriMaxTintas,
     vinilColorAdd:Math.round(P.vinilColorAdd*100), vinilMaxColores:P.vinilMaxColores, vinilEspecial:Math.round(P.vinilEspecial*100),
   });
@@ -3738,7 +3738,7 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
         urgente:Number(d.urgente)/100, ponchado:Number(d.ponchado), ponchadoDesde:Number(d.ponchadoDesde),
         prefDesc:Number(d.prefDesc)/100, prefDescVol:Number(d.prefDescVol)/100, prefVolDesde:Number(d.prefVolDesde),
         minSolo:Number(d.minSolo), iva:Number(d.iva)/100,
-        impSeri:d.impSeri.map(r=>r.map(Number)), impDtf:d.impDtf.map(r=>r.map(Number)), impVinil:d.impVinil.map(r=>r.map(Number)),
+        impSeri:d.impSeri.map(Number), impDtf:d.impDtf.map(Number), impVinil:d.impVinil.map(Number),
         seriTintaExtra:d.seriTintaExtra.map(Number), revelado:Number(d.revelado), reveladoDesde:Number(d.reveladoDesde), seriMaxTintas:Number(d.seriMaxTintas),
         vinilColorAdd:Number(d.vinilColorAdd)/100, vinilMaxColores:Number(d.vinilMaxColores), vinilEspecial:Number(d.vinilEspecial)/100,
       });
@@ -3748,15 +3748,13 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
     setGuardando(false);
   };
   const card={background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:"14px 16px",marginBottom:12};
+  // Precio del logo chico por volumen (una fila de 5). Los tamaños mayores escalan de forma suave (×1 a ×3).
   const mtzTabla=(k,titulo)=>(
     <div style={{overflowX:"auto",marginBottom:12}}>
       <div style={{fontSize:12,color:C.text,fontWeight:700,marginBottom:4}}>{titulo}</div>
-      <table style={{borderCollapse:"collapse",minWidth:520}}>
-        <thead><tr><th style={{...th,textAlign:"left"}}>Tamaño</th>{TB_IMP_RANGOS.map(r=><th key={r.min} style={th}>{r.label}</th>)}</tr></thead>
-        <tbody>{TB_IMP_TAM.map((t,ri)=>(
-          <tr key={ri}><td style={{padding:"3px 8px",fontSize:12,color:C.text,whiteSpace:"nowrap"}}>{t.label}</td>
-            {d[k][ri].map((v,ci)=>(<td key={ci} style={{padding:"3px 4px"}}><input type="number" value={v} onChange={e=>setMtz(k,ri,ci,e.target.value)} style={sinp}/></td>))}</tr>
-        ))}</tbody>
+      <table style={{borderCollapse:"collapse",minWidth:420}}>
+        <thead><tr>{TB_IMP_RANGOS.map(r=><th key={r.min} style={th}>{r.label}</th>)}</tr></thead>
+        <tbody><tr>{d[k].map((v,ci)=>(<td key={ci} style={{padding:"3px 4px"}}><input type="number" value={v} onChange={e=>setArr(k,ci,e.target.value)} style={sinp}/></td>))}</tr></tbody>
       </table>
     </div>
   );
@@ -3777,10 +3775,11 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
           <tbody>{[["descChica","Chica (≤10 cm)"],["descGrande","Grande (>10 cm)"]].map(([k,t])=>(<tr key={k}><td style={{padding:"3px 8px",fontSize:12.5,color:C.text,whiteSpace:"nowrap"}}>{t}</td>{d[k].map((v,i)=>(<td key={i} style={{padding:"3px 4px"}}><input type="number" value={v} onChange={e=>setArr(k,i,e.target.value)} style={sinp}/></td>))}</tr>))}</tbody>
         </table></div>
 
-        <div style={{fontWeight:800,color:C.accent,fontSize:13,margin:"14px 0 8px"}}>IMPRESIÓN — precios Solo servicio (1 tinta/color)</div>
-        {mtzTabla("impSeri","Serigrafía · por tamaño")}
-        {mtzTabla("impDtf","DTF · por tamaño")}
-        {mtzTabla("impVinil","Vinil textil · por tamaño")}
+        <div style={{fontWeight:800,color:C.accent,fontSize:13,margin:"14px 0 4px"}}>IMPRESIÓN — precio del logo chico (Hasta 20 cm²), Solo servicio, 1 tinta/color</div>
+        <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Captura el precio del logo chico por volumen; los tamaños mayores escalan de forma suave (×1 a ×3 del chico al grande).</div>
+        {mtzTabla("impSeri","Serigrafía · por volumen")}
+        {mtzTabla("impDtf","DTF · por volumen")}
+        {mtzTabla("impVinil","Vinil textil · por volumen")}
         <div style={h3}>Serigrafía: cada tinta adicional por pieza (por rango)</div>
         <div style={{overflowX:"auto",marginBottom:12}}><table style={{borderCollapse:"collapse",minWidth:400}}>
           <thead><tr>{TB_IMP_RANGOS.map(r=><th key={r.min} style={th}>{r.label}</th>)}</tr></thead>
@@ -9138,11 +9137,8 @@ function AppInner() {
   const [tbCfg, setTbCfg] = useState(null);
   const tbParams = tbParamsEf(tbCfg);
   const guardarTbParams = async (obj) => {
-    // Firestore no admite arreglos anidados: las matrices de impresión (3×5) se guardan
-    // como objeto de filas {f0,f1,f2}. tbParamsEf las vuelve a leer en cualquiera de las dos formas.
-    const mtz = (m)=> (Array.isArray(m) ? { f0:m[0], f1:m[1], f2:m[2] } : m);
-    const safe = { ...obj, impSeri: mtz(obj.impSeri), impDtf: mtz(obj.impDtf), impVinil: mtz(obj.impVinil),
-      actualizado: new Date().toISOString(), actualizadoPor: usuario?.email || "" };
+    // Las tablas de impresión ahora son arreglos simples (no anidados), así que Firestore las acepta.
+    const safe = { ...obj, actualizado: new Date().toISOString(), actualizadoPor: usuario?.email || "" };
     await setDoc(doc(db, "config", "tarifasBordado"), safe, { merge: true });
     setTbCfg(safe);
   };

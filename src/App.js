@@ -3372,21 +3372,22 @@ function tbImpNoConviene(tecnica, volIdx){
   return null;
 }
 
-// Sobreprecios. soloBordado = solo aplica en bordado. especial = en vinil usa vinilEspecial.
+// Sobreprecios: SOLO aplican al bordado (en serigrafía, vinil y DTF no se muestran ni se cobran).
 const TB_SOBRE_DEF = [
-  { id:"relleno", label:"Relleno completo", soloBordado:true, nota:"Logo cubierto 100% de puntada, sin tela visible" },
-  { id:"d3d",     label:"3D o relieve", nota:"Bordado foam, vinil relieve 3D o tinta de alto relieve" },
-  { id:"metal",   label:"Hilo, vinil o tinta especial", especial:true, nota:"Metálico, neón, glitter, reflejante o fosforescente" },
-  { id:"colores", label:"Más de 6 colores", soloBordado:true, nota:"Del 7.º color de hilo en adelante (solo bordado)" },
-  { id:"gorra",   label:"Gorra, mochila o zona difícil", nota:"Gorra armada, bolsa, manga/pierna cosida, cuello" },
-  { id:"grueso",  label:"Material grueso o delicado", nota:"Chamarra acolchada, piel, toalla, polar, malla" },
+  { id:"relleno",    label:"Relleno completo", nota:"Logo cubierto 100% de puntada, sin tela visible" },
+  { id:"aplicacion", label:"Bordado con aplicación", nota:"Lleva una aplicación (parche/tela) cosida sobre el bordado" },
+  { id:"d3d",        label:"Bordado 3D (foam)", nota:"Letras o formas en relieve con foam" },
+  { id:"metal",      label:"Hilo metálico o especial", nota:"Metálico, neón, glitter, reflejante o fosforescente" },
+  { id:"colores",    label:"Más de 6 colores", nota:"Del 7.º color de hilo en adelante" },
+  { id:"gorra",      label:"Gorra, mochila o zona difícil", nota:"Gorra armada, bolsa, manga/pierna cosida, cuello" },
+  { id:"grueso",     label:"Material grueso o delicado", nota:"Chamarra acolchada, piel, toalla, polar, malla" },
 ];
 const TB_DEFAULTS = {
   // Bordado
   base:[28,42,55,85,130,190,250],
   descChica:[0,0.10,0.22,0.32,0.40,0.45],
   descGrande:[0,0.08,0.15,0.22,0.27,0.30],
-  sobre:{ relleno:0.40, d3d:0.35, metal:0.25, colores:0.15, gorra:0.15, grueso:0.20 },
+  sobre:{ relleno:0.40, aplicacion:0.45, d3d:0.35, metal:0.25, colores:0.15, gorra:0.15, grueso:0.20 },
   urgente:0.25, ponchado:150, ponchadoDesde:21,
   prefDesc:0.40, prefDescVol:0.25, prefVolDesde:51, // Preferencial: 40% pedidos chicos, 25% desde 51 pzas (todas las técnicas)
   minSolo:200, iva:0.16,
@@ -3478,10 +3479,9 @@ function tbImpSolo(P, tecnica, tier, qtyCol){ return Math.round( tbImpFila(P,tec
 function tbCalcDiseno(P, tecnica, servicio, pzs, urgente, d){
   const area = (String(d.ancho).trim()!=="" && String(d.alto).trim()!=="" && !isNaN(Number(d.ancho)) && !isNaN(Number(d.alto)))
     ? Number(d.ancho)*Number(d.alto) : null;
-  // Sobreprecio total (según técnica)
+  // Sobreprecio total. Urgente aplica a todas las técnicas; los demás sobreprecios SOLO al bordado.
   let sumSobre = urgente? P.urgente:0;
-  TB_SOBRE_DEF.forEach(s=>{ if(!d.sobre[s.id]) return; if(s.soloBordado && tecnica!=="Bordado") return;
-    let pc = P.sobre[s.id]; if(s.especial && tecnica==="Vinil textil") pc = P.vinilEspecial; sumSobre += pc; });
+  if(tecnica==="Bordado") TB_SOBRE_DEF.forEach(s=>{ if(d.sobre[s.id]) sumSobre += P.sobre[s.id]; });
 
   if(tecnica==="Bordado"){
     const usaPunt = (String(d.punt).trim()!=="" && !isNaN(Number(d.punt)) && Number(d.punt)>0);
@@ -3625,13 +3625,12 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
             {tecnica==="Serigrafía" && <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:13,color:C.text,fontWeight:700,alignSelf:"flex-end",paddingBottom:8}}><input type="checkbox" checked={d.oscura} onChange={e=>setD(i,{oscura:e.target.checked})} style={{width:17,height:17}}/>Prenda oscura (+1 tinta base)</label>}
             {(tecnica==="Bordado"||tecnica==="Serigrafía") && <label style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:13,color:C.text,fontWeight:700,alignSelf:"flex-end",paddingBottom:8}}><input type="checkbox" checked={d.nuevo} onChange={e=>setD(i,{nuevo:e.target.checked})} style={{width:17,height:17}}/>Diseño nuevo ({cargoLabel})</label>}
           </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:4}}>
-            {TB_SOBRE_DEF.filter(s=> !(s.soloBordado && tecnica!=="Bordado")).map(s=>{
+          {tecnica==="Bordado" && <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:4}}>
+            {TB_SOBRE_DEF.map(s=>{
               const on=!!d.sobre[s.id];
-              const pc = (s.especial && tecnica==="Vinil textil")? P.vinilEspecial : P.sobre[s.id];
-              return (<button key={s.id} title={s.nota} onClick={()=>toggleSobre(i,s.id)} style={{border:"1px solid "+(on?C.accent:C.border),background:on?C.accent+"22":C.surface,color:on?C.accent:C.muted,borderRadius:20,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{s.label} +{pct(pc)}</button>);
+              return (<button key={s.id} title={s.nota} onClick={()=>toggleSobre(i,s.id)} style={{border:"1px solid "+(on?C.accent:C.border),background:on?C.accent+"22":C.surface,color:on?C.accent:C.muted,borderRadius:20,padding:"5px 11px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{s.label} +{pct(P.sobre[s.id])}</button>);
             })}
-          </div>
+          </div>}
           <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             {c.estado==="cotizar" ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>{esImp?`Más de ${TB_MAX_CM2} cm²`+(tecnica==="Serigrafía"?` o ${P.seriMaxTintas} tintas`:"")+" → cotizar con producción":`Más de ${TB_MAX_CM2} cm² o ${TB_MAX_PUNT.toLocaleString("es-MX")} puntadas → cotizar con producción`}</span>
              : c.estado==="maxcol" ? <span style={{color:C.accent,fontWeight:700,fontSize:13}}>Vinil: máximo {P.vinilMaxColores} colores. Con más usa DTF.</span>
@@ -3695,7 +3694,7 @@ function CotizadorBordado({ esAdmin, params, onGuardarParams, onBack }){
                 {TB_IMP_RANGOS.map((r,ri)=>(<td key={ri} style={{textAlign:"right",padding:"6px 8px",color:(tbImpNoConviene(tecnica,ri)?C.accent:C.text)}}>${fmtMoney(tbImpSolo(P,tecnica,ti,ri))}</td>))}</tr>
             ))}</tbody>
           </table>
-          <div style={{fontSize:11,color:C.muted,marginTop:8}}>El tamaño usa las mismas medidas del bordado; el precio escala {tecnica==="Serigrafía"?"muy poco con el tamaño (×1 a ×1.5, es la misma pantalla)":"de forma suave (×1 el chico a ×3 el grande)"}. {tecnica==="Serigrafía"?`Precio de solo impresión; el revelado ($${fmtMoney(P.revelado)}/tinta en pedidos de menos de ${P.reveladoDesde} pzas) se cobra una sola vez aparte. En 1–5 pzas no conviene (revelado).`:tecnica==="Vinil textil"?`Cada color adicional +${pct(P.vinilColorAdd)}. Máx. ${P.vinilMaxColores} colores. Vinil especial +${pct(P.vinilEspecial)}. En +100 pzas no conviene (depilado).`:"DTF admite full color sin costo extra por color."} Preferencial: −{pct(P.prefDesc)} / −{pct(P.prefDescVol)}. Más de {TB_MAX_CM2} cm²: cotizar. Las columnas en color son volúmenes donde la técnica no conviene.</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>El tamaño usa las mismas medidas del bordado; el precio escala {tecnica==="Serigrafía"?"muy poco con el tamaño (×1 a ×1.5, es la misma pantalla)":"de forma suave (×1 el chico a ×3 el grande)"}. {tecnica==="Serigrafía"?`Precio de solo impresión; el revelado ($${fmtMoney(P.revelado)}/tinta en pedidos de menos de ${P.reveladoDesde} pzas) se cobra una sola vez aparte. En 1–5 pzas no conviene (revelado).`:tecnica==="Vinil textil"?`Cada color adicional +${pct(P.vinilColorAdd)}. Máx. ${P.vinilMaxColores} colores. En +100 pzas no conviene (depilado).`:"DTF admite full color sin costo extra por color."} Preferencial: −{pct(P.prefDesc)} / −{pct(P.prefDescVol)}. Más de {TB_MAX_CM2} cm²: cotizar. Las columnas en color son volúmenes donde la técnica no conviene.</div>
         </div>
       )}
 
@@ -3792,7 +3791,6 @@ function ParamsBordado({ P, onGuardar, abierto, setAbierto }){
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Serigrafía máx. tintas<input type="number" value={d.seriMaxTintas} onChange={e=>setD(p=>({...p,seriMaxTintas:e.target.value}))} style={sinp}/></label>
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Vinil color adicional<input type="number" value={d.vinilColorAdd} onChange={e=>setD(p=>({...p,vinilColorAdd:e.target.value}))} style={sinp}/>%</label>
           <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Vinil máx. colores<input type="number" value={d.vinilMaxColores} onChange={e=>setD(p=>({...p,vinilMaxColores:e.target.value}))} style={sinp}/></label>
-          <label style={{fontSize:12.5,color:C.text,display:"flex",alignItems:"center",gap:6}}>Vinil especial<input type="number" value={d.vinilEspecial} onChange={e=>setD(p=>({...p,vinilEspecial:e.target.value}))} style={sinp}/>%</label>
         </div>
 
         <div style={{fontWeight:800,color:C.accent,fontSize:13,margin:"14px 0 8px"}}>COMUNES</div>

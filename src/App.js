@@ -1808,10 +1808,12 @@ if (id === "entregada" && form.etapa === "bordado") {
   const fmtFechaMin = (() => { const p = fechaMinEntregaISO.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; })();
   const fmtFechaReq = () => { if (!form.fechaRequerida) return ""; const p = form.fechaRequerida.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; };
 const validarYGuardar = async (cb) => {
-    if (!form.fechaRequerida || !form.noCotizacion) {
-      alert("Por favor llena los campos obligatorios:\n" + 
+    const correoOk = form.clienteSinCorreo || (form.correoCliente && /^\S+@\S+\.\S+$/.test(form.correoCliente));
+    if (!form.fechaRequerida || !form.noCotizacion || !correoOk) {
+      alert("Por favor llena los campos obligatorios:\n" +
         (!form.fechaRequerida ? "• Fecha Requerida\n" : "") +
-        (!form.noCotizacion ? "• No. Cotización\n" : ""));
+        (!form.noCotizacion ? "• No. Cotización\n" : "") +
+        (!correoOk ? "• Correo del cliente (o marca \"El cliente no tiene correo\")\n" : ""));
       return;
     }
     // Aviso (no bloqueante) si la fecha prometida es antes de lo que el taller puede hoy.
@@ -1889,7 +1891,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
       </div>
       <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
         <Btn onClick={async () => { console.log("POSICIONES FORM:", JSON.stringify(form.posiciones)); await onSave(form); await new Promise(r => setTimeout(r, 500)); const html = await buildPdfHtml(form); setPdfHtml(html); }} variant="info" size="sm">🖨 Ver PDF</Btn>
-                     <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } setSolicitarFirmaModal(true); }} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
+                     <Btn onClick={() => { if (!puedeEditar) { alert("No tienes permiso para esta acción."); return; } if (form.correoCliente) setEmailCliente(form.correoCliente); setSolicitarFirmaModal(true); }} variant="ghost" size="sm">✍ Solicitar Firma</Btn>
         <Btn onClick={async () => {
           if (!puedeEditar) { alert("Solo ventas o administración pueden enviar el enlace de seguimiento al cliente."); return; }
           let tk = form.seguimientoToken;
@@ -1937,6 +1939,19 @@ await setDoc(doc(db, "solicitudesFirma", token), {
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           <Inp label="Número de Orden" value={form.numero} onChange={() => {}} readOnly/>
           <Inp label="Cliente" value={form.cliente} onChange={v => upd("cliente", v)}/>
+          <div style={{gridColumn:"1 / -1",display:"flex",flexDirection:"column",gap:4}}>
+            <label style={{fontSize:10,color:C.muted,textTransform:"uppercase",letterSpacing:1}}>Correo del cliente {form.clienteSinCorreo ? "(sin correo)" : "*"}</label>
+            <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+              <input type="email" value={form.correoCliente||""} disabled={!!form.clienteSinCorreo} onChange={e => upd("correoCliente", e.target.value.trim())}
+                placeholder="correo@cliente.com"
+                style={{flex:"1 1 220px",background:C.surface,border:"1px solid "+(form.clienteSinCorreo?C.border:(form.correoCliente?C.border:"#e0a53a")),borderRadius:6,color:C.text,fontSize:13,padding:"8px 10px",outline:"none",opacity:form.clienteSinCorreo?0.5:1}}/>
+              <label style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:C.muted,cursor:"pointer",whiteSpace:"nowrap"}}>
+                <input type="checkbox" checked={!!form.clienteSinCorreo} onChange={e => upd("clienteSinCorreo", e.target.checked)}/>
+                El cliente no tiene correo
+              </label>
+            </div>
+            <div style={{fontSize:11,color:C.muted}}>Se usa para la firma y para avisarle al cliente cada cambio de estatus.</div>
+          </div>
           <Inp label="Fecha" type="date" value={form.fecha} onChange={v => upd("fecha", v)}/>
           <Inp label="Fecha Requerida" type="date" value={form.fechaRequerida} onChange={v => upd("fechaRequerida", v)}/>
           <div style={{display:"flex",flexDirection:"column",gap:4}}>
@@ -9996,6 +10011,24 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
 
   const logout = () => signOut(auth);
 
+  // Avisa al CLIENTE por correo cada vez que su pedido cambia de estatus.
+  // Solo dispara en etapas de cara al cliente (Recibido / En bordado / Calidad /
+  // Entregado). Las etapas internas (espera de faltante, retrabajo, cancelada) NO
+  // generan correo. El propio endpoint vuelve a leer la orden en Firestore y revisa
+  // que tenga correo del cliente y que no esté marcada "sin correo", así que aquí
+  // solo mandamos el id y la etapa. Es "disparar y olvidar": si falla el correo, el
+  // cambio de etapa ya quedó guardado igual.
+  const notificarClienteCambioEtapa = (ordenId, nuevaEtapa) => {
+    if (!["nueva", "bordado", "calidad", "entregada"].includes(nuevaEtapa)) return;
+    try {
+      fetch("/api/notificarEstatus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ordenId: String(ordenId), etapa: nuevaEtapa }),
+      }).catch(() => {});
+    } catch (e) { console.log("notificarClienteCambioEtapa error:", e); }
+  };
+
   // ── Permissions helpers ───────────────────────────────────────────────────
   const moverEtapaKanban = async (orden, nuevaEtapa) => {
     const permitidas = KANBAN_TRANS[orden.etapa] || [];
@@ -10014,6 +10047,8 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       historial: [...(orden.historial||[]), { etapa: nuevaEtapa, fecha: new Date().toISOString(), nota: `Movida a "${etapaInfo(nuevaEtapa).label}" desde el tablero` }],
     };
     await guardarOrden(actualizada);
+    // Avisar al cliente por correo del nuevo estatus (si aplica).
+    if (orden.etapa !== nuevaEtapa) notificarClienteCambioEtapa(orden.id, nuevaEtapa);
     // El semáforo se recalcula solo (efecto reactivo sobre `ordenes`).
     // Registrar el cambio de etapa en el historial (igual que al guardar desde el detalle)
     try {
@@ -10293,6 +10328,10 @@ Object.keys(form).forEach(campo => {
       } catch (err) {
         console.log("Error enviando notificación:", err);
       }
+    }
+    // Avisar al CLIENTE por correo si cambió la etapa (independiente del vendedor).
+    if (anterior && anterior.etapa !== form.etapa) {
+      notificarClienteCambioEtapa(form.id, form.etapa);
     }
   };
 

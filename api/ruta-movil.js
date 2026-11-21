@@ -61,7 +61,7 @@ function serializarRuta(ruta) {
       idx: i,
       orden: Number(p.orden) || 0,
       tipo: p.tipo, horario: p.horario || '', cliente: p.cliente || '',
-      direccion: p.direccion || '', contacto: p.contacto || '',
+      direccion: p.direccion || '', contacto: p.contacto || '', telefono: p.telefono || '',
       noPedido: p.noPedido || '', estatus: p.estatus || '', obs: p.obs || '',
       horaLlegada: p.horaLlegada || '', horaReal: p.horaReal || '',
       geo: p.geo || null,

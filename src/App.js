@@ -3864,7 +3864,7 @@ const RUTA_TIPOS = [
 ];
 function tipoInfo(v){ return RUTA_TIPOS.find(t => t.v === v) || RUTA_TIPOS[0]; }
 function nuevaParada(tipo){
-  return { id: "p_" + Math.random().toString(36).slice(2,10) + Date.now().toString(36), tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", noPedido:"", ordenId:null, estatus:"", horaLlegada:"", horaReal:"", docs:false, obs:"" };
+  return { id: "p_" + Math.random().toString(36).slice(2,10) + Date.now().toString(36), tipo: tipo||"R", horario:"", cliente:"", direccion:"", contacto:"", telefono:"", noPedido:"", ordenId:null, estatus:"", horaLlegada:"", horaReal:"", docs:false, obs:"" };
 }
 function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImprimirCierre, clientesDir = [], onImportarClientes, onBorrarCliente, onEditarDireccion }) {
   const [r, setR] = useState(null);
@@ -3875,6 +3875,11 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
   const [editDir, setEditDir] = useState(null);      // { id, direccion } — edición de dirección
   const [guardandoCli, setGuardandoCli] = useState(false);
   const [importando, setImportando] = useState(false);
+  const [destacada, setDestacada] = useState(null);  // parada resaltada al tocar su chip de avance
+  const irAParada = (pid) => {                        // baja a la parada en "Resultado de cada parada"
+    const el = typeof document !== "undefined" && document.getElementById("rpar-" + pid);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); setDestacada(pid); setTimeout(() => setDestacada(d => d === pid ? null : d), 1800); }
+  };
   const fileClientesRef = useRef(null);
   const handleExcelClientes = async (ev) => {
     const file = ev.target.files && ev.target.files[0];
@@ -3888,8 +3893,8 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, blankrows: false });
       let ini = 0;
       if (rows.length && String(rows[0][0] || "").toLowerCase().includes("cliente")) ini = 1; // salta encabezados
-      const entradas = rows.slice(ini).map(f => ({ nombre: f[0], direccion: f[1], contacto: f[2] })).filter(e => String(e.nombre||"").trim() && String(e.direccion||"").trim());
-      if (!entradas.length) { alert("No se encontraron filas válidas. El Excel debe tener: columna A = Cliente, columna B = Dirección, columna C = Contacto (opcional)."); }
+      const entradas = rows.slice(ini).map(f => ({ nombre: f[0], direccion: f[1], contacto: f[2], telefono: f[3] })).filter(e => String(e.nombre||"").trim() && String(e.direccion||"").trim());
+      if (!entradas.length) { alert("No se encontraron filas válidas. El Excel debe tener: columna A = Cliente, columna B = Dirección, columna C = Contacto (opcional), columna D = Teléfono (opcional)."); }
       else { await onImportarClientes(entradas, { forzar:true }); alert("Listo: " + entradas.length + " cliente(s) cargados o actualizados."); }
     } catch (e) { alert("Error al importar: " + e.message); }
     setImportando(false);
@@ -3960,7 +3965,7 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
           </div>
           {dirOpen && (
             <div style={{marginTop:12}}>
-              <div style={{fontSize:12, color:C.muted, marginBottom:10}}>Se llena solo: cada vez que guardas una ruta con cliente y dirección, se guarda aquí. Al capturar paradas, escribe el nombre y la dirección se pone sola. También puedes cargar una base inicial desde Excel (columna A = Cliente, B = Dirección, C = Contacto opcional).</div>
+              <div style={{fontSize:12, color:C.muted, marginBottom:10}}>Se llena solo: cada vez que guardas una ruta con cliente y dirección, se guarda aquí. Al capturar paradas, escribe el nombre y la dirección se pone sola. También puedes cargar una base inicial desde Excel (columna A = Cliente, B = Dirección, C = Contacto opcional, D = Teléfono opcional).</div>
               <div style={{display:"flex", gap:8, flexWrap:"wrap", marginBottom:10}}>
                 <button disabled={importando} onClick={()=>fileClientesRef.current && fileClientesRef.current.click()} style={{border:"none", borderRadius:8, cursor:"pointer", background:C.accent, color:"#1a1d27", padding:"9px 14px", fontSize:13, fontWeight:800, fontFamily:"inherit", opacity:importando?0.6:1}}>{importando?"Importando…":"📥 Importar Excel"}</button>
                 <input ref={fileClientesRef} type="file" accept=".xlsx,.xls,.csv" style={{display:"none"}} onChange={handleExcelClientes}/>
@@ -3973,7 +3978,7 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
                       <div style={{flex:1, minWidth:0}}>
                         <div style={{fontSize:13, fontWeight:700, color:C.text}}>{c.nombre}</div>
                         {!(editDir && editDir.id === c.id) && (
-                          <div style={{fontSize:11.5, color:C.muted}}>📍 {c.direccion}{c.contacto ? " · 👤 "+c.contacto : ""}</div>
+                          <div style={{fontSize:11.5, color:C.muted}}>📍 {c.direccion}{c.contacto ? " · 👤 "+c.contacto : ""}{c.telefono ? " · 📞 "+c.telefono : ""}</div>
                         )}
                       </div>
                       {!(editDir && editDir.id === c.id) && (
@@ -4070,25 +4075,64 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
       )}
 
       {(() => {
-        const conOrden = (r.paradas || []).filter(p => Number(p.orden) > 0).length;
+        const ordenadas = (r.paradas || []).filter(p => Number(p.orden) > 0).sort((a,b)=>a.orden-b.orden);
+        const totalP = (r.paradas || []).length;
+        const sinOrden = totalP - ordenadas.length;
         const m = urlMapsOrdenChofer(r.paradas);
-        if (!conOrden) return (
+        if (!ordenadas.length) return (
           <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:12.5, color:C.muted}}>
-            🗺️ El chofer aún no asigna el orden de esta ruta — cuando lo haga, aquí podrás verla en Google Maps.
+            🗺️ El chofer aún no asigna el orden de esta ruta — cuando lo haga, aquí verás su avance y el mapa.
           </div>
         );
+        const nOk = ordenadas.filter(p=>p.estatus==="ok").length;
+        const nInc = ordenadas.filter(p=>p.estatus==="inc").length;
+        const nX = ordenadas.filter(p=>p.estatus==="x").length;
+        const nPend = ordenadas.filter(p=>!p.estatus).length;
+        const atendidas = nOk + nInc + nX;
+        // Color/ícono por resultado de la parada
+        const estInfo = (p) => {
+          if (p.estatus==="ok")  return { col:"#4caf7d", bg:"rgba(76,175,125,.16)", bd:"#4caf7d66", g:"✓" };
+          if (p.estatus==="inc") return { col:"#f5a623", bg:"rgba(245,166,35,.16)", bd:"#f5a62366", g:"⚠️" };
+          if (p.estatus==="x")   return { col:"#c0392b", bg:"rgba(192,57,43,.16)", bd:"#c0392b66", g:"✗" };
+          return { col:C.muted, bg:C.surface, bd:C.border, g:"" };
+        };
+        const seg = (n,c,key) => n>0 ? <div key={key} style={{width:(n/ordenadas.length*100)+"%", background:c, height:"100%"}}/> : null;
         return (
-          <div style={{display:"flex", alignItems:"center", gap:12, background:C.card, border:"1px solid "+C.border, borderRadius:10, padding:"10px 14px", marginBottom:14, flexWrap:"wrap"}}>
-            <div style={{flex:1, minWidth:200, fontSize:12.5, color:C.muted}}>
-              Orden del chofer: <b style={{color:C.text}}>{(r.paradas||[]).filter(p=>Number(p.orden)>0).sort((a,b)=>a.orden-b.orden).map(p=>p.orden+". "+(p.cliente||"—")).join("  →  ")}</b>
-              {conOrden < (r.paradas||[]).length ? <span> · {(r.paradas||[]).length - conOrden} sin orden aún</span> : null}
+          <div style={{background:C.card, border:"1px solid "+C.border, borderRadius:12, padding:"14px 16px", marginBottom:14}}>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, flexWrap:"wrap", marginBottom:10}}>
+              <div style={{fontSize:14, fontWeight:800, color:C.text}}>Avance del chofer <span style={{color:C.muted, fontWeight:600}}>· {atendidas} de {ordenadas.length} atendidas</span></div>
+              {m && (
+                <a href={m.url} target="_blank" rel="noopener noreferrer"
+                  style={{border:"none", borderRadius:9, background:"#5c8fe0", color:"#fff", padding:"10px 16px", fontSize:13, fontWeight:800, textDecoration:"none", whiteSpace:"nowrap"}}>
+                  🗺️ Ver en Google Maps{m.n < m.total ? " ("+m.n+" de "+m.total+")" : ""}
+                </a>
+              )}
             </div>
-            {m && (
-              <a href={m.url} target="_blank" rel="noopener noreferrer"
-                style={{border:"none", borderRadius:9, background:"#5c8fe0", color:"#fff", padding:"10px 16px", fontSize:13, fontWeight:800, textDecoration:"none", whiteSpace:"nowrap"}}>
-                🗺️ Ver en Google Maps{m.n < m.total ? " ("+m.n+" de "+m.total+")" : ""}
-              </a>
-            )}
+            {/* Barra segmentada: verde=listas, ámbar=incidencia, rojo=no logradas, gris=pendientes */}
+            <div style={{display:"flex", height:11, borderRadius:20, overflow:"hidden", border:"1px solid "+C.border, marginBottom:9}}>
+              {seg(nOk,"#4caf7d","ok")}{seg(nInc,"#f5a623","inc")}{seg(nX,"#c0392b","x")}{seg(nPend,"#3a3f4f","pend")}
+            </div>
+            <div style={{display:"flex", gap:16, flexWrap:"wrap", fontSize:12, fontWeight:700, marginBottom:13}}>
+              <span style={{color:"#4caf7d"}}>✓ {nOk} lista{nOk===1?"":"s"}</span>
+              <span style={{color:"#f5a623"}}>⚠️ {nInc} incidencia{nInc===1?"":"s"}</span>
+              <span style={{color:"#c0392b"}}>✗ {nX} no lograda{nX===1?"":"s"}</span>
+              <span style={{color:C.muted}}>⬤ {nPend} pendiente{nPend===1?"":"s"}</span>
+            </div>
+            {/* Un chip por parada, en el orden del chofer, coloreado por su resultado */}
+            <div style={{display:"flex", flexWrap:"wrap", gap:7}}>
+              {ordenadas.map(p => {
+                const e = estInfo(p);
+                return (
+                  <div key={p.id||p.orden} title={"Ir a: "+(p.cliente||"—")+(p.direccion?" · "+p.direccion:"")} onClick={()=>irAParada(p.id||p.orden)}
+                    style={{display:"flex", alignItems:"center", gap:6, background:e.bg, border:"1px solid "+e.bd, borderRadius:20, padding:"5px 11px 5px 5px", maxWidth:210, cursor:"pointer"}}>
+                    <span style={{minWidth:21, height:21, borderRadius:"50%", background: p.estatus?e.col:"#3a3f4f", color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, flexShrink:0}}>{p.orden}</span>
+                    <span style={{fontSize:12.5, fontWeight:700, color: p.estatus?C.text:C.muted, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{p.cliente||"—"}</span>
+                    {e.g && <span style={{fontSize:12.5, flexShrink:0}}>{e.g}</span>}
+                  </div>
+                );
+              })}
+            </div>
+            {sinOrden>0 && <div style={{fontSize:11.5, color:C.muted, marginTop:9}}>➕ {sinOrden} actividad{sinOrden===1?"":"es"} sin orden todavía (el chofer aún no la{sinOrden===1?"":"s"} acomoda).</div>}
           </div>
         );
       })()}
@@ -4182,10 +4226,11 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
             </div>
             <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:8}}>
               <input value={p.horario} onChange={e=>setP(i,"horario",e.target.value)} placeholder="Horario (ej. 09:00)" style={iS}/>
-              <input value={p.cliente} list="wl-dir-clientes" onChange={e=>{ const v=e.target.value; setP(i,"cliente",v); const m=(clientesDir||[]).find(c=>(c.nombre||"").toLowerCase()===v.trim().toLowerCase()); if(m){ if(!p.direccion && m.direccion) setP(i,"direccion",m.direccion); if(!p.contacto && m.contacto) setP(i,"contacto",m.contacto); } }} placeholder="Cliente / Destino" style={iS}/>
+              <input value={p.cliente} list="wl-dir-clientes" onChange={e=>{ const v=e.target.value; setP(i,"cliente",v); const m=(clientesDir||[]).find(c=>(c.nombre||"").toLowerCase()===v.trim().toLowerCase()); if(m){ if(!p.direccion && m.direccion) setP(i,"direccion",m.direccion); if(!p.contacto && m.contacto) setP(i,"contacto",m.contacto); if(!p.telefono && m.telefono) setP(i,"telefono",m.telefono); } }} placeholder="Cliente / Destino" style={iS}/>
               <input value={p.noPedido} onChange={e=>setP(i,"noPedido",e.target.value)} placeholder="No. Pedido / Orden" style={iS}/>
               <input value={p.direccion} onChange={e=>setP(i,"direccion",e.target.value)} placeholder="Dirección" style={iS}/>
               <input value={p.contacto} onChange={e=>setP(i,"contacto",e.target.value)} placeholder="Contacto" style={iS}/>
+              <input value={p.telefono} onChange={e=>setP(i,"telefono",e.target.value.replace(/[^\d+\-() ]/g,""))} inputMode="tel" placeholder="Teléfono (WhatsApp)" style={iS}/>
             </div>
           </div>
         );
@@ -4201,8 +4246,10 @@ function Rutas({ rutas, ordenes, choferes = [], onGuardar, onImprimirHoja, onImp
         {r.paradas.map((p,i)=>({p,i})).sort((a,b)=>(a.p.orden||9999)-(b.p.orden||9999)||a.i-b.i).map(({p,i}) => {
           const ti = tipoInfo(p.tipo);
           const esEntrega = p.tipo === "E";
+          const pid = p.id||p.orden;
+          const foco = destacada===pid;
           return (
-            <div key={i} style={{background:C.card, border:"1px solid "+C.border, borderRadius:11, padding:"12px 14px", marginBottom:10}}>
+            <div key={i} id={"rpar-"+pid} style={{background:C.card, border:"1px solid "+(foco?C.accent:C.border), borderRadius:11, padding:"12px 14px", marginBottom:10, boxShadow: foco?"0 0 0 2px "+C.accent+"66":"none", transition:"box-shadow .3s, border-color .3s"}}>
               <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:10, flexWrap:"wrap"}}>
                 <span style={{fontSize:12, fontWeight:800, color: p.orden>0?C.accent:C.muted}}>{p.orden>0 ? p.orden : i+1}</span>
                 <span style={{fontSize:10.5, fontWeight:700, color:"#fff", background:ti.col, borderRadius:10, padding:"2px 9px"}}>{p.tipo}</span>
@@ -8077,6 +8124,9 @@ function RutaMovil(){
   const [okKmF, setOkKmF] = useState(false);
   const [guardInc, setGuardInc] = useState(false);
   const [okInc, setOkInc] = useState(false);
+  const [verTodo, setVerTodo] = useState(false);     // alterna modo guiado / lista completa
+  const [verHechas, setVerHechas] = useState(false); // expandir las paradas ya hechas
+  const [verCierre, setVerCierre] = useState(false); // abrir el cierre en modo guiado
   const [ultAct, setUltAct] = useState("");   // hora del último refresco
   const refRefrescar = useRef(null);          // siempre apunta al refresco con el estado más reciente
   const ultRefresco = useRef(0);              // timestamp del último refresco, para no repetir de más
@@ -8477,152 +8527,95 @@ function RutaMovil(){
   const nuevas = cerrada ? [] : paradas.filter(p => !p.orden);
   const lista  = paradas.filter(p => cerrada || p.orden).sort((a,b)=>(a.orden||999)-(b.orden||999));
   const total  = paradas.length;
-  const hechas = paradas.filter(p => p.estatus).length;
-  return (
-    <div style={wrap}><div style={card}>
-      {gpsMsg && <div style={{position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", zIndex:9999, background:"#13351f", border:"1px solid #4caf7d", color:"#cdeed9", padding:"11px 18px", borderRadius:12, fontSize:14, fontWeight:700, boxShadow:"0 6px 20px rgba(0,0,0,.45)"}}>{gpsMsg}</div>}
-      <BandaChecada pin={pin}/>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, gap:10}}>
-        <div style={{fontSize:19, fontWeight:800}}>🚚 Ruta de hoy</div>
-        <div style={{textAlign:"right"}}>
-          <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{border:"1px solid "+C2.border, borderRadius:9, background:C2.surface, color:C2.muted, padding:"8px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando?"…":"🔄 Actualizar"}</button>
-          {ultAct && <div style={{fontSize:10.5, color:C2.muted, marginTop:4, opacity:.8}}>Actualizado {ultAct}</div>}
+  const hechasN = paradas.filter(p => p.estatus).length;
+  const pendientes = lista.filter(p => !p.estatus);            // las que faltan, en orden
+  const hechasList = lista.filter(p => p.estatus);             // las ya marcadas
+  const actual = pendientes[0] || null;                        // la parada en la que va ahorita
+  const siguientes = pendientes.slice(1);                      // las que vienen después
+  const pct = total ? Math.round((hechasN / total) * 100) : 0;
+
+  // Teléfono: para marcar (tel:) y para WhatsApp (wa.me con lada MX si trae 10 dígitos).
+  const soloTel = (t) => String(t || "").replace(/[^\d]/g, "");
+  const waNumero = (t) => { const d = soloTel(t); if (!d) return ""; if (d.length === 10) return "52" + d; return d; };
+
+  // Tarjeta de una parada. grande=true para la parada actual: texto y botones más grandes
+  // y de mayor contraste, para leerse y tocarse con una mano bajo el sol.
+  const tarjeta = (p, grande) => {
+    const t = tipoInfo(p.tipo);
+    const est = p.estatus;
+    const wa = waNumero(p.telefono);
+    const btn = (id, lbl2, col) => (
+      <button key={id} disabled={cerrada} onClick={()=>marcar(p.idx, id)}
+        style={{flex:1, border: est===id ? "none" : "1px solid "+C2.border, borderRadius:12, background: est===id ? col : C2.surface, color: est===id ? "#fff" : C2.text, padding: grande?"17px 6px":"12px 6px", fontSize: grande?15:12.5, fontWeight:800, cursor:cerrada?"default":"pointer", fontFamily:"inherit", opacity: cerrada?0.6:1}}>{lbl2}</button>
+    );
+    const accion = (href, bg, fg, txt, key) => (
+      <a key={key} href={href} target={href.startsWith("tel:")?undefined:"_blank"} rel="noopener noreferrer"
+        style={{flex:"1 1 46%", textAlign:"center", borderRadius:12, background:bg, color:fg, padding: grande?"15px 8px":"12px 8px", fontSize: grande?15:13, fontWeight:800, textDecoration:"none", fontFamily:"inherit"}}>{txt}</a>
+    );
+    return (
+      <div key={p.idx} style={{background:C2.card, border: grande?"2px solid "+C2.accent:"1px solid "+(est==="ok"?"#4caf7d66":est?"#f5a62366":C2.border), borderRadius:16, padding: grande?"16px":"13px 14px", marginBottom:12}}>
+        <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+          {p.orden ? <span style={{minWidth: grande?30:24, height: grande?30:24, borderRadius:"50%", background:C2.accent, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize: grande?15:12, fontWeight:900}}>{p.orden}</span> : null}
+          <span style={{fontSize:11, fontWeight:800, color:"#fff", background:t.col, padding:"3px 10px", borderRadius:12}}>{t.lbl}</span>
+          {p.horario && <span style={{fontSize: grande?13:12, color:C2.text, fontWeight:700}}>🕐 {p.horario}</span>}
+          {p.horaLlegada && <span style={{fontSize:12, color:C2.accent, fontWeight:700}}>🕐→ {p.horaLlegada}</span>}
+          {p.horaReal && <span style={{fontSize:12, color:C2.success, fontWeight:700}}>✓ {p.horaReal}</span>}
         </div>
-      </div>
-      <div style={{color:C2.muted, fontSize:13, marginBottom:14}}>
-        {fmtDate(ruta.fecha)} · {hechas}/{total} paradas registradas
-        {ruta.kmInicial ? <> · 🔢 Km inicial {ruta.kmInicial}</> : null}
-        {ruta.kmFinal ? <> · 🏁 Km final {ruta.kmFinal}</> : null}
-        {ruta.kmInicial && ruta.kmFinal ? <> · 🚗 {Number(ruta.kmFinal) - Number(ruta.kmInicial)} km recorridos</> : null}
-        {ruta.horaSalida ? <> · 🕐 Salida {ruta.horaSalida}</> : null}
-      </div>
-      {enRuta && !cerrada && (
-        <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>▶️ Ruta iniciada — ve marcando cada actividad conforme la termines.</div>
-      )}
-      {!cerrada && (() => { const m = urlRutaCompleta(lista); return m ? (
-        <a href={m.url} target="_blank" rel="noopener noreferrer"
-          style={{display:"block", textAlign:"center", border:"none", borderRadius:14, background:"#5c8fe0", color:"#fff", padding:"16px", fontSize:16, fontWeight:900, textDecoration:"none", marginBottom:14, fontFamily:"inherit"}}>
-          🗺️ Visualiza tu ruta
-          <div style={{fontSize:11.5, fontWeight:600, opacity:.85, marginTop:3}}>{m.n < m.total ? "Abre las primeras "+m.n+" de "+m.total+" paradas en Google Maps" : "Abre tus "+m.total+" paradas en Google Maps"}</div>
-        </a>
-      ) : null; })()}
-      {cerrada && (
-        <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>🔒 Esta ruta ya fue cerrada por Krisia — solo lectura.</div>
-      )}
-
-      {!cerrada && nuevas.length > 0 && (
-        <div style={{background:"#4a2f0a", border:"2px solid #f5a623", borderRadius:14, padding:"14px", marginBottom:14}}>
-          <div style={{fontSize:16, fontWeight:900, color:"#ffd899"}}>➕ {nuevas.length === 1 ? "Actividad nueva" : nuevas.length + " actividades nuevas"}</div>
-          <div style={{fontSize:12.5, color:"#ffe9c9", marginTop:4, marginBottom:10}}>Krisia agregó esto a tu ruta. Dale su lugar con un toque.</div>
-          {nuevas.map(p => {
-            const t = tipoInfo(p.tipo);
-            const asignadas = paradas.filter(x => x.orden).sort((a,b)=>a.orden-b.orden);
-            return (
-              <div key={p.idx} style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"11px 12px", marginBottom:9}}>
-                <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
-                  <span style={{fontSize:10.5, fontWeight:800, color:"#fff", background:t.col, padding:"2px 9px", borderRadius:12}}>{t.lbl}</span>
-                  {p.horario && <span style={{fontSize:11.5, color:C2.muted}}>🕐 {p.horario}</span>}
-                </div>
-                <div style={{fontSize:14.5, fontWeight:800, marginTop:5}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
-                {p.direccion && <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{display:"block", fontSize:12, color:C2.muted, marginTop:2, textDecoration:"underline dotted", textUnderlineOffset:"3px"}}>📍 {p.direccion}</a>}
-                <div style={{display:"flex", gap:8, marginTop:10}}>
-                  <button disabled={guardando} onClick={()=>colocar(p.idx, posSiguiente())}
-                    style={{flex:1, border:"none", borderRadius:10, background:"#4caf7d", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⚡ La sigo ahora</button>
-                  <button disabled={guardando} onClick={()=>colocar(p.idx, 999)}
-                    style={{flex:1, border:"none", borderRadius:10, background:"#5c8fe0", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⤓ Al final</button>
-                  <button disabled={guardando} onClick={()=>setEligiendo(eligiendo === p.idx ? null : p.idx)}
-                    style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.muted, padding:"13px 12px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>📍 Otro</button>
-                </div>
-                {eligiendo === p.idx && (
-                  <div style={{marginTop:10, borderTop:"1px solid "+C2.border, paddingTop:10}}>
-                    <div style={{fontSize:11.5, color:C2.muted, marginBottom:8}}>¿Dónde la metes?</div>
-                    <div style={{display:"flex", flexWrap:"wrap", gap:7}}>
-                      <button disabled={guardando} onClick={()=>colocar(p.idx, 0)}
-                        style={{border:"1px solid "+C2.border, borderRadius:20, background:C2.surface, color:C2.text, padding:"9px 13px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Al inicio</button>
-                      {asignadas.map((q, i) => (
-                        <button key={q.idx} disabled={guardando} onClick={()=>colocar(p.idx, i+1)}
-                          style={{border:"1px solid "+C2.border, borderRadius:20, background:C2.surface, color:C2.text, padding:"9px 13px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-                          Después de {q.orden}. {q.cliente || "—"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {lista.map((p) => {
-        const t = tipoInfo(p.tipo);
-        const est = p.estatus;
-        const btn = (id, lbl2, col) => (
-          <button key={id} disabled={cerrada} onClick={()=>marcar(p.idx, id)}
-            style={{flex:1, border: est===id ? "none" : "1px solid "+C2.border, borderRadius:10, background: est===id ? col : C2.surface, color: est===id ? "#fff" : C2.muted, padding:"12px 6px", fontSize:12.5, fontWeight:800, cursor:cerrada?"default":"pointer", fontFamily:"inherit", opacity: cerrada?0.6:1}}>{lbl2}</button>
-        );
-        return (
-          <div key={p.idx} style={{background:C2.card, border:"1px solid "+(est==="ok"?"#4caf7d66":est?"#f5a62366":C2.border), borderRadius:14, padding:"13px 14px", marginBottom:12}}>
-            <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
-              {p.orden ? <span style={{minWidth:24, height:24, borderRadius:"50%", background:C2.accent, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:900}}>{p.orden}</span> : null}
-              <span style={{fontSize:11, fontWeight:800, color:"#fff", background:t.col, padding:"3px 10px", borderRadius:12}}>{t.lbl}</span>
-              {p.horario && <span style={{fontSize:12, color:C2.muted}}>🕐 {p.horario}</span>}
-              {p.horaLlegada && <span style={{fontSize:12, color:C2.accent, fontWeight:700}}>🕐→ {p.horaLlegada}</span>}
-              {p.horaReal && <span style={{fontSize:12, color:C2.success, fontWeight:700}}>✓ {p.horaReal}</span>}
-            </div>
-            <div style={{fontSize:15.5, fontWeight:800, marginTop:8}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
-            {p.contacto && <div style={{fontSize:12.5, color:C2.muted, marginTop:2}}>👤 {p.contacto}</div>}
-            {p.direccion && (
-              <div style={{display:"flex", alignItems:"center", gap:8, marginTop:6}}>
-                <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer"
-                  style={{flex:1, fontSize:12.5, color:C2.muted, textDecoration:"underline dotted", textUnderlineOffset:"3px"}}>📍 {p.direccion}</a>
-                <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer"
-                  style={{border:"none", borderRadius:8, background:"#5c8fe0", color:"#fff", padding:"8px 12px", fontSize:12, fontWeight:800, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", textDecoration:"none", display:"inline-block"}}>🗺️ Navegar</a>
-              </div>
-            )}
-            {p.obs && abierto !== p.idx && (
-              <div onClick={()=>{ if(!cerrada) abrirObs(p.idx, p.obs); }} style={{fontSize:12, color:C2.accent, marginTop:6, cursor:cerrada?"default":"pointer"}}>📝 {p.obs}{!cerrada && <span style={{color:C2.muted}}> · editar</span>}</div>
-            )}
-            {!cerrada && !p.horaLlegada && (
-              <button onClick={()=>llegar(p.idx)} style={{width:"100%", marginTop:10, border:"none", borderRadius:10, background:C2.accent, color:"#fff", padding:"12px", fontSize:13.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>🕐 Llegué</button>
-            )}
-            {p.horaLlegada && (
-              <div style={{fontSize:12.5, color:C2.accent, fontWeight:700, marginTop:10}}>🕐 Llegó a las {p.horaLlegada}{p.horaReal && <span style={{color:C2.muted, fontWeight:600}}> · terminó {p.horaReal}</span>}</div>
-            )}
-            <div style={{display:"flex", gap:8, marginTop:10}}>
-              {btn("ok", "✓ Listo", "#4caf7d")}
-              {btn("inc", "⚠️ Incidencia", "#f5a623")}
-              {btn("x", "✗ No se pudo", "#c0392b")}
-            </div>
-
-            {/* Observación: aparece al marcar. Opcional, salvo en incidencia. */}
-            {abierto === p.idx && !cerrada && (
-              <div style={{marginTop:10, borderTop:"1px solid "+C2.border, paddingTop:10}}>
-                <div style={{fontSize:12, fontWeight:800, color: pendInc===p.idx ? "#f5a623" : C2.muted, marginBottom:6}}>
-                  {pendInc===p.idx ? "⚠️ Escribe el motivo de la incidencia (obligatorio)" : "📝 Observación (opcional)"}
-                </div>
-                {pendInc===p.idx && <div style={{fontSize:11.5, color:C2.muted, marginBottom:6, lineHeight:1.45}}>Explica qué pasó y por qué no dependió de ti. Sin motivo, la incidencia no se registra.</div>}
-                <textarea value={borrador[p.idx] || ""} onChange={e=>setBorrador(b=>({...b, [p.idx]: e.target.value.slice(0,500)}))}
-                  rows={3} placeholder={pendInc===p.idx ? "Ej. El cliente cerró antes de la hora acordada" : "Algo que Krisia deba saber…"}
-                  style={{width:"100%", boxSizing:"border-box", border:"1px solid "+(pendInc===p.idx?"#f5a623":C2.border), borderRadius:10, background:C2.surface, color:C2.text, padding:"10px", fontSize:14, fontFamily:"inherit", resize:"vertical"}}/>
-                <div style={{display:"flex", gap:8, marginTop:8, alignItems:"center"}}>
-                  <button disabled={guardObs===p.idx} onClick={()=>guardarObs(p.idx)}
-                    style={{flex:1, border:"none", borderRadius:10, background: pendInc===p.idx ? "#f5a623" : "#4caf7d", color:"#fff", padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardObs===p.idx?0.6:1}}>
-                    {guardObs===p.idx ? "Guardando…" : pendInc===p.idx ? "Guardar incidencia" : "Guardar"}
-                  </button>
-                  <button onClick={()=>cancelarObs(p.idx)} style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.muted, padding:"12px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Cancelar</button>
-                </div>
-              </div>
-            )}
-            {okObs === p.idx && abierto !== p.idx && <div style={{fontSize:12, color:C2.success, fontWeight:800, marginTop:8}}>Guardado ✓</div>}
-            {!cerrada && !p.obs && abierto !== p.idx && p.estatus && (
-              <button onClick={()=>abrirObs(p.idx, "")} style={{marginTop:9, border:"1px dashed "+C2.border, borderRadius:9, background:"transparent", color:C2.muted, padding:"9px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", width:"100%"}}>📝 Agregar observación</button>
-            )}
+        <div style={{fontSize: grande?20:15.5, fontWeight:900, marginTop:8, lineHeight:1.25}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:500, fontSize: grande?14:12.5}}> · #{p.noPedido}</span> : null}</div>
+        {p.contacto && <div style={{fontSize: grande?14.5:12.5, color:C2.text, marginTop:4, fontWeight:600}}>👤 {p.contacto}</div>}
+        {p.direccion && <div style={{fontSize: grande?14.5:13, color:C2.text, marginTop:5, lineHeight:1.4}}>📍 {p.direccion}</div>}
+        {/* Navegar / Llamar / WhatsApp */}
+        {(p.direccion || p.telefono) && (
+          <div style={{display:"flex", gap:8, marginTop:11, flexWrap:"wrap"}}>
+            {p.direccion && accion("https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion), "#5c8fe0", "#fff", "🗺️ Navegar", "nav")}
+            {p.telefono && accion("tel:"+soloTel(p.telefono), "#4caf7d", "#fff", "📞 Llamar", "tel")}
+            {p.telefono && wa && accion("https://wa.me/"+wa, "#25D366", "#0b2e16", "💬 WhatsApp", "wa")}
           </div>
-        );
-      })}
+        )}
+        {p.obs && abierto !== p.idx && (
+          <div onClick={()=>{ if(!cerrada) abrirObs(p.idx, p.obs); }} style={{fontSize:12.5, color:C2.accent, marginTop:8, cursor:cerrada?"default":"pointer"}}>📝 {p.obs}{!cerrada && <span style={{color:C2.muted}}> · editar</span>}</div>
+        )}
+        {!cerrada && !p.horaLlegada && (
+          <button onClick={()=>llegar(p.idx)} style={{width:"100%", marginTop:11, border:"none", borderRadius:12, background:C2.accent, color:"#fff", padding: grande?"15px":"12px", fontSize: grande?15.5:13.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>🕐 Llegué</button>
+        )}
+        {p.horaLlegada && (
+          <div style={{fontSize:12.5, color:C2.accent, fontWeight:700, marginTop:10}}>🕐 Llegó a las {p.horaLlegada}{p.horaReal && <span style={{color:C2.muted, fontWeight:600}}> · terminó {p.horaReal}</span>}</div>
+        )}
+        <div style={{display:"flex", gap:8, marginTop:11}}>
+          {btn("ok", "✓ Listo", "#4caf7d")}
+          {btn("inc", "⚠️ Incidencia", "#f5a623")}
+          {btn("x", "✗ No se pudo", "#c0392b")}
+        </div>
+        {/* Observación: aparece al marcar. Opcional, salvo en incidencia. */}
+        {abierto === p.idx && !cerrada && (
+          <div style={{marginTop:10, borderTop:"1px solid "+C2.border, paddingTop:10}}>
+            <div style={{fontSize:12, fontWeight:800, color: pendInc===p.idx ? "#f5a623" : C2.muted, marginBottom:6}}>
+              {pendInc===p.idx ? "⚠️ Escribe el motivo de la incidencia (obligatorio)" : "📝 Observación (opcional)"}
+            </div>
+            {pendInc===p.idx && <div style={{fontSize:11.5, color:C2.muted, marginBottom:6, lineHeight:1.45}}>Explica qué pasó y por qué no dependió de ti. Sin motivo, la incidencia no se registra.</div>}
+            <textarea value={borrador[p.idx] || ""} onChange={e=>setBorrador(b=>({...b, [p.idx]: e.target.value.slice(0,500)}))}
+              rows={3} placeholder={pendInc===p.idx ? "Ej. El cliente cerró antes de la hora acordada" : "Algo que Krisia deba saber…"}
+              style={{width:"100%", boxSizing:"border-box", border:"1px solid "+(pendInc===p.idx?"#f5a623":C2.border), borderRadius:10, background:C2.surface, color:C2.text, padding:"10px", fontSize:14, fontFamily:"inherit", resize:"vertical"}}/>
+            <div style={{display:"flex", gap:8, marginTop:8, alignItems:"center"}}>
+              <button disabled={guardObs===p.idx} onClick={()=>guardarObs(p.idx)}
+                style={{flex:1, border:"none", borderRadius:10, background: pendInc===p.idx ? "#f5a623" : "#4caf7d", color:"#fff", padding:"12px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardObs===p.idx?0.6:1}}>
+                {guardObs===p.idx ? "Guardando…" : pendInc===p.idx ? "Guardar incidencia" : "Guardar"}
+              </button>
+              <button onClick={()=>cancelarObs(p.idx)} style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.muted, padding:"12px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        {okObs === p.idx && abierto !== p.idx && <div style={{fontSize:12, color:C2.success, fontWeight:800, marginTop:8}}>Guardado ✓</div>}
+        {!cerrada && !p.obs && abierto !== p.idx && p.estatus && (
+          <button onClick={()=>abrirObs(p.idx, "")} style={{marginTop:9, border:"1px dashed "+C2.border, borderRadius:9, background:"transparent", color:C2.muted, padding:"9px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", width:"100%"}}>📝 Agregar observación</button>
+        )}
+      </div>
+    );
+  };
 
-      {/* Incidencias del día: siempre visible al final de la lista */}
+  // Bloque de cierre del día: incidencias generales + kilometraje final + documentos.
+  const bloqueCierre = (
+    <>
       <div style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:14, padding:"13px 14px", marginTop:6, marginBottom:12}}>
         <div style={{fontSize:13.5, fontWeight:800, marginBottom:4}}>⚠️ Incidencias del día</div>
         <div style={{fontSize:11.5, color:C2.muted, marginBottom:8, lineHeight:1.45}}>Lo que pasó en general y no cabe en una sola parada: tráfico, vehículo, clima, cambios de última hora. Sale impreso en la hoja de cierre.</div>
@@ -8671,6 +8664,161 @@ function RutaMovil(){
           </label>
         ))}
       </div>
+    </>
+  );
+
+  return (
+    <div style={wrap}><div style={card}>
+      {gpsMsg && <div style={{position:"fixed", bottom:20, left:"50%", transform:"translateX(-50%)", zIndex:9999, background:"#13351f", border:"1px solid #4caf7d", color:"#cdeed9", padding:"11px 18px", borderRadius:12, fontSize:14, fontWeight:700, boxShadow:"0 6px 20px rgba(0,0,0,.45)"}}>{gpsMsg}</div>}
+      <BandaChecada pin={pin}/>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, gap:10}}>
+        <div style={{fontSize:19, fontWeight:800}}>🚚 Ruta de hoy</div>
+        <div style={{textAlign:"right"}}>
+          <button onClick={()=>cargarHoy(pin)} disabled={cargando} style={{border:"1px solid "+C2.border, borderRadius:9, background:C2.surface, color:C2.muted, padding:"8px 12px", fontSize:12.5, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>{cargando?"…":"🔄 Actualizar"}</button>
+          {ultAct && <div style={{fontSize:10.5, color:C2.muted, marginTop:4, opacity:.8}}>Actualizado {ultAct}</div>}
+        </div>
+      </div>
+
+      {/* Barra de progreso del día */}
+      <div style={{marginBottom:14}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", fontSize:13, marginBottom:6}}>
+          <span style={{color:C2.text, fontWeight:900, fontSize:15}}>{hechasN} de {total} paradas</span>
+          <span style={{color:C2.muted}}>{fmtDate(ruta.fecha)}</span>
+        </div>
+        <div style={{height:12, background:C2.surface, borderRadius:20, overflow:"hidden", border:"1px solid "+C2.border}}>
+          <div style={{height:"100%", width:pct+"%", background: pct===100?C2.success:C2.accent, borderRadius:20, transition:"width .3s"}}/>
+        </div>
+        {(ruta.kmInicial || ruta.horaSalida || ruta.kmFinal) && (
+          <div style={{fontSize:11.5, color:C2.muted, marginTop:6}}>
+            {ruta.kmInicial ? <>🔢 Km inicial {ruta.kmInicial}</> : null}
+            {ruta.horaSalida ? <> · 🕐 Salida {ruta.horaSalida}</> : null}
+            {ruta.kmInicial && ruta.kmFinal ? <> · 🚗 {Number(ruta.kmFinal) - Number(ruta.kmInicial)} km</> : null}
+          </div>
+        )}
+      </div>
+
+      {enRuta && !cerrada && pendientes.length>0 && (
+        <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>▶️ Ruta iniciada — marca cada parada conforme la termines y avanza sola a la siguiente.</div>
+      )}
+      {cerrada && (
+        <div style={{background:"#13351f", border:"1px solid "+C2.success, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:"#cdeed9"}}>🔒 Esta ruta ya fue cerrada por Krisia — solo lectura.</div>
+      )}
+
+      {!cerrada && (() => { const m = urlRutaCompleta(lista); return m ? (
+        <a href={m.url} target="_blank" rel="noopener noreferrer"
+          style={{display:"block", textAlign:"center", border:"none", borderRadius:14, background:"#5c8fe0", color:"#fff", padding:"15px", fontSize:15.5, fontWeight:900, textDecoration:"none", marginBottom:12, fontFamily:"inherit"}}>
+          🗺️ Ver toda la ruta en el mapa
+          <div style={{fontSize:11.5, fontWeight:600, opacity:.85, marginTop:3}}>{m.n < m.total ? "Abre las primeras "+m.n+" de "+m.total+" paradas en Google Maps" : "Abre tus "+m.total+" paradas en Google Maps"}</div>
+        </a>
+      ) : null; })()}
+
+      {!cerrada && total>0 && (
+        <button onClick={()=>setVerTodo(v=>!v)}
+          style={{width:"100%", border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.text, padding:"11px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit", marginBottom:14}}>
+          {verTodo ? "🎯 Volver al modo guiado (una parada a la vez)" : "📋 Ver la lista completa de paradas"}
+        </button>
+      )}
+
+      {!cerrada && nuevas.length > 0 && (
+        <div style={{background:"#4a2f0a", border:"2px solid #f5a623", borderRadius:14, padding:"14px", marginBottom:14}}>
+          <div style={{fontSize:16, fontWeight:900, color:"#ffd899"}}>➕ {nuevas.length === 1 ? "Actividad nueva" : nuevas.length + " actividades nuevas"}</div>
+          <div style={{fontSize:12.5, color:"#ffe9c9", marginTop:4, marginBottom:10}}>Krisia agregó esto a tu ruta. Dale su lugar con un toque.</div>
+          {nuevas.map(p => {
+            const t = tipoInfo(p.tipo);
+            const asignadas = paradas.filter(x => x.orden).sort((a,b)=>a.orden-b.orden);
+            return (
+              <div key={p.idx} style={{background:C2.card, border:"1px solid "+C2.border, borderRadius:12, padding:"11px 12px", marginBottom:9}}>
+                <div style={{display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+                  <span style={{fontSize:10.5, fontWeight:800, color:"#fff", background:t.col, padding:"2px 9px", borderRadius:12}}>{t.lbl}</span>
+                  {p.horario && <span style={{fontSize:11.5, color:C2.muted}}>🕐 {p.horario}</span>}
+                </div>
+                <div style={{fontSize:14.5, fontWeight:800, marginTop:5}}>{p.cliente || "—"}{p.noPedido ? <span style={{color:C2.muted, fontWeight:400}}> · #{p.noPedido}</span> : null}</div>
+                {p.direccion && <a href={"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(p.direccion)} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{display:"block", fontSize:12, color:C2.muted, marginTop:2, textDecoration:"underline dotted", textUnderlineOffset:"3px"}}>📍 {p.direccion}</a>}
+                <div style={{display:"flex", gap:8, marginTop:10}}>
+                  <button disabled={guardando} onClick={()=>colocar(p.idx, posSiguiente())}
+                    style={{flex:1, border:"none", borderRadius:10, background:"#4caf7d", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⚡ La sigo ahora</button>
+                  <button disabled={guardando} onClick={()=>colocar(p.idx, 999)}
+                    style={{flex:1, border:"none", borderRadius:10, background:"#5c8fe0", color:"#fff", padding:"13px 6px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit", opacity:guardando?0.6:1}}>⤓ Al final</button>
+                  <button disabled={guardando} onClick={()=>setEligiendo(eligiendo === p.idx ? null : p.idx)}
+                    style={{border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.muted, padding:"13px 12px", fontSize:12.5, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>📍 Otro</button>
+                </div>
+                {eligiendo === p.idx && (
+                  <div style={{marginTop:10, borderTop:"1px solid "+C2.border, paddingTop:10}}>
+                    <div style={{fontSize:11.5, color:C2.muted, marginBottom:8}}>¿Dónde la metes?</div>
+                    <div style={{display:"flex", flexWrap:"wrap", gap:7}}>
+                      <button disabled={guardando} onClick={()=>colocar(p.idx, 0)}
+                        style={{border:"1px solid "+C2.border, borderRadius:20, background:C2.surface, color:C2.text, padding:"9px 13px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit"}}>Al inicio</button>
+                      {asignadas.map((q, i) => (
+                        <button key={q.idx} disabled={guardando} onClick={()=>colocar(p.idx, i+1)}
+                          style={{border:"1px solid "+C2.border, borderRadius:20, background:C2.surface, color:C2.text, padding:"9px 13px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                          Después de {q.orden}. {q.cliente || "—"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {verTodo ? (
+        /* ── Lista completa de paradas ── */
+        lista.map(p => tarjeta(p, false))
+      ) : (
+        /* ── Modo guiado: una parada a la vez ── */
+        <>
+          {hechasList.length>0 && (
+            <div style={{marginBottom:12}}>
+              <button onClick={()=>setVerHechas(v=>!v)}
+                style={{width:"100%", textAlign:"left", border:"1px solid "+C2.border, borderRadius:10, background:C2.surface, color:C2.success, padding:"11px 14px", fontSize:13, fontWeight:800, cursor:"pointer", fontFamily:"inherit"}}>
+                {verHechas ? "▾" : "▸"} ✓ {hechasList.length} parada{hechasList.length===1?"":"s"} hecha{hechasList.length===1?"":"s"}
+              </button>
+              {verHechas && <div style={{marginTop:10, opacity:.9}}>{hechasList.map(p => tarjeta(p, false))}</div>}
+            </div>
+          )}
+          {actual ? (
+            <>
+              <div style={{fontSize:12.5, fontWeight:900, color:C2.accent, margin:"2px 0 8px", letterSpacing:1}}>📍 VAS EN ESTA PARADA</div>
+              {tarjeta(actual, true)}
+              {siguientes.length>0 && (
+                <div style={{background:C2.surface, border:"1px solid "+C2.border, borderRadius:12, padding:"12px 14px", marginBottom:12}}>
+                  <div style={{fontSize:12, fontWeight:800, color:C2.muted, marginBottom:8}}>Luego siguen</div>
+                  {siguientes.slice(0,3).map(p => {
+                    const t = tipoInfo(p.tipo);
+                    return (
+                      <div key={p.idx} style={{display:"flex", gap:10, alignItems:"center", padding:"5px 0"}}>
+                        <span style={{minWidth:22, height:22, borderRadius:"50%", background:C2.border, color:C2.text, display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:900, flexShrink:0}}>{p.orden}</span>
+                        <div style={{flex:1, minWidth:0, fontSize:13.5, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{p.cliente || "—"}</div>
+                        <span style={{fontSize:10.5, fontWeight:800, color:"#fff", background:t.col, padding:"2px 8px", borderRadius:10, flexShrink:0}}>{t.lbl}</span>
+                      </div>
+                    );
+                  })}
+                  {siguientes.length>3 && <div style={{fontSize:11.5, color:C2.muted, marginTop:6}}>y {siguientes.length-3} más…</div>}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{background:"#13351f", border:"2px solid "+C2.success, borderRadius:16, padding:"24px 18px", textAlign:"center", marginBottom:14}}>
+              <div style={{fontSize:46, lineHeight:1}}>🎉</div>
+              <div style={{fontSize:20, fontWeight:900, color:"#a9e9c4", marginTop:8}}>¡Terminaste todas las paradas!</div>
+              <div style={{fontSize:13.5, color:"#cdeed9", marginTop:8, lineHeight:1.5}}>Ya solo falta el kilometraje final y los documentos para Krisia, aquí abajo.</div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Cierre del día: automático al terminar todas las paradas; si aún faltan, detrás de un toque. */}
+      {(cerrada || verTodo || pendientes.length===0) ? bloqueCierre : (
+        <div style={{marginTop:4}}>
+          <button onClick={()=>setVerCierre(v=>!v)}
+            style={{width:"100%", border:"1px dashed "+C2.border, borderRadius:10, background:"transparent", color:C2.muted, padding:"12px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit", marginBottom:12}}>
+            {verCierre ? "▾ Ocultar cierre del día" : "🏁 Kilometraje final y documentos"}
+          </button>
+          {verCierre && bloqueCierre}
+        </div>
+      )}
     </div></div>
   );
 }
@@ -9617,7 +9765,7 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
     } catch (e) { console.log("reconciliar ruta:", e); }
     await setDoc(doc(db, "rutas", id), payload, { merge: true });
     // Directorio de clientes: guarda/actualiza automáticamente cliente + dirección de las paradas.
-    try { await upsertClientesDir((ruta.paradas || []).map(p => ({ nombre: p.cliente, direccion: p.direccion, contacto: p.contacto }))); } catch (e) { console.log("dir clientes:", e); }
+    try { await upsertClientesDir((ruta.paradas || []).map(p => ({ nombre: p.cliente, direccion: p.direccion, contacto: p.contacto, telefono: p.telefono }))); } catch (e) { console.log("dir clientes:", e); }
   };
 
   // ── Directorio de clientes (para autocompletar direcciones en rutas) ──
@@ -9649,6 +9797,8 @@ getToken(messaging, { vapidKey: process.env.REACT_APP_FCM_VAPID_KEY })
       if (forzar) data.direccionManual = true;
       const contacto = String(e.contacto || "").trim();
       if (contacto) data.contacto = contacto;
+      const telefono = String(e.telefono || "").trim();
+      if (telefono) data.telefono = telefono;
       await setDoc(doc(db, "directorioClientes", id), data, { merge: true });
     }
   };

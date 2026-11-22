@@ -10759,6 +10759,7 @@ const cancelar = async (id) => {
               </svg>
             </ModTile>
 
+            {puedeEditarSeguimiento && (
             <ModTile order={ordHome("carga")} reordenando={reordm} dnd={dndFor("carga")} onClick={() => setVista("carga")} label="Bordadores" badge={homeSinAsignar} badgeColor="#f57c00"
               stat={homeSinAsignar>0 ? <span style={{color:"#f57c00",fontWeight:700}}>🟠 {homeSinAsignar} sin asignar</span> : <span style={{color:C.muted}}>{bordadores.length} bordador{bordadores.length===1?"":"es"}</span>}>
               <svg width="72" height="72" viewBox="0 0 88 88" style={{display:"block"}}>
@@ -10769,6 +10770,7 @@ const cancelar = async (id) => {
                 <path d="M27 60 v-3 a17 17 0 0 1 34 0 v3" stroke="#fff" strokeWidth="3.5" fill="none" strokeLinecap="round"/>
               </svg>
             </ModTile>
+            )}
 
             {puedeEditarSeguimiento && (
             <ModTile order={ordHome("rutas")} reordenando={reordm} dnd={dndFor("rutas")} onClick={() => setVista("rutas")} label="Rutas"
@@ -11109,7 +11111,7 @@ const cancelar = async (id) => {
         />
       )}
 
-      {vista === "carga" && (
+      {vista === "carga" && puedeEditarSeguimiento && (
         <CargaBordador
           ordenes={ordenes}
           onBack={() => setVista("home")}

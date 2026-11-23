@@ -1809,7 +1809,10 @@ if (id === "entregada" && form.etapa === "bordado") {
   const fmtFechaReq = () => { if (!form.fechaRequerida) return ""; const p = form.fechaRequerida.split("-"); return p[2] + "/" + p[1] + "/" + p[0]; };
 const validarYGuardar = async (cb) => {
     const correoOk = form.clienteSinCorreo || (form.correoCliente && /^\S+@\S+\.\S+$/.test(form.correoCliente));
-    if (!form.fechaRequerida || !form.noCotizacion || !correoOk) {
+    // Los campos obligatorios (fecha, cotización y correo) solo se exigen a quien crea/edita
+    // la orden (admin o el vendedor dueño). Seguimiento, que únicamente asigna bordador o
+    // cambia etapa, no debe quedar bloqueado por datos que no le toca capturar.
+    if (puedeEditar && (!form.fechaRequerida || !form.noCotizacion || !correoOk)) {
       alert("Por favor llena los campos obligatorios:\n" +
         (!form.fechaRequerida ? "• Fecha Requerida\n" : "") +
         (!form.noCotizacion ? "• No. Cotización\n" : "") +

@@ -274,6 +274,7 @@ function emptyOrden(ordenes) {
     fechaRequerida: "",
     tiempoEntrega: "",
     noCotizacion: "",
+    totalPedido: "",
     comentariosLogo: "",
     posiciones: pos,
     prendas: [emptyPrenda()],
@@ -1614,7 +1615,7 @@ function DropdownBordador({ value, opciones, onSelect, onAgregar, disabled, pued
   );
 }
 
-function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [], usuariosRoles = {}, onGenerarEnvio, onLiberar, semaforo }) {
+function Detalle({ orden, usuario, rol, puedeEditar, puedeEditarSeguimiento, onSave, onBack, onDelete, onDuplicar, bordadores = [], onAgregarBordador, catalogoLogos = [], usuariosRoles = {}, onGenerarEnvio, onLiberar, semaforo, ordenes = [] }) {
   const [pdfHtml, setPdfHtml] = useState(null);
   const [form, setForm] = useState(() => {
   const o = JSON.parse(JSON.stringify(orden));
@@ -1796,6 +1797,17 @@ if (id === "entregada" && form.etapa === "bordado") {
     }));
   };   
   const totalPrendas = form.prendas.reduce((s, p) => s + TALLAS.reduce((ts, t) => ts + (parseInt(p.tallas[t]) || 0), 0), 0);
+  // ── Conciliación de piezas contra el total del pedido Odoo ──
+  // Varias órdenes de bordado pueden pertenecer al MISMO pedido Odoo; se ligan por el
+  // No. Cotización. La suma de prendas de todas esas órdenes no debe ser menor ni mayor al
+  // total global capturado del pedido. Se cuentan TODAS las tallas (igual que "Total prendas").
+  const contarPrendas = (o) => (o.prendas || []).reduce((s, p) => s + TALLAS.reduce((ts, t) => ts + (parseInt(p.tallas && p.tallas[t]) || 0), 0), 0);
+  const globalPedido = parseInt(form.totalPedido) || 0;
+  const cotKey = (form.noCotizacion || "").trim().toLowerCase();
+  const hermanas = cotKey ? (ordenes || []).filter(o => o.id !== form.id && o.etapa !== "cancelada" && (o.noCotizacion || "").trim().toLowerCase() === cotKey) : [];
+  const prendasHermanas = hermanas.reduce((s, o) => s + contarPrendas(o), 0);
+  const sumaPedido = totalPrendas + prendasHermanas;
+  const difPedido = globalPedido ? (sumaPedido - globalPedido) : 0; // >0 excede, <0 faltan
   const TABS = [
     {id:"info",l:"Información"},{id:"viz",l:"Visualización"},
     {id:"pos",l:"Posiciones"},{id:"prendas",l:"Prendas"},{id:"seg",l:"Seguimiento"},
@@ -1818,6 +1830,14 @@ const validarYGuardar = async (cb) => {
         (!form.noCotizacion ? "• No. Cotización\n" : "") +
         (!correoOk ? "• Correo del cliente (o marca \"El cliente no tiene correo\")\n" : ""));
       return;
+    }
+    // Aviso (no bloqueante) de inconsistencia de piezas contra el total del pedido Odoo.
+    if (puedeEditar && globalPedido > 0 && difPedido !== 0) {
+      const base = "Suma de prendas: " + sumaPedido + " · Total del pedido Odoo: " + globalPedido + (hermanas.length ? " (incluye " + hermanas.length + " orden(es) más con la cotización " + form.noCotizacion + ")." : ".");
+      const msg = difPedido > 0
+        ? "⛔ INCONSISTENCIA — hay MÁS piezas que las del pedido:\n\n" + base + "\n\nExceden " + difPedido + " pieza(s).\n\n¿Guardar de todos modos?"
+        : "⚠️ INCONSISTENCIA — faltan piezas para cubrir el pedido:\n\n" + base + "\n\nFaltan " + (-difPedido) + " pieza(s). Si el pedido lleva varias órdenes de bordado, puedes completarlo con las demás (mismo No. Cotización); si no, estarías generando la orden por MENOS piezas de las necesarias.\n\n¿Guardar de todos modos?";
+      if (!window.confirm(msg)) return;
     }
     // Aviso (no bloqueante) si la fecha prometida es antes de lo que el taller puede hoy.
     if (fechaMuyPronto) {
@@ -1969,6 +1989,7 @@ await setDoc(doc(db, "solicitudesFirma", token), {
             </div>
           </div>
           <Inp label="No. Cotización" value={form.noCotizacion} onChange={v => upd("noCotizacion", v)}/>
+          <Inp label="Total piezas del pedido (Odoo)" value={form.totalPedido||""} onChange={v => upd("totalPedido", (v||"").replace(/\D/g,""))}/>
           <div style={{gridColumn:"1/-1", background: fechaMuyPronto ? "#e5484d18" : C.surface, border:"1px solid "+(fechaMuyPronto ? "#e5484d" : C.border), borderRadius:8, padding:"9px 12px", fontSize:12.5, color: fechaMuyPronto ? "#e5484d" : C.muted, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
             <span>⏱️ Entrega actual del taller: <b style={{color: fechaMuyPronto ? "#e5484d" : C.text}}>{diasEntregaTaller} días hábiles</b> · fecha mínima sugerida: <b style={{color: fechaMuyPronto ? "#e5484d" : C.text}}>{fmtFechaMin}</b>.</span>
             {fechaMuyPronto && <span style={{fontWeight:800}}>⚠ La fecha que pusiste es antes de eso — el taller podría no cumplirla.</span>}
@@ -2062,6 +2083,29 @@ await setDoc(doc(db, "solicitudesFirma", token), {
             <div style={{color:C.muted,fontSize:13}}>Total prendas: <span style={{color:C.accent,fontWeight:800}}>{totalPrendas}</span></div>
             <Btn onClick={addPrenda} size="sm" variant="ghost">+ Agregar prenda</Btn>
           </div>
+          {(globalPedido > 0 || hermanas.length > 0) && (
+            <div style={{marginBottom:12, borderRadius:8, padding:"10px 12px", fontSize:12.5,
+              background: globalPedido===0 ? C.surface : difPedido===0 ? "#13351f" : difPedido>0 ? "#e5484d18" : "#e0a53a18",
+              border:"1px solid "+(globalPedido===0 ? C.border : difPedido===0 ? C.success : difPedido>0 ? "#e5484d" : "#e0a53a"),
+              color: globalPedido===0 ? C.muted : difPedido===0 ? "#cdeed9" : difPedido>0 ? "#e5484d" : "#e0a53a"}}>
+              {globalPedido===0 ? (
+                <span>Captura el <b>Total piezas del pedido (Odoo)</b> en la pestaña Info para validar la cantidad.</span>
+              ) : (
+                <>
+                  <div style={{fontWeight:800, marginBottom:4}}>
+                    {difPedido===0 ? "✓ Las piezas cuadran con el pedido Odoo." : difPedido>0 ? "⛔ Hay MÁS piezas que las del pedido Odoo." : "⚠️ Faltan piezas para cubrir el pedido Odoo."}
+                  </div>
+                  <div>Suma de prendas: <b>{sumaPedido}</b> de <b>{globalPedido}</b>{difPedido>0 ? <> · exceden <b>{difPedido}</b></> : difPedido<0 ? <> · faltan <b>{-difPedido}</b></> : null}</div>
+                  {hermanas.length>0 && (
+                    <div style={{marginTop:3, opacity:.9}}>Esta orden: <b>{totalPrendas}</b> · otras {hermanas.length} orden{hermanas.length===1?"":"es"} con la misma cotización: <b>{prendasHermanas}</b></div>
+                  )}
+                  {difPedido<0 && hermanas.length===0 && (
+                    <div style={{marginTop:3, opacity:.9}}>Si este pedido lleva varias órdenes de bordado, créalas con el mismo No. Cotización y entre todas deben sumar {globalPedido}.</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           {/* Leyenda de colores */}
           <div style={{display:"flex",gap:16,marginBottom:8,fontSize:10,color:C.muted}}>
             <span><b style={{color:C.accent}}>■</b> Talla ropa (XCH, CH…)</span>
@@ -11286,6 +11330,7 @@ const cancelar = async (id) => {
           usuariosRoles={rolesActivos}
           onGenerarEnvio={(rol === "admin" || rol === "seguimiento") ? prepararEnvioDesdeOrden : null}
           semaforo={semaforo}
+          ordenes={ordenes}
         />
       )}
 
